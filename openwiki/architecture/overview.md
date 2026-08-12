@@ -1,36 +1,41 @@
 # Architecture overview
 
-The repository is currently a product scaffold rather than a finished application. The only concrete source evidence describes an **early-stage Pi extension** that runs an autonomous mode through `pi automode` and is meant to stay isolated from the user's normal Pi configuration.
+The repository is currently a product scaffold rather than a finished application. The concrete source evidence now describes a repository-scoped **Automode** experience that starts from `/automode` inside normal Pi and runs with a controlled configuration, capability profile, skill set, prompt, and session boundary.
+
+The current vocabulary in `CONTEXT.md` clarifies that Automode is a durable repository-scoped run with a Main Session that hosts the repository-singleton Automode Coordinator, while independent Ticket Sessions do the actual ticket work.
 
 ## Known architectural intent
 
-### Autonomous mode isolation
+### Automode isolation boundary
 
-The README says automode is intended to be separated from the user's regular Pi setup. That implies future work will likely need a dedicated configuration boundary, separate runtime state, or a launch wrapper that prevents cross-contamination with the normal Pi environment.
+Automode is meant to leave the normal Pi experience and launch a fresh process for the repository's durable Automode Run. That implies a separate configuration boundary and explicit control over which skills and capabilities are available inside the Automode environment.
 
-### Planned workflow system
+### Repository-scoped coordinator and ticket sessions
 
-A workflow system is explicitly planned, with inspiration from Claude Code and Ben Davis's Pi workflow implementation. No implementation files exist yet, so this is only a design intent and not a documented behavior.
+The MVP design distinguishes a repository-singleton **Automode Coordinator** in the Main Session from independent **Ticket Sessions** that do the actual work. The Coordinator supervises work, reconstructs state best-effort after restart, and never performs ticket work itself.
 
-### Personal WeChat access path
+### Automation Stage model
 
-The README also calls out a personal WeChat channel integration. The important architectural implication is that WeChat is not just a user-facing add-on; it is intended to be a distinct access surface for a Pi session.
+The MVP has four independently selectable stages: Auto-Triage, Auto-Grilling, Auto-Implement, and Auto-Review. Full-Auto enables all four; Half-Auto enables one to three; planning remains human-controlled.
+
+### Separate WeChat integration boundary
+
+Personal-WeChat/OpenClaw channel integration is explicitly outside the Automode MVP and must be charted separately. That makes WeChat a future adjacent boundary rather than part of the current Automode architecture.
 
 ## What is not present yet
 
-- no application entrypoints beyond the product-level launch phrase
+- no implementation files that show the actual `/automode` wiring
 - no package manifest or runtime implementation in the inspected evidence
-- no domain glossary files such as `CONTEXT.md`
 - no ADRs yet, so there are no written architectural decisions to defer to
 
 ## Where future agents should start
 
 When code arrives, document:
 
-1. the actual process entrypoint for `pi automode`
-2. the boundary between normal Pi config and automode config
-3. the workflow engine's state, persistence, and execution model
-4. the interface between the workflow system and the WeChat integration
+1. the actual process entrypoint for `/automode`
+2. the boundary between normal Pi config and Automode config
+3. the Coordinator/Ticket Session lifecycle and recovery model
+4. the interface between Automode and any future WeChat integration
 
 ## Evidence
 
