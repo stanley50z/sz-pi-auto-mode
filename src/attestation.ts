@@ -7,7 +7,7 @@ export interface CanonicalSkill {
   sourceRoot: string;
 }
 
-function inside(path: string, root: string): boolean {
+export function isPathInside(path: string, root: string): boolean {
   const rel = relative(root, path);
   return rel === "" || (!rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel));
 }
@@ -47,7 +47,7 @@ export function attestCanonicalCommands(
     }
     const sourcePath = realpathSync(command.sourceInfo.path);
     const sourceRoot = realpathSync(resolve(skill.sourceRoot));
-    if (!inside(sourcePath, sourceRoot)) {
+    if (!isPathInside(sourcePath, sourceRoot)) {
       throw new Error(`Unexpected provenance for ${skill.command}: ${sourcePath}`);
     }
     attested.set(skill.command, command);

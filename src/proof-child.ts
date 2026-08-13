@@ -12,7 +12,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { attestCanonicalCommands } from "./attestation.js";
 import { isNormalPiConfigurationKey } from "./environment.js";
-import { createIsolatedAutomodeSession } from "./session.js";
+import { createMainSession } from "./session.js";
 
 interface Invocation {
   name: string;
@@ -94,7 +94,7 @@ if (!cwd) throw new Error("Missing caller repository path");
 const normalAgentDir = process.argv[3] || undefined;
 const terminalInput = process.env.AUTOMODE_HANDOFF_INPUT === "1" ? await waitForTerminalLine() : undefined;
 const fixtureRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../skills");
-const result = await createIsolatedAutomodeSession({
+const result = await createMainSession({
   cwd,
   skillPaths: [fixtureRoot],
   systemPrompt: "Automode process-handoff proof. Do not access an issue tracker.",
@@ -149,6 +149,7 @@ console.log(JSON.stringify({
   terminalInput,
   settingsDefaultThinkingLevel: result.session.settingsManager.getDefaultThinkingLevel(),
   appendSystemPrompts: result.session.resourceLoader.getAppendSystemPrompt(),
+  contextFilePaths: result.session.resourceLoader.getAgentsFiles().agentsFiles.map((file) => file.path),
   credentialEnvironmentPresent: process.env.ANTHROPIC_API_KEY === "not-a-real-environment-credential",
   inheritedNormalConfiguration: Object.keys(process.env).filter(isNormalPiConfigurationKey),
 }));

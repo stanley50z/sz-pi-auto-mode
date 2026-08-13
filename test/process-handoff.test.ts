@@ -19,6 +19,7 @@ interface ProofResult {
   terminalInput?: string;
   settingsDefaultThinkingLevel?: string;
   appendSystemPrompts: string[];
+  contextFilePaths: string[];
   credentialEnvironmentPresent: boolean;
   inheritedNormalConfiguration: string[];
 }
@@ -60,6 +61,8 @@ test("fresh child owns the terminal and composes only isolated SDK state", async
   const home = join(fixture, "home");
   const sourceSkills = resolve(dirname(fileURLToPath(import.meta.url)), "../../skills");
   mkdirSync(join(repository, ".git"), { recursive: true });
+  writeFileSync(join(fixture, "AGENTS.md"), "AMBIENT_PARENT_GUIDANCE");
+  writeFileSync(join(repository, "AGENTS.md"), "REPOSITORY_AUTOMODE_GUIDANCE");
   writeSkill(join(repository, "skills"), "canonical-one", "ATTACKER_CANONICAL_ONE");
   writeSkill(join(repository, "skills"), "canonical-two", "ATTACKER_CANONICAL_TWO");
   writeSkill(join(repository, ".pi", "skills"), "ambient-project", "AMBIENT_PROJECT_MARKER");
@@ -110,6 +113,7 @@ test("fresh child owns the terminal and composes only isolated SDK state", async
   assert.deepEqual(proof.credentialProviders, ["proof-credential"]);
   assert.equal(proof.settingsDefaultThinkingLevel, "low");
   assert.deepEqual(proof.appendSystemPrompts, []);
+  assert.deepEqual(proof.contextFilePaths.map((path) => resolve(path)), [resolve(repository, "AGENTS.md")]);
   assert.equal(proof.credentialEnvironmentPresent, true);
   assert.deepEqual(proof.inheritedNormalConfiguration, []);
   assert.deepEqual(proof.invocations, [

@@ -18,6 +18,9 @@ test("shares credential environment without inheriting normal Pi process configu
     PI_TIMING: "1",
     PI_TUI_WRITE_LOG: "normal-tui.log",
     HTTP_PROXY: "http://normal-proxy",
+    HTTPS_PROXY: "http://normal-secure-proxy",
+    ALL_PROXY: "socks5://normal-proxy",
+    NO_PROXY: "localhost,127.0.0.1",
     NODE_OPTIONS: "--require normal-config.js",
   });
 
@@ -37,6 +40,9 @@ test("shares credential environment without inheriting normal Pi process configu
   assert.equal(environment.PI_CLEAR_ON_SHRINK, undefined);
   assert.equal(environment.PI_TIMING, undefined);
   assert.equal(environment.PI_TUI_WRITE_LOG, undefined);
-  assert.equal(environment.HTTP_PROXY, undefined);
+  assert.equal(environment.HTTP_PROXY, "http://normal-proxy");
+  assert.equal(environment.HTTPS_PROXY, "http://normal-secure-proxy");
+  assert.equal(environment.ALL_PROXY, "socks5://normal-proxy");
+  assert.equal(environment.NO_PROXY, "localhost,127.0.0.1");
   assert.equal(environment.NODE_OPTIONS, undefined);
 });

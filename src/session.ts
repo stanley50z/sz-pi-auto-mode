@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import {
   createAgentSession,
@@ -9,9 +9,10 @@ import {
   type CreateAgentSessionResult,
 } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
-import { resolveAutomodePaths } from "./paths.js";
+import { isPathInside } from "./attestation.js";
+import { repositoryRoot, resolveAutomodePaths } from "./paths.js";
 
-export interface IsolatedSessionOptions {
+export interface MainSessionOptions {
   cwd: string;
   skillPaths: string[];
   systemPrompt: string;
@@ -20,10 +21,11 @@ export interface IsolatedSessionOptions {
   normalAgentDir?: string;
 }
 
-export async function createIsolatedAutomodeSession(
-  options: IsolatedSessionOptions,
+export async function createMainSession(
+  options: MainSessionOptions,
 ): Promise<CreateAgentSessionResult> {
   const paths = resolveAutomodePaths(options.cwd, options.home, options.normalAgentDir);
+  const contextRoot = repositoryRoot(options.cwd);
   mkdirSync(paths.automodeDir, { recursive: true });
   mkdirSync(paths.sessionDir, { recursive: true });
 
@@ -44,7 +46,10 @@ export async function createIsolatedAutomodeSession(
     noSkills: true,
     noPromptTemplates: true,
     noThemes: true,
-    noContextFiles: true,
+    noContextFiles: false,
+    agentsFilesOverride: ({ agentsFiles }) => ({
+      agentsFiles: agentsFiles.filter((file) => isPathInside(realpathSync(file.path), contextRoot)),
+    }),
     systemPrompt: options.systemPrompt,
     appendSystemPrompt: [],
   });

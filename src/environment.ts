@@ -1,11 +1,5 @@
 const FORWARDED_PI_MARKERS = new Set(["AI_AGENT", "PI_CODING_AGENT"]);
-const STRIPPED_NON_PI_KEYS = new Set([
-  "HTTP_PROXY",
-  "HTTPS_PROXY",
-  "ALL_PROXY",
-  "NO_PROXY",
-  "NODE_OPTIONS",
-]);
+const STRIPPED_NON_PI_KEYS = new Set(["NODE_OPTIONS"]);
 
 export function isNormalPiConfigurationKey(key: string): boolean {
   const normalized = key.toUpperCase();
