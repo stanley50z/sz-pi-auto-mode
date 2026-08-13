@@ -61,7 +61,7 @@ test("Half-Auto visibly rejects zero and four stages and launches one to three",
   invalidFour.component.handleInput("\t");
   invalidFour.component.handleInput("\r");
   assert.equal(invalidFour.result(), undefined);
-  assert.match(invalidFour.component.render(80).join("\n"), /choose one to three/i);
+  assert.match(invalidFour.component.render(80).join("\n"), /requires one to three/i);
 
   const valid = selector();
   valid.component.handleInput("\t");
@@ -80,16 +80,40 @@ test("Half-Auto visibly rejects zero and four stages and launches one to three",
   }
   invalidZero.component.handleInput("\r");
   assert.equal(invalidZero.result(), undefined);
-  assert.match(invalidZero.component.render(80).join("\n"), /choose one to three/i);
+  assert.match(invalidZero.component.render(80).join("\n"), /requires one to three/i);
 });
 
-test("Escape cancels and minimum-width rendering never clips past the terminal", () => {
+test("Escape cancels and minimum-size rendering keeps every label and control readable", () => {
   const view = selector();
   view.component.handleInput("\x1b");
   assert.equal(view.result(), null);
 
   const minimumTerminal = { columns: 32, rows: 20, piReservedRows: 2 };
   const lines = view.component.render(minimumTerminal.columns);
+  const readableText = lines.join(" ").replace(/\s+/g, " ");
   assert.ok(lines.length <= minimumTerminal.rows - minimumTerminal.piReservedRows);
   for (const line of lines) assert.ok(visibleWidth(line) <= minimumTerminal.columns, line);
+  for (const requiredText of [
+    "Full-Auto",
+    "Half-Auto",
+    "Auto-Triage",
+    "Auto-Grilling",
+    "Auto-Implement",
+    "Auto-Review",
+    "Tab mode",
+    "↑↓←→ focus",
+    "Space toggle",
+    "Enter launch",
+    "Esc cancel",
+  ]) {
+    assert.match(readableText, new RegExp(requiredText));
+  }
+
+  const invalid = selector();
+  invalid.component.handleInput("\t");
+  invalid.component.handleInput("\r");
+  const invalidLines = invalid.component.render(minimumTerminal.columns);
+  assert.ok(invalidLines.length <= minimumTerminal.rows - minimumTerminal.piReservedRows);
+  for (const line of invalidLines) assert.ok(visibleWidth(line) <= minimumTerminal.columns, line);
+  assert.match(invalidLines.join(" ").replace(/\s+/g, " "), /Half-Auto requires one to three Automation Stages/);
 });

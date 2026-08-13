@@ -13,7 +13,7 @@ pi install .
 /automode
 ```
 
-The minimal **Automode Bridge** opens a keyboard-driven Full-Auto/Half-Auto stage selector. `Tab` changes mode, arrows move stage focus, `Space` toggles stages in Half-Auto, `Enter` launches, and `Escape` cancels without side effects. Confirmation serializes the immutable **Automation Stage Configuration** through `AUTOMODE_STAGE_CONFIGURATION`, leaves normal Pi, and launches a fresh isolated Main Session in the same repository. Automode reuses Pi credentials but loads isolated settings, resources, prompt, and session storage.
+The minimal **Automode Bridge** opens a keyboard-driven Full-Auto/Half-Auto stage selector. `Tab` changes mode, all four arrow keys move stage focus, `Space` toggles stages in Half-Auto, `Enter` launches, and `Escape` cancels without side effects. Confirmation serializes and confirms the immutable **Automation Stage Configuration**, leaves normal Pi, and launches a fresh isolated Main Session at the Git repository root. Automode reuses Pi credentials but loads isolated settings, resources, prompt, and session storage.
 
 ## Automode MVP
 

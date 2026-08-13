@@ -4,7 +4,7 @@ This repository is an early-stage Pi extension centered on **Automode**, a disti
 
 - the product launches from **`/automode` inside normal Pi**
 - `pi automode` is obsolete in the agent guidance
-- Automode runs with a fixed stage profile and a repository-scoped Coordinator/Ticket Session split
+- Automode runs with a fixed, confirmed stage configuration and a repository-scoped Main Session / Ticket Session split
 - the MVP is organized into four Automation Stages: Auto-Triage, Auto-Grilling, Auto-Implement, and Auto-Review
 - Personal-WeChat integration is planned separately from the Automode MVP
 

@@ -1,3 +1,5 @@
+import { createHash, timingSafeEqual } from "node:crypto";
+
 export const AUTOMATION_STAGES = [
   "auto-triage",
   "auto-grilling",
@@ -7,6 +9,20 @@ export const AUTOMATION_STAGES = [
 
 export type AutomationStage = (typeof AUTOMATION_STAGES)[number];
 export type AutomodeMode = "full" | "half";
+
+export const AUTOMATION_STAGE_LABELS: Readonly<Record<AutomationStage, string>> = Object.freeze({
+  "auto-triage": "Auto-Triage",
+  "auto-grilling": "Auto-Grilling",
+  "auto-implement": "Auto-Implement",
+  "auto-review": "Auto-Review",
+});
+
+export const AUTOMODE_MODE_LABELS: Readonly<Record<AutomodeMode, string>> = Object.freeze({
+  full: "Full-Auto",
+  half: "Half-Auto",
+});
+
+export const HALF_AUTO_SELECTION_REQUIREMENT = "Half-Auto requires one to three Automation Stages.";
 
 export interface AutomationStageConfiguration {
   readonly mode: AutomodeMode;
@@ -37,7 +53,7 @@ export function createAutomationStageConfiguration(
     throw new Error("Full-Auto requires all four Automation Stages");
   }
   if (mode === "half" && !isValidHalfAutoSelection(uniqueStages)) {
-    throw new Error("Half-Auto requires one to three Automation Stages");
+    throw new Error(HALF_AUTO_SELECTION_REQUIREMENT);
   }
   const orderedStages = AUTOMATION_STAGES.filter((stage) => uniqueStages.includes(stage));
   return Object.freeze({ mode, stages: Object.freeze(orderedStages) });
@@ -45,6 +61,23 @@ export function createAutomationStageConfiguration(
 
 export function serializeAutomationStageConfiguration(configuration: AutomationStageConfiguration): string {
   return JSON.stringify(createAutomationStageConfiguration(configuration.mode, configuration.stages));
+}
+
+export function confirmSerializedAutomationStageConfiguration(serialized: string): string {
+  parseAutomationStageConfiguration(serialized);
+  return createHash("sha256").update(serialized).digest("hex");
+}
+
+export function parseConfirmedAutomationStageConfiguration(
+  serialized: string,
+  confirmation: string,
+): AutomationStageConfiguration {
+  const actual = Buffer.from(confirmSerializedAutomationStageConfiguration(serialized), "hex");
+  const expected = Buffer.from(confirmation, "hex");
+  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+    throw new Error("Automation Stage Configuration changed after confirmation");
+  }
+  return parseAutomationStageConfiguration(serialized);
 }
 
 export function parseAutomationStageConfiguration(serialized: string): AutomationStageConfiguration {

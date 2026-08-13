@@ -1,44 +1,46 @@
 # Architecture overview
 
-The repository is currently a product scaffold rather than a finished application. The concrete source evidence now describes a repository-scoped **Automode** experience that starts from `/automode` inside normal Pi and runs with a controlled configuration, capability profile, skill set, prompt, and session boundary.
+The repository now has a concrete `/automode` launch seam. Normal Pi registers the command, shows a stage selector, serializes an immutable Automation Stage Configuration, and hands off to a fresh Automode Main Session in a child process.
 
-The current vocabulary in `CONTEXT.md` clarifies that Automode is a durable repository-scoped run with a Main Session that hosts the repository-singleton Automode Coordinator, while independent Ticket Sessions do the actual ticket work.
+The current vocabulary in `CONTEXT.md` matches the implementation more closely: Automode is a durable repository-scoped run with a Main Session that hosts the repository-singleton Automode Coordinator, while independent Ticket Sessions do the actual ticket work.
 
-## Known architectural intent
+## Implemented architecture
 
-### Automode isolation boundary
+### Bridge and child process boundary
 
-Automode is meant to leave the normal Pi experience and launch a fresh process for the repository's durable Automode Run. That implies a separate configuration boundary and explicit control over which skills and capabilities are available inside the Automode environment.
+`src/bridge.ts` registers `/automode` as a Pi extension command. The command waits for idle, opens the selector only in TUI mode, and launches the child with the repository root plus a serialized Automation Stage Configuration. `src/launch.ts` then passes `AUTOMODE_STAGE_CONFIGURATION` and a SHA-256 confirmation digest into the child process, which rejects tampered payloads before Main Session startup.
 
-### Repository-scoped coordinator and ticket sessions
+### Immutable run configuration
 
-The MVP design distinguishes a repository-singleton **Automode Coordinator** in the Main Session from independent **Ticket Sessions** that do the actual work. The Coordinator supervises work, reconstructs state best-effort after restart, and never performs ticket work itself.
+`src/stage-configuration.ts` defines the four stages, the Full-Auto/Half-Auto modes, and the validation rules: Full-Auto requires all four stages, while Half-Auto requires one to three. `src/automode-main.ts` persists the confirmed configuration to `~/.pi/automode/<repository-key>/stage-configuration.json` and refuses to start a different configuration for the same run.
 
-### Automation Stage model
+### Main Session and ticket boundary
 
-The MVP has four independently selectable stages: Auto-Triage, Auto-Grilling, Auto-Implement, and Auto-Review. Full-Auto enables all four; Half-Auto enables one to three; planning remains human-controlled.
+The Main Session is started with an Automode-specific system prompt and an extension that cancels session switching and forking. That keeps the Main Session as the coordinator boundary rather than a place where ticket work or session replacement can happen.
+
+### Stage model
+
+The MVP still has four independently selectable stages: Auto-Triage, Auto-Grilling, Auto-Implement, and Auto-Review. Full-Auto enables all four; Half-Auto enables one to three; planning remains human-controlled.
 
 ### Separate WeChat integration boundary
 
-Personal-WeChat/OpenClaw channel integration is explicitly outside the Automode MVP and must be charted separately. That makes WeChat a future adjacent boundary rather than part of the current Automode architecture.
+Personal-WeChat/OpenClaw channel integration is still explicitly outside the Automode MVP and remains a future adjacent boundary rather than part of the current Automode architecture.
 
-## What is not present yet
+## What future agents should start with
 
-- no implementation files that show the actual `/automode` wiring
-- no package manifest or runtime implementation in the inspected evidence
-- no ADRs yet, so there are no written architectural decisions to defer to
+When implementation evolves, document:
 
-## Where future agents should start
-
-When code arrives, document:
-
-1. the actual process entrypoint for `/automode`
+1. the Coordinator/Ticket Session lifecycle and recovery model
 2. the boundary between normal Pi config and Automode config
-3. the Coordinator/Ticket Session lifecycle and recovery model
+3. any eventual work-queue discovery and ticket claiming logic
 4. the interface between Automode and any future WeChat integration
 
 ## Evidence
 
 - [`README.md`](../../README.md)
-- [`AGENTS.md`](../../AGENTS.md)
-- [`CLAUDE.md`](../../CLAUDE.md)
+- [`CONTEXT.md`](../../CONTEXT.md)
+- [`docs/automode-launch.md`](../../docs/automode-launch.md)
+- [`src/bridge.ts`](../../src/bridge.ts)
+- [`src/launch.ts`](../../src/launch.ts)
+- [`src/automode-main.ts`](../../src/automode-main.ts)
+- [`src/stage-configuration.ts`](../../src/stage-configuration.ts)

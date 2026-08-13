@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   AUTOMATION_STAGES,
+  confirmSerializedAutomationStageConfiguration,
   createAutomationStageConfiguration,
   parseAutomationStageConfiguration,
+  parseConfirmedAutomationStageConfiguration,
   serializeAutomationStageConfiguration,
 } from "../src/stage-configuration.js";
 
@@ -33,6 +35,18 @@ test("Half-Auto permits one to three stages and rejects zero or four", () => {
   assert.throws(() => createAutomationStageConfiguration("half", []), /one to three/);
   assert.throws(() => createAutomationStageConfiguration("half", AUTOMATION_STAGES), /one to three/);
   assert.throws(() => createAutomationStageConfiguration("full", ["auto-triage"]), /all four/);
+});
+
+test("the child rejects a serialized configuration changed after confirmation", () => {
+  const full = serializeAutomationStageConfiguration(createAutomationStageConfiguration("full", AUTOMATION_STAGES));
+  const confirmation = confirmSerializedAutomationStageConfiguration(full);
+  assert.equal(confirmation, "1f7e6c2c6fc1a8cab6e05155bc4c25595c58afd16cf3dc969f1d96017d64439a");
+
+  const changed = serializeAutomationStageConfiguration(createAutomationStageConfiguration("half", ["auto-review"]));
+  assert.throws(
+    () => parseConfirmedAutomationStageConfiguration(changed, confirmation),
+    /changed after confirmation/,
+  );
 });
 
 test("serialized configurations are validated rather than trusted", () => {

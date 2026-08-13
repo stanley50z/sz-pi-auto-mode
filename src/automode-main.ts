@@ -1,16 +1,21 @@
-import { dirname, resolve } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { InteractiveMode, type InlineExtension } from "@earendil-works/pi-coding-agent";
+import { resolveAutomodePaths } from "./paths.js";
 import { createMainSessionRuntime } from "./session.js";
 import {
+  AUTOMODE_MODE_LABELS,
   parseAutomationStageConfiguration,
-  type AutomationStage,
+  parseConfirmedAutomationStageConfiguration,
+  serializeAutomationStageConfiguration,
   type AutomationStageConfiguration,
 } from "./stage-configuration.js";
 
 export interface StartAutomodeMainOptions {
   repository: string;
   serializedConfiguration: string;
+  configurationConfirmation: string;
   home?: string;
   normalAgentDir?: string;
 }
@@ -20,12 +25,14 @@ export interface StartedAutomodeMainSession {
   configuration: AutomationStageConfiguration;
   sessionName: string;
   sessionFile: string | undefined;
+  configurationFile: string;
   tryNewSession(): Promise<{ cancelled: boolean }>;
+  tryFork(): Promise<{ cancelled: boolean; selectedText?: string }>;
   runInteractive(): Promise<void>;
   dispose(): void;
 }
 
-function immutableConfigurationExtension(configuration: AutomationStageConfiguration): InlineExtension {
+function immutableConfigurationExtension(): InlineExtension {
   return {
     name: "automode-immutable-configuration",
     factory: (pi) => {
@@ -35,11 +42,44 @@ function immutableConfigurationExtension(configuration: AutomationStageConfigura
   };
 }
 
+function persistAutomationStageConfiguration(
+  repository: string,
+  configuration: AutomationStageConfiguration,
+  home?: string,
+  normalAgentDir?: string,
+): string {
+  const { automodeDir } = resolveAutomodePaths(repository, home, normalAgentDir);
+  mkdirSync(automodeDir, { recursive: true });
+  const configurationFile = join(automodeDir, "stage-configuration.json");
+  const serialized = serializeAutomationStageConfiguration(configuration);
+  try {
+    writeFileSync(configurationFile, `${serialized}\n`, { encoding: "utf8", flag: "wx" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    const persisted = serializeAutomationStageConfiguration(
+      parseAutomationStageConfiguration(readFileSync(configurationFile, "utf8")),
+    );
+    if (persisted !== serialized) {
+      throw new Error("Automation Stage Configuration is fixed for this Automode Run");
+    }
+  }
+  return configurationFile;
+}
+
 export async function startAutomodeMainSession(
   options: StartAutomodeMainOptions,
 ): Promise<StartedAutomodeMainSession> {
-  const configuration = parseAutomationStageConfiguration(options.serializedConfiguration);
-  const sessionName = `Automode Main — ${configuration.mode === "full" ? "Full-Auto" : "Half-Auto"}`;
+  const configuration = parseConfirmedAutomationStageConfiguration(
+    options.serializedConfiguration,
+    options.configurationConfirmation,
+  );
+  const configurationFile = persistAutomationStageConfiguration(
+    options.repository,
+    configuration,
+    options.home,
+    options.normalAgentDir,
+  );
+  const sessionName = `Automode Main — ${AUTOMODE_MODE_LABELS[configuration.mode]}`;
   const skillRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../skills");
   const runtime = await createMainSessionRuntime({
     cwd: options.repository,
@@ -47,33 +87,18 @@ export async function startAutomodeMainSession(
     systemPrompt: "You are the Automode Main Session. The Coordinator is not implemented in this launch ticket; remain idle.",
     home: options.home,
     normalAgentDir: options.normalAgentDir,
-    extensionFactories: [immutableConfigurationExtension(configuration)],
+    extensions: [immutableConfigurationExtension()],
   });
   runtime.session.setSessionName(sessionName);
   runtime.session.sessionManager.appendCustomEntry("automode.stage-configuration", configuration);
-  runtime.session.sessionManager.appendMessage({
-    role: "assistant",
-    content: [{ type: "text", text: "Automode Main Session initialized with an immutable stage configuration. Queue discovery is not active yet." }],
-    api: runtime.session.model?.api ?? "openai-completions",
-    provider: runtime.session.model?.provider ?? "automode",
-    model: runtime.session.model?.id ?? "main-session",
-    usage: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 0,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-    },
-    stopReason: "stop",
-    timestamp: Date.now(),
-  });
   return {
     cwd: runtime.cwd,
     configuration,
     sessionName,
     sessionFile: runtime.session.sessionFile,
+    configurationFile,
     tryNewSession: () => runtime.newSession(),
+    tryFork: () => runtime.fork(runtime.session.sessionManager.getLeafId()!),
     runInteractive: async () => {
       const interactiveMode = new InteractiveMode(runtime, {
         initialMessages: [],
@@ -90,27 +115,15 @@ async function main(): Promise<void> {
   if (!repository) throw new Error("Missing caller repository path");
   const serializedConfiguration = process.env.AUTOMODE_STAGE_CONFIGURATION;
   if (!serializedConfiguration) throw new Error("Missing immutable Automation Stage Configuration");
+  const configurationConfirmation = process.env.AUTOMODE_STAGE_CONFIGURATION_CONFIRMATION;
+  if (!configurationConfirmation) throw new Error("Missing Automation Stage Configuration confirmation");
   const normalAgentDir = process.argv[3] || undefined;
-  const mainSession = await startAutomodeMainSession({ repository, serializedConfiguration, normalAgentDir });
-  if (process.argv.includes("--launch-proof")) {
-    let mutationRejected = false;
-    try {
-      (mainSession.configuration.stages as AutomationStageConfiguration["stages"] & AutomationStage[]).pop();
-    } catch (error) {
-      mutationRejected = error instanceof TypeError;
-    }
-    console.log(`AUTOMODE_MAIN_SESSION ${JSON.stringify({
-      cwd: mainSession.cwd,
-      configuration: mainSession.configuration,
-      configurationFrozen: Object.isFrozen(mainSession.configuration) && Object.isFrozen(mainSession.configuration.stages),
-      mutationRejected,
-      sessionName: mainSession.sessionName,
-      sessionFile: mainSession.sessionFile,
-      pid: process.pid,
-    })}`);
-    mainSession.dispose();
-    return;
-  }
+  const mainSession = await startAutomodeMainSession({
+    repository,
+    serializedConfiguration,
+    configurationConfirmation,
+    normalAgentDir,
+  });
   await mainSession.runInteractive();
 }
 

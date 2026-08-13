@@ -1,18 +1,17 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { createAutomodeSelector, type SelectorTheme } from "./selector.js";
 import { launchAutomode } from "./launch.js";
+import { repositoryRoot } from "./paths.js";
 import { serializeAutomationStageConfiguration, type AutomationStageConfiguration } from "./stage-configuration.js";
 
 export interface AutomodeLaunchRequest {
   cwd: string;
   serializedConfiguration: string;
-  launchProof: boolean;
 }
 
 export interface AutomodeBridgeDependencies {
   selectConfiguration(ctx: ExtensionCommandContext): Promise<AutomationStageConfiguration | null>;
   launch(request: AutomodeLaunchRequest): Promise<never>;
-  launchProof: boolean;
 }
 
 function selectorTheme(theme: ExtensionCommandContext["ui"]["theme"]): SelectorTheme {
@@ -42,14 +41,12 @@ export async function selectAutomationStageConfiguration(
     });
     return selector;
   });
-  if (result === undefined) throw new Error("Automode selector closed without a result");
-  return result;
+  return result ?? null;
 }
 
 const defaultDependencies: AutomodeBridgeDependencies = {
   selectConfiguration: selectAutomationStageConfiguration,
   launch: launchAutomode,
-  launchProof: false,
 };
 
 export default function automodeBridge(
@@ -63,9 +60,8 @@ export default function automodeBridge(
       const configuration = await dependencies.selectConfiguration(ctx);
       if (configuration === null) return;
       await dependencies.launch({
-        cwd: ctx.cwd,
+        cwd: repositoryRoot(ctx.cwd),
         serializedConfiguration: serializeAutomationStageConfiguration(configuration),
-        launchProof: dependencies.launchProof,
       });
     },
   });

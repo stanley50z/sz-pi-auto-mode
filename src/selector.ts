@@ -1,7 +1,10 @@
 import { Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import {
+  AUTOMATION_STAGE_LABELS,
   AUTOMATION_STAGES,
+  AUTOMODE_MODE_LABELS,
   createAutomationStageConfiguration,
+  HALF_AUTO_SELECTION_REQUIREMENT,
   isValidHalfAutoSelection,
   type AutomationStage,
   type AutomodeMode,
@@ -31,13 +34,6 @@ export interface AutomodeSelectorOptions {
   onDone(result: AutomationStageConfiguration | null): void;
 }
 
-const STAGE_LABELS: Record<AutomationStage, string> = {
-  "auto-triage": "Auto-Triage",
-  "auto-grilling": "Auto-Grilling",
-  "auto-implement": "Auto-Implement",
-  "auto-review": "Auto-Review",
-};
-
 function addWrapped(lines: string[], prefix: string, text: string, width: number): void {
   const prefixWidth = visibleWidth(prefix);
   if (prefixWidth >= width) {
@@ -57,9 +53,13 @@ export function createAutomodeSelector(options: AutomodeSelectorOptions): Automo
   let cachedWidth: number | undefined;
   let cachedLines: string[] | undefined;
 
-  function refreshAfterInteraction(): void {
+  function invalidateCache(): void {
     cachedWidth = undefined;
     cachedLines = undefined;
+  }
+
+  function refreshAfterInteraction(): void {
+    invalidateCache();
     validationMessage = undefined;
     options.onChange();
   }
@@ -95,9 +95,8 @@ export function createAutomodeSelector(options: AutomodeSelectorOptions): Automo
     }
     if (matchesKey(data, Key.enter)) {
       if (mode === "half" && !isValidHalfAutoSelection(enabled)) {
-        validationMessage = "Half-Auto: choose one to three stages before launching.";
-        cachedWidth = undefined;
-        cachedLines = undefined;
+        validationMessage = HALF_AUTO_SELECTION_REQUIREMENT;
+        invalidateCache();
         options.onChange();
         return;
       }
@@ -114,8 +113,12 @@ export function createAutomodeSelector(options: AutomodeSelectorOptions): Automo
     addWrapped(lines, " ", options.theme.accent(options.theme.bold("Launch Automode")), renderWidth);
     lines.push("");
 
-    const full = mode === "full" ? options.theme.selected("Full-Auto") : options.theme.muted("Full-Auto");
-    const half = mode === "half" ? options.theme.selected("Half-Auto") : options.theme.muted("Half-Auto");
+    const full = mode === "full"
+      ? options.theme.selected(AUTOMODE_MODE_LABELS.full)
+      : options.theme.muted(AUTOMODE_MODE_LABELS.full);
+    const half = mode === "half"
+      ? options.theme.selected(AUTOMODE_MODE_LABELS.half)
+      : options.theme.muted(AUTOMODE_MODE_LABELS.half);
     addWrapped(lines, " ", `${full}  ${half}`, renderWidth);
     lines.push("");
 
@@ -124,7 +127,9 @@ export function createAutomodeSelector(options: AutomodeSelectorOptions): Automo
       const active = mode === "full" || enabled.has(stage);
       const prefix = focused ? options.theme.accent("> ") : "  ";
       const state = active ? options.theme.success("enabled") : options.theme.dim("disabled");
-      const label = focused ? options.theme.accent(STAGE_LABELS[stage]) : options.theme.text(STAGE_LABELS[stage]);
+      const label = focused
+        ? options.theme.accent(AUTOMATION_STAGE_LABELS[stage])
+        : options.theme.text(AUTOMATION_STAGE_LABELS[stage]);
       addWrapped(lines, prefix, `${active ? "●" : "○"} ${label} — ${state}`, renderWidth);
     });
 
@@ -133,23 +138,20 @@ export function createAutomodeSelector(options: AutomodeSelectorOptions): Automo
       ? options.theme.success("Full-Auto: all four stages enabled.")
       : isValidHalfAutoSelection(enabled)
         ? options.theme.success(`Half-Auto: ${enabled.size} stage${enabled.size === 1 ? "" : "s"} enabled.`)
-        : options.theme.warning("Half-Auto: choose one to three stages.");
+        : options.theme.warning(HALF_AUTO_SELECTION_REQUIREMENT);
     addWrapped(lines, " ", validationMessage ? options.theme.warning(validationMessage) : status, renderWidth);
     lines.push("");
-    addWrapped(lines, " ", options.theme.dim("Tab mode • ↑↓ focus • Space toggle • Enter launch • Esc cancel"), renderWidth);
+    addWrapped(lines, " ", options.theme.dim("Tab mode • ↑↓←→ focus • Space toggle • Enter launch • Esc cancel"), renderWidth);
     lines.push(border);
 
     cachedWidth = renderWidth;
-    cachedLines = lines.map((line) => truncateToWidth(line, renderWidth, ""));
+    cachedLines = lines;
     return cachedLines;
   }
 
   return {
     render,
     handleInput,
-    invalidate() {
-      cachedWidth = undefined;
-      cachedLines = undefined;
-    },
+    invalidate: invalidateCache,
   };
 }
