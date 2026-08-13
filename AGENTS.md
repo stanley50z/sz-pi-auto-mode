@@ -14,7 +14,7 @@ This repository uses the single-context domain docs layout. See `docs/agents/dom
 
 ### Automode MVP
 
-For work on Automode launch, orchestration, or any Automation Stage, use [the implementation specification](https://github.com/stanley50z/sz-pi-full-auto/issues/21). The [Wayfinder map](https://github.com/stanley50z/sz-pi-full-auto/issues/1) indexes the underlying decisions. The entrypoint is `/automode` inside normal Pi; `pi automode` is obsolete. Personal-WeChat integration is outside this MVP.
+For work on Automode launch, orchestration, or any Automation Stage, use [the implementation specification](https://github.com/stanley50z/sz-pi-auto-mode/issues/21). The [Wayfinder map](https://github.com/stanley50z/sz-pi-auto-mode/issues/1) indexes the underlying decisions. The entrypoint is `/automode` inside normal Pi; `pi automode` is obsolete. Personal-WeChat integration is outside this MVP.
 
 <!-- OPENWIKI:START -->
 

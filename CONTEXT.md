@@ -9,7 +9,7 @@ The separate Pi experience that coordinates the Matt Pocock workflow through con
 _Avoid_: Auto mode, autonomous Pi
 
 **Automode Bridge**:
-The minimal `/automode` entrypoint available in normal Pi that leaves the current Pi experience and starts a fresh Automode process for the repository's durable Automode Run in the same working directory. It does not expose Automode's mode-specific capabilities to the normal session.
+The minimal `/automode` entrypoint available in normal Pi that leaves the current Pi experience and starts a fresh Automode process for the repository's durable Automode Run at the Git repository root. It does not expose Automode's mode-specific capabilities to the normal session.
 _Avoid_: `pi automode`, in-place mode toggle, Automode runtime
 
 **Automode Capability Profile**:
@@ -19,6 +19,10 @@ _Avoid_: Global skill discovery, inherited Pi setup, general configuration schem
 **Automation Stage**:
 One independently configurable part of the repository workflow: Auto-Triage, Auto-Grilling, Auto-Implement, or Auto-Review. A stage's setting is fixed for an Automode Run; enabled stages are handled automatically and disabled stages remain human-controlled.
 _Avoid_: Sub-mode, workflow phase
+
+**Automation Stage Configuration**:
+The immutable Full-Auto or Half-Auto selection of enabled Automation Stages confirmed when an Automode Run launches. It is serialized across the Automode Bridge process boundary and remains fixed for that run.
+_Avoid_: Stage profile, Automode Capability Profile
 
 **Auto-Triage**:
 The Automation Stage that discovers and processes tracker items marked `needs-triage`.
