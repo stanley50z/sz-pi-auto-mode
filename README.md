@@ -28,3 +28,7 @@ The canonical implementation specification is [GitHub issue #21](https://github.
 ## Separately planned
 
 Personal-WeChat/OpenClaw channel integration is outside the Automode workflow MVP and must be charted separately.
+
+## Development proof
+
+The isolated Pi process-handoff seam is runnable and documented in [docs/process-handoff-proof.md](docs/process-handoff-proof.md).

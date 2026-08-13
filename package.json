@@ -1,0 +1,23 @@
+{
+  "name": "sz-pi-full-auto",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "prove:handoff": "npm run build && node dist/src/proof-cli.js"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "0.84.1",
+    "@earendil-works/pi-coding-agent": "0.84.1"
+  },
+  "devDependencies": {
+    "@lydell/node-pty": "1.2.0-beta.15",
+    "@types/node": "22.15.3",
+    "typescript": "5.8.3"
+  }
+}
