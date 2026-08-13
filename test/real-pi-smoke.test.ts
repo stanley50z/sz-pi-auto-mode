@@ -58,6 +58,12 @@ test("real Pi registers /automode as an extension command and handles it before 
     name: "automode",
     source: "extension",
   });
+  const packageCommands = commands.data?.commands?.filter((command) =>
+    command.sourceInfo?.path?.replaceAll("\\", "/").startsWith(process.cwd().replaceAll("\\", "/"))
+  );
+  assert.deepEqual(packageCommands?.map((command) => [command.name, command.source]), [
+    ["automode", "extension"],
+  ]);
 
   child.stdin.write(`${JSON.stringify({ id: "invoke", type: "prompt", message: "/automode" })}\n`);
   const invoke = await waitFor((message) => message.id === "invoke");

@@ -17,6 +17,7 @@ test("shares the configured normal credential root while isolating repository st
   assert.equal(one.normalAgentDir, normalAgentDir);
   assert.notEqual(one.automodeDir, one.normalAgentDir);
   assert.notEqual(one.automodeDir, two.automodeDir);
+  assert.notEqual(one.coordinatorDir, two.coordinatorDir);
   assert.ok(one.sessionDir.startsWith(one.automodeDir));
 });
 
@@ -31,4 +32,15 @@ test("keys one repository consistently from root, subdirectories, and symlink pa
   const nestedPaths = resolveAutomodePaths(nested, fixture);
   assert.equal(nestedPaths.automodeDir, rootPaths.automodeDir);
   assert.equal(dirname(rootPaths.normalAgentDir), join(fixture, ".pi"));
+});
+
+test("Coordinator ownership is repository-scoped even when processes use different homes", () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), "automode-coordinator-root-")));
+  const repository = join(fixture, "repository");
+  mkdirSync(join(repository, ".git"), { recursive: true });
+
+  const first = resolveAutomodePaths(repository, join(fixture, "home-one"));
+  const second = resolveAutomodePaths(repository, join(fixture, "home-two"));
+  assert.notEqual(first.automodeDir, second.automodeDir);
+  assert.equal(first.coordinatorDir, second.coordinatorDir);
 });

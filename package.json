@@ -19,11 +19,13 @@
   "dependencies": {
     "@earendil-works/pi-ai": "0.84.1",
     "@earendil-works/pi-coding-agent": "0.84.1",
-    "@earendil-works/pi-tui": "0.84.1"
+    "@earendil-works/pi-tui": "0.84.1",
+    "proper-lockfile": "4.1.2"
   },
   "devDependencies": {
     "@lydell/node-pty": "1.2.0-beta.15",
     "@types/node": "22.15.3",
+    "@types/proper-lockfile": "4.1.4",
     "typescript": "5.8.3"
   }
 }

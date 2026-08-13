@@ -13,7 +13,9 @@ pi install .
 /automode
 ```
 
-The minimal **Automode Bridge** opens a keyboard-driven Full-Auto/Half-Auto stage selector. `Tab` changes mode, all four arrow keys move stage focus, `Space` toggles stages in Half-Auto, `Enter` launches, and `Escape` cancels without side effects. Confirmation serializes and confirms the immutable **Automation Stage Configuration**, leaves normal Pi, and launches a fresh isolated Main Session at the Git repository root. Automode reuses Pi credentials but loads isolated settings, resources, prompt, and session storage.
+The minimal **Automode Bridge** opens a keyboard-driven Full-Auto/Half-Auto stage selector. `Tab` changes mode, all four arrow keys move stage focus, `Space` toggles stages in Half-Auto, `Enter` launches, and `Escape` cancels without side effects. Confirmation serializes and confirms the immutable **Automation Stage Configuration**, leaves normal Pi, and launches a fresh isolated Main Session at the Git repository root. Automode reuses Pi credentials but loads an explicit fail-closed Capability Profile with isolated settings, resources, prompt, and session storage.
+
+Before any work discovery, startup verifies the local Git root, authenticated GitHub repository access, every required execution profile, canonical skill identity/provenance, and the repository-singleton Coordinator lock. Enabled stages receive extension-owned Automode Stage Skills; disabled stages retain bundled unchanged native skills. Ambient global and project executable resources are excluded unless a project resource is both trusted and explicitly allowlisted; the controlled `/fast` command explicitly reuses normal Pi's synchronized OpenAI fast-mode state. Ordinary Ticket Sessions are fixed to Pi / `openai-codex/gpt-5.6-sol` / high reasoning; panel stages additionally require Pi / `openai-codex/gpt-5.6-sol`, Pi / `kimi-coding/k3`, and Claude Code / `claude-fable-5`, all at high reasoning. A durable repository Coordinator identity survives process restarts, while an atomic live-process lock prevents competing Coordinators.
 
 ## Automode MVP
 

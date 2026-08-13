@@ -1,14 +1,20 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { Model } from "@earendil-works/pi-ai";
 import { InteractiveMode, type InlineExtension } from "@earendil-works/pi-coding-agent";
+import { createCapabilitySession, type ProjectResourceAllowlist } from "./capability-session.js";
+import { acquireRepositoryCoordinator } from "./coordinator-lock.js";
 import { resolveAutomodePaths } from "./paths.js";
 import { createMainSessionRuntime } from "./session.js";
 import {
+  validateAutomodeStartup,
+  type ExecutionProfileAttestor,
+  type StartupCommandRunner,
+} from "./startup.js";
+import {
   AUTOMODE_MODE_LABELS,
-  parseAutomationStageConfiguration,
   parseConfirmedAutomationStageConfiguration,
-  serializeAutomationStageConfiguration,
   type AutomationStageConfiguration,
 } from "./stage-configuration.js";
 
@@ -18,6 +24,12 @@ export interface StartAutomodeMainOptions {
   configurationConfirmation: string;
   home?: string;
   normalAgentDir?: string;
+  model?: Model<any>;
+  projectResources?: ProjectResourceAllowlist;
+  startupValidation?: {
+    runner?: StartupCommandRunner;
+    attestExecutions?: ExecutionProfileAttestor;
+  };
 }
 
 export interface StartedAutomodeMainSession {
@@ -25,7 +37,10 @@ export interface StartedAutomodeMainSession {
   configuration: AutomationStageConfiguration;
   sessionName: string;
   sessionFile: string | undefined;
-  configurationFile: string;
+  capabilityProfileFile: string;
+  coordinatorId: string;
+  coordinatorIdentityFile: string;
+  coordinatorLockFile: string;
   runInteractive(): Promise<void>;
   dispose(): void;
 }
@@ -38,28 +53,40 @@ export const automodeRunConfigurationGuard = {
   },
 } satisfies InlineExtension;
 
-function persistAutomationStageConfiguration(
+function persistAutomodeCapabilityProfile(
   repository: string,
   configuration: AutomationStageConfiguration,
+  projectResources: ProjectResourceAllowlist | undefined,
   home?: string,
   normalAgentDir?: string,
 ): string {
-  const { automodeDir } = resolveAutomodePaths(repository, home, normalAgentDir);
+  const { automodeDir, capabilityProfileFile } = resolveAutomodePaths(repository, home, normalAgentDir);
   mkdirSync(automodeDir, { recursive: true });
-  const configurationFile = join(automodeDir, "stage-configuration.json");
-  const serialized = serializeAutomationStageConfiguration(configuration);
+  const serialized = JSON.stringify({
+    version: 1,
+    stageConfiguration: configuration,
+    projectResources: {
+      trusted: projectResources?.trusted ?? false,
+      skillFiles: [...(projectResources?.skillPaths ?? [])]
+        .map((path) => realpathSync(join(resolve(path), "SKILL.md")))
+        .sort(),
+    },
+  });
   try {
-    writeFileSync(configurationFile, `${serialized}\n`, { encoding: "utf8", flag: "wx" });
+    writeFileSync(capabilityProfileFile, `${serialized}\n`, { encoding: "utf8", flag: "wx" });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    const persisted = serializeAutomationStageConfiguration(
-      parseAutomationStageConfiguration(readFileSync(configurationFile, "utf8")),
-    );
+    let persisted: string;
+    try {
+      persisted = JSON.stringify(JSON.parse(readFileSync(capabilityProfileFile, "utf8")));
+    } catch (parseError) {
+      throw new Error("The durable Automode Capability Profile is invalid", { cause: parseError });
+    }
     if (persisted !== serialized) {
-      throw new Error("Automation Stage Configuration is fixed for this Automode Run");
+      throw new Error("The Automode Capability Profile is fixed for this Automode Run");
     }
   }
-  return configurationFile;
+  return capabilityProfileFile;
 }
 
 export async function startAutomodeMainSession(
@@ -69,38 +96,93 @@ export async function startAutomodeMainSession(
     options.serializedConfiguration,
     options.configurationConfirmation,
   );
-  const configurationFile = persistAutomationStageConfiguration(
-    options.repository,
+  const validated = await validateAutomodeStartup({
+    repository: options.repository,
     configuration,
+    home: options.home,
+    normalAgentDir: options.normalAgentDir,
+    runner: options.startupValidation?.runner,
+    attestExecutions: options.startupValidation?.attestExecutions,
+  });
+  const paths = resolveAutomodePaths(
+    validated.repository,
     options.home,
     options.normalAgentDir,
   );
+  const lease = acquireRepositoryCoordinator(paths.coordinatorDir);
+  let runtime;
+  let capabilityProfileFile!: string;
+  try {
+    const attestationSession = await createCapabilitySession({
+      cwd: validated.repository,
+      configuration,
+      model: options.model,
+      home: options.home,
+      normalAgentDir: options.normalAgentDir,
+      projectResources: options.projectResources,
+      sessionName: `Automode Capability Attestation — ${lease.coordinatorId}`,
+    });
+    attestationSession.session.dispose();
+
+    runtime = await createMainSessionRuntime({
+      cwd: validated.repository,
+      skillPaths: [],
+      systemPrompt: "You are the Automode Main Session. Host the repository Coordinator and never perform Ticket Session work.",
+      model: options.model,
+      home: options.home,
+      normalAgentDir: options.normalAgentDir,
+      extensions: [automodeRunConfigurationGuard],
+    });
+    capabilityProfileFile = persistAutomodeCapabilityProfile(
+      validated.repository,
+      configuration,
+      options.projectResources,
+      options.home,
+      options.normalAgentDir,
+    );
+  } catch (error) {
+    runtime?.session.dispose();
+    lease.release();
+    throw error;
+  }
+
   const sessionName = `Automode Main — ${AUTOMODE_MODE_LABELS[configuration.mode]}`;
-  const skillRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../skills");
-  const runtime = await createMainSessionRuntime({
-    cwd: options.repository,
-    skillPaths: [skillRoot],
-    systemPrompt: "You are the Automode Main Session. The Coordinator is not implemented in this launch ticket; remain idle.",
-    home: options.home,
-    normalAgentDir: options.normalAgentDir,
-    extensions: [automodeRunConfigurationGuard],
-  });
   runtime.session.setSessionName(sessionName);
   runtime.session.sessionManager.appendCustomEntry("automode.stage-configuration", configuration);
+  runtime.session.sessionManager.appendCustomEntry("automode.coordinator", {
+    coordinatorId: lease.coordinatorId,
+  });
+  let disposed = false;
+  const dispose = () => {
+    if (disposed) return;
+    try {
+      runtime.session.dispose();
+    } finally {
+      lease.release();
+      disposed = true;
+    }
+  };
   return {
     cwd: runtime.cwd,
     configuration,
     sessionName,
     sessionFile: runtime.session.sessionFile,
-    configurationFile,
+    capabilityProfileFile,
+    coordinatorId: lease.coordinatorId,
+    coordinatorIdentityFile: lease.identityFile,
+    coordinatorLockFile: lease.lockFile,
     runInteractive: async () => {
       const interactiveMode = new InteractiveMode(runtime, {
         initialMessages: [],
         verbose: false,
       });
-      await interactiveMode.run();
+      try {
+        await interactiveMode.run();
+      } finally {
+        dispose();
+      }
     },
-    dispose: () => runtime.session.dispose(),
+    dispose,
   };
 }
 

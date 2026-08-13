@@ -18,9 +18,20 @@ The selector starts in Full-Auto with all four stages enabled. The minimum suppo
 
 Confirmation serializes and validates the Automation Stage Configuration, passes it to the child as `AUTOMODE_STAGE_CONFIGURATION`, and passes a matching confirmation digest as `AUTOMODE_STAGE_CONFIGURATION_CONFIRMATION`. The child rejects a changed payload before Main Session startup. The bridge resolves nested working directories to the Git repository root, gives the fresh child process the inherited terminal through the proven handoff seam, and exits normal Pi with the child's status.
 
-The child persists the fixed run configuration at `~/.pi/automode/<repository-key>/stage-configuration.json`, targets native Main Session history under `~/.pi/automode/<repository-key>/sessions`, and appends the configuration to Main Session state. Restarting the same Automode Run with a different configuration fails; `/new`, `/resume`, `/fork`, and `/clone` replacement paths are cancelled.
+After every startup check and canonical-resource attestation succeeds, the child persists the fixed run configuration and explicitly allowlisted project skill files together at `~/.pi/automode/<repository-key>/capability-profile.json`, targets native Main Session history under `~/.pi/automode/<repository-key>/sessions`, and appends the configuration to Main Session state. Restarting the same Automode Run with a different configuration fails; `/new`, `/resume`, `/fork`, and `/clone` replacement paths are cancelled.
 
-Issue #23 intentionally launches against an empty eligible queue. Queue discovery and Coordinator behavior arrive in later tickets; the Main Session therefore starts idle rather than touching GitHub work.
+Before work discovery, startup fails closed unless all of these checks succeed:
+
+- Git identifies the same repository root selected by the Bridge.
+- `gh` is authenticated for `github.com`, resolves the same repository as the local `origin`, and grants the mutation permission required by the enabled stages.
+- Pi can resolve the fixed ordinary Ticket Session model; panel-enabled configurations can also resolve every fixed panel harness/profile.
+- Pi's public command registry and resource diagnostics show exactly one canonical command per controlled skill, from the expected native or Automode-owned source root.
+- The repository's Agent guidance, domain context, and directly referenced tracker/domain documents load while ambient extensions, skills, prompts, themes, and project settings remain excluded; the controlled `/fast` extension explicitly reuses normal Pi's synchronized OpenAI fast-mode state.
+- The repository Coordinator lock is available.
+
+The durable Coordinator identity and live lock are stored under the repository's Git common directory so processes using different home/config roots still contend for one Coordinator. A live `coordinator.lock` permits only one Coordinator process; a clean stop removes the lock, and a restart reuses the identity and fixed Automation Stage Configuration. Ordinary Ticket Sessions use Pi / `openai-codex/gpt-5.6-sol` / high reasoning. Auto-Grilling and Auto-Review additionally require Pi / `openai-codex/gpt-5.6-sol`, Pi / `kimi-coding/k3`, and Claude Code / `claude-fable-5`, all at high reasoning. Project executable skills load only when the project is explicitly trusted and each path is explicitly allowlisted.
+
+Queue discovery and ticket claiming arrive in later tickets; this startup boundary reads repository metadata for validation but does not discover or mutate eligible tracker work.
 
 ## Validation
 

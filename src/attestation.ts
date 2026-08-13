@@ -1,6 +1,6 @@
 import type { ResourceDiagnostic, SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import { realpathSync } from "node:fs";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export interface CanonicalSkill {
   command: string;
@@ -20,12 +20,12 @@ export function attestCanonicalCommands(
   const expectedSkillNames = new Set(expected.map((skill) => skill.command.replace(/^skill:/, "")));
   for (const diagnostic of diagnostics) {
     const collision = diagnostic.collision;
-    if (
-      diagnostic.type === "collision"
-      && collision?.resourceType === "skill"
-      && expectedSkillNames.has(collision.name)
-    ) {
-      throw new Error(`Colliding canonical command: skill:${collision.name}`);
+    if (diagnostic.type === "collision" && collision?.resourceType === "skill") {
+      const qualifier = expectedSkillNames.has(collision.name) ? "canonical " : "";
+      throw new Error(`Colliding ${qualifier}command: skill:${collision.name}`);
+    }
+    if (diagnostic.type === "error") {
+      throw new Error(`Resource attestation failed: ${diagnostic.message}`);
     }
   }
 
@@ -47,8 +47,12 @@ export function attestCanonicalCommands(
     }
     const sourcePath = realpathSync(command.sourceInfo.path);
     const sourceRoot = realpathSync(resolve(skill.sourceRoot));
-    if (!isPathInside(sourcePath, sourceRoot)) {
+    const expectedPath = realpathSync(join(sourceRoot, "SKILL.md"));
+    if (sourcePath !== expectedPath) {
       throw new Error(`Unexpected provenance for ${skill.command}: ${sourcePath}`);
+    }
+    if (command.sourceInfo.scope !== "temporary" || command.sourceInfo.origin !== "top-level") {
+      throw new Error(`Unexpected provenance metadata for ${skill.command}`);
     }
     attested.set(skill.command, command);
   }

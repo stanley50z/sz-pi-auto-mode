@@ -94,9 +94,10 @@ if (!cwd) throw new Error("Missing caller repository path");
 const normalAgentDir = process.argv[3] || undefined;
 const terminalInput = process.env.AUTOMODE_HANDOFF_INPUT === "1" ? await waitForTerminalLine() : undefined;
 const fixtureRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../skills");
+const fixtureSkillRoots = ["canonical-one", "canonical-two"].map((name) => join(fixtureRoot, name));
 const result = await createMainSession({
   cwd,
-  skillPaths: [fixtureRoot],
+  skillPaths: fixtureSkillRoots,
   systemPrompt: "Automode process-handoff proof. Do not access an issue tracker.",
   model: getBuiltinModel("anthropic", "claude-sonnet-4-5"),
   normalAgentDir,

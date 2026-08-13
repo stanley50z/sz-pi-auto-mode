@@ -4,7 +4,8 @@ This repository is an early-stage Pi extension centered on **Automode**, a disti
 
 - the product launches from **`/automode` inside normal Pi**
 - `pi automode` is obsolete in the agent guidance
-- Automode runs with a fixed, confirmed stage configuration and a repository-scoped Main Session / Ticket Session split
+- Automode uses an immutable stage configuration, a confirmed handoff digest, and a repository-scoped Main Session / Ticket Session split
+- startup fails closed until repository access, capability profile attestation, canonical skill provenance, and the repository Coordinator lock all validate
 - the MVP is organized into four Automation Stages: Auto-Triage, Auto-Grilling, Auto-Implement, and Auto-Review
 - Personal-WeChat integration is planned separately from the Automode MVP
 
@@ -13,6 +14,7 @@ Start here, then follow the section pages below for the small set of concepts th
 ## What this wiki covers
 
 - the product shape and why the repo exists
+- the TypeScript application surfaces that implement Automode
 - the Automode architecture boundary and stage model
 - the launch and workflow surface described by the source docs
 - the repository's operating conventions for issue tracking and local OpenWiki updates
@@ -40,4 +42,4 @@ Start here, then follow the section pages below for the small set of concepts th
 
 ## Notes for future updates
 
-There is still no application code, so the wiki intentionally stays high-level. The root `CONTEXT.md` captures the current Automode vocabulary. When implementation files appear, the first follow-up should be a tighter architecture page and a source map for entrypoints, packages, and tests.
+The repository now has TypeScript application code for startup validation, capability profiles and sessions, controlled services, and repository coordinator locking, so the wiki should point readers to those implementation surfaces. `src/paths.ts` owns the repository-scoped `AutomodePaths.capabilityProfileFile` path, which is persisted only after startup validation and capability attestation succeed. The root `CONTEXT.md` still captures the current Automode vocabulary, but implementation files are now part of the source evidence.
