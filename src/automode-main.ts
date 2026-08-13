@@ -26,21 +26,17 @@ export interface StartedAutomodeMainSession {
   sessionName: string;
   sessionFile: string | undefined;
   configurationFile: string;
-  tryNewSession(): Promise<{ cancelled: boolean }>;
-  tryFork(): Promise<{ cancelled: boolean; selectedText?: string }>;
   runInteractive(): Promise<void>;
   dispose(): void;
 }
 
-function immutableConfigurationExtension(): InlineExtension {
-  return {
-    name: "automode-immutable-configuration",
-    factory: (pi) => {
-      pi.on("session_before_switch", () => ({ cancel: true }));
-      pi.on("session_before_fork", () => ({ cancel: true }));
-    },
-  };
-}
+export const automodeRunConfigurationGuard = {
+  name: "automode-immutable-configuration",
+  factory: (pi) => {
+    pi.on("session_before_switch", () => ({ cancel: true }));
+    pi.on("session_before_fork", () => ({ cancel: true }));
+  },
+} satisfies InlineExtension;
 
 function persistAutomationStageConfiguration(
   repository: string,
@@ -87,7 +83,7 @@ export async function startAutomodeMainSession(
     systemPrompt: "You are the Automode Main Session. The Coordinator is not implemented in this launch ticket; remain idle.",
     home: options.home,
     normalAgentDir: options.normalAgentDir,
-    extensions: [immutableConfigurationExtension()],
+    extensions: [automodeRunConfigurationGuard],
   });
   runtime.session.setSessionName(sessionName);
   runtime.session.sessionManager.appendCustomEntry("automode.stage-configuration", configuration);
@@ -97,8 +93,6 @@ export async function startAutomodeMainSession(
     sessionName,
     sessionFile: runtime.session.sessionFile,
     configurationFile,
-    tryNewSession: () => runtime.newSession(),
-    tryFork: () => runtime.fork(runtime.session.sessionManager.getLeafId()!),
     runInteractive: async () => {
       const interactiveMode = new InteractiveMode(runtime, {
         initialMessages: [],

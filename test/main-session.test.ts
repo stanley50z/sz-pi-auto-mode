@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { startAutomodeMainSession } from "../src/automode-main.js";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { automodeRunConfigurationGuard, startAutomodeMainSession } from "../src/automode-main.js";
 import {
   confirmSerializedAutomationStageConfiguration,
   createAutomationStageConfiguration,
@@ -22,6 +23,19 @@ function confirmedConfiguration(
     configurationConfirmation: confirmSerializedAutomationStageConfiguration(serializedConfiguration),
   };
 }
+
+test("the Automode Run guard cancels Main Session replacement and forking", async () => {
+  const handlers = new Map<string, () => unknown>();
+  const pi = {
+    on(event: string, handler: () => unknown) {
+      handlers.set(event, handler);
+    },
+  } as unknown as ExtensionAPI;
+  await automodeRunConfigurationGuard.factory(pi);
+
+  assert.deepEqual(await handlers.get("session_before_switch")!(), { cancel: true });
+  assert.deepEqual(await handlers.get("session_before_fork")!(), { cancel: true });
+});
 
 test("a fresh Main Session starts in the caller repository and durably records the fixed configuration", async () => {
   const fixture = mkdtempSync(join(tmpdir(), "automode-main-"));
@@ -48,8 +62,6 @@ test("a fresh Main Session starts in the caller repository and durably records t
       mode: "half",
       stages: ["auto-triage", "auto-review"],
     });
-    assert.deepEqual(await main.tryNewSession(), { cancelled: true });
-    assert.deepEqual(await main.tryFork(), { cancelled: true });
   } finally {
     main.dispose();
   }
