@@ -20,6 +20,10 @@ _Avoid_: Global skill discovery, inherited Pi setup, general configuration schem
 One independently configurable part of the repository workflow: Auto-Triage, Auto-Grilling, Auto-Implement, or Auto-Review. A stage's setting is fixed for an Automode Run; enabled stages are handled automatically and disabled stages remain human-controlled.
 _Avoid_: Sub-mode, workflow phase
 
+**Automation Stage Configuration**:
+The immutable Full-Auto or Half-Auto selection of enabled Automation Stages confirmed when an Automode Run launches. It is serialized across the Automode Bridge process boundary and remains fixed for that run.
+_Avoid_: Stage profile, Automode Capability Profile
+
 **Auto-Triage**:
 The Automation Stage that discovers and processes tracker items marked `needs-triage`.
 _Avoid_: Issue intake mode
