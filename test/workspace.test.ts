@@ -1,0 +1,355 @@
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import test from "node:test";
+import {
+  processWorkspaceCommandRunner,
+  WorkspaceManager,
+  type WorkspaceCommandRunner,
+} from "../src/workspace.js";
+
+const COMMAND_TIMEOUT_MS = 10_000;
+
+function git(cwd: string, ...args: string[]): string {
+  return execFileSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    timeout: COMMAND_TIMEOUT_MS,
+    windowsHide: true,
+  }).trim();
+}
+
+interface RepositoryFixture {
+  readonly root: string;
+  readonly seed: string;
+  readonly repository: string;
+  commitAndPush(contents: string): string;
+  dispose(): void;
+}
+
+function createRepositoryFixture(): RepositoryFixture {
+  const root = mkdtempSync(join(tmpdir(), "automode-workspace-"));
+  const remote = join(root, "origin.git");
+  const seed = join(root, "seed");
+  const repository = join(root, "repository");
+  git(root, "init", "--bare", remote);
+  git(root, "init", "-b", "main", seed);
+  git(seed, "config", "user.name", "Workspace Test");
+  git(seed, "config", "user.email", "workspace@example.test");
+  writeFileSync(join(seed, "fixture.txt"), "initial\n", "utf8");
+  git(seed, "add", "fixture.txt");
+  git(seed, "commit", "-m", "initial");
+  git(seed, "remote", "add", "origin", remote);
+  git(seed, "push", "-u", "origin", "main");
+  git(remote, "symbolic-ref", "HEAD", "refs/heads/main");
+  git(root, "clone", remote, repository);
+  git(repository, "config", "user.name", "Workspace Test");
+  git(repository, "config", "user.email", "workspace@example.test");
+
+  return {
+    root,
+    seed,
+    repository,
+    commitAndPush(contents) {
+      writeFileSync(join(seed, "fixture.txt"), contents, "utf8");
+      git(seed, "add", "fixture.txt");
+      git(seed, "commit", "-m", `fixture ${contents.trim()}`);
+      git(seed, "push", "origin", "main");
+      return git(seed, "rev-parse", "HEAD");
+    },
+    dispose() {
+      rmSync(root, { recursive: true, force: true });
+    },
+  };
+}
+
+test("a production issue gets a deterministic isolated worktree from the freshly fetched origin default", async () => {
+  const fixture = createRepositoryFixture();
+  try {
+    const expectedHead = fixture.commitAndPush("fresh default\n");
+    const manager = new WorkspaceManager({ repositoryRoot: fixture.repository });
+
+    const workspace = await manager.prepareProductionIssue(40);
+
+    assert.deepEqual(workspace, {
+      branch: "automode/issue-40",
+      worktree: join(fixture.repository, ".worktree", "issue-40"),
+    });
+    assert.equal(existsSync(workspace.worktree), true);
+    assert.equal(git(workspace.worktree, "rev-parse", "HEAD"), expectedHead);
+    assert.equal(git(workspace.worktree, "branch", "--show-current"), "automode/issue-40");
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test("preparing an existing issue resumes its branch and worktree without resetting progress", async () => {
+  const fixture = createRepositoryFixture();
+  try {
+    const manager = new WorkspaceManager({ repositoryRoot: fixture.repository });
+    const first = await manager.prepareProductionIssue(41);
+    writeFileSync(join(first.worktree, "progress.txt"), "preserve me\n", "utf8");
+    git(first.worktree, "add", "progress.txt");
+    git(first.worktree, "commit", "-m", "work in progress");
+    const progressHead = git(first.worktree, "rev-parse", "HEAD");
+    fixture.commitAndPush("newer default\n");
+
+    const resumed = await manager.prepareProductionIssue(41);
+
+    assert.deepEqual(resumed, first);
+    assert.equal(git(resumed.worktree, "rev-parse", "HEAD"), progressHead);
+    assert.equal(existsSync(join(resumed.worktree, "progress.txt")), true);
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test("a missing worktree is recreated from its surviving issue branch", async () => {
+  const fixture = createRepositoryFixture();
+  try {
+    const manager = new WorkspaceManager({ repositoryRoot: fixture.repository });
+    const first = await manager.prepareProductionIssue(42);
+    writeFileSync(join(first.worktree, "surviving.txt"), "branch evidence\n", "utf8");
+    git(first.worktree, "add", "surviving.txt");
+    git(first.worktree, "commit", "-m", "surviving branch");
+    const survivingHead = git(first.worktree, "rev-parse", "HEAD");
+    rmSync(first.worktree, { recursive: true, force: true });
+
+    const recreated = await manager.prepareProductionIssue(42);
+
+    assert.deepEqual(recreated, first);
+    assert.equal(git(recreated.worktree, "rev-parse", "HEAD"), survivingHead);
+    assert.equal(existsSync(join(recreated.worktree, "surviving.txt")), true);
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test("prototype and production work for one issue use permanently distinct deterministic identities", async () => {
+  const fixture = createRepositoryFixture();
+  try {
+    const manager = new WorkspaceManager({ repositoryRoot: fixture.repository });
+
+    const prototype = await manager.preparePrototypeIssue(43);
+    const production = await manager.prepareProductionIssue(43);
+
+    assert.deepEqual(prototype, {
+      branch: "automode/prototype-43",
+      worktree: join(fixture.repository, ".worktree", "prototype-43"),
+    });
+    assert.deepEqual(production, {
+      branch: "automode/issue-43",
+      worktree: join(fixture.repository, ".worktree", "issue-43"),
+    });
+    assert.notEqual(prototype.branch, production.branch);
+    assert.notEqual(prototype.worktree, production.worktree);
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test("Coordinator review preparation fails fast for a fork head without a writable remote", async () => {
+  const manager = new WorkspaceManager({
+    repositoryRoot: resolve(tmpdir()),
+    repositorySlug: "owner/repository",
+    runner: { async run() { throw new Error("must not execute Git"); } },
+  });
+
+  await assert.rejects(
+    () => manager.prepare({
+      item: {
+        kind: "pull-request",
+        number: 440,
+        url: "https://github.com/owner/repository/pull/440",
+        state: "open",
+        labels: [],
+        assignees: [],
+        blockedBy: 0,
+        draft: false,
+        merged: false,
+        headSha: "0123456789abcdef0123456789abcdef01234567",
+        headBranch: "feature",
+        headRepository: "fork-owner/repository",
+        updatedAt: "2026-01-01T00:00:00Z",
+        materialVersion: "fork-pr",
+      },
+      skillName: "code-review",
+    }),
+    /fork head.*no writable head remote/i,
+  );
+});
+
+test("review preparation creates a writable isolated worktree at the exact advertised pull-request head", async () => {
+  const fixture = createRepositoryFixture();
+  try {
+    const headSha = fixture.commitAndPush("pull request head\n");
+    git(fixture.seed, "push", "origin", `HEAD:refs/heads/contributor/pr-44`);
+    git(fixture.seed, "push", "origin", `HEAD:refs/pull/44/head`);
+    const manager = new WorkspaceManager({ repositoryRoot: fixture.repository });
+
+    const workspace = await manager.prepareReview({
+      pullRequestNumber: 44,
+      headSha,
+      headBranch: "contributor/pr-44",
+      pushRemote: "origin",
+    });
+
+    assert.deepEqual(workspace, {
+      branch: "automode/review-pr-44",
+      worktree: join(fixture.repository, ".worktree", "review-pr-44"),
+    });
+    assert.equal(git(workspace.worktree, "rev-parse", "HEAD"), headSha);
+    assert.equal(git(workspace.worktree, "branch", "--show-current"), "automode/review-pr-44");
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test("review preparation fails before checkout when the fetched pull-request head is not exact", async () => {
+  const fixture = createRepositoryFixture();
+  try {
+    fixture.commitAndPush("actual pull request head\n");
+    git(fixture.seed, "push", "origin", `HEAD:refs/pull/45/head`);
+    const manager = new WorkspaceManager({ repositoryRoot: fixture.repository });
+
+    await assert.rejects(
+      () => manager.prepareReview({
+        pullRequestNumber: 45,
+        headSha: "0000000000000000000000000000000000000000",
+        headBranch: "contributor/pr-45",
+        pushRemote: "origin",
+      }),
+      /did not match expected/,
+    );
+    assert.equal(existsSync(join(fixture.repository, ".worktree", "review-pr-45")), false);
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test("review preparation fails explicitly and preserves evidence when fixes cannot be pushed", async () => {
+  const fixture = createRepositoryFixture();
+  try {
+    const headSha = fixture.commitAndPush("unwritable pull request head\n");
+    git(fixture.seed, "push", "origin", `HEAD:refs/heads/contributor/pr-46`);
+    git(fixture.seed, "push", "origin", `HEAD:refs/pull/46/head`);
+    const runner: WorkspaceCommandRunner = {
+      run(command, args, cwd) {
+        if (command === "git" && args[0] === "push" && args.includes("--dry-run")) {
+          throw new Error("remote rejected write access");
+        }
+        return processWorkspaceCommandRunner.run(command, args, cwd);
+      },
+    };
+    const manager = new WorkspaceManager({ repositoryRoot: fixture.repository, runner });
+
+    await assert.rejects(
+      () => manager.prepareReview({
+        pullRequestNumber: 46,
+        headSha,
+        headBranch: "contributor/pr-46",
+        pushRemote: "origin",
+      }),
+      /cannot push fixes/,
+    );
+    assert.equal(existsSync(join(fixture.repository, ".worktree", "review-pr-46")), true);
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test("review preparation reuses the exact recorded production worktree", async () => {
+  const fixture = createRepositoryFixture();
+  try {
+    const manager = new WorkspaceManager({ repositoryRoot: fixture.repository });
+    const production = await manager.prepareProductionIssue(47);
+    const headSha = git(production.worktree, "rev-parse", "HEAD");
+    git(production.worktree, "push", "origin", `HEAD:refs/heads/contributor/pr-47`);
+    git(production.worktree, "push", "origin", `HEAD:refs/pull/47/head`);
+
+    const review = await manager.prepareReview({
+      pullRequestNumber: 47,
+      headSha,
+      headBranch: "contributor/pr-47",
+      pushRemote: "origin",
+      existingWorkspace: production,
+    });
+
+    assert.deepEqual(review, production);
+    assert.equal(existsSync(join(fixture.repository, ".worktree", "review-pr-47")), false);
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test("cleanup is rejected before a successful merge and preserves every artifact", async () => {
+  const fixture = createRepositoryFixture();
+  try {
+    const manager = new WorkspaceManager({ repositoryRoot: fixture.repository });
+    const workspace = await manager.prepareProductionIssue(48);
+
+    await assert.rejects(
+      () => manager.cleanupAfterSuccessfulMerge({
+        mergeSucceeded: false,
+        workspace,
+        headRemote: "origin",
+        headBranch: "automode/issue-48",
+        sameRepository: true,
+      }),
+      /successful merge/,
+    );
+    assert.equal(existsSync(workspace.worktree), true);
+    assert.equal(git(fixture.repository, "show-ref", "--verify", "refs/heads/automode/issue-48").length > 0, true);
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test("successful-merge cleanup removes same-repository artifacts and is idempotent", async () => {
+  const fixture = createRepositoryFixture();
+  try {
+    const manager = new WorkspaceManager({ repositoryRoot: fixture.repository });
+    const workspace = await manager.prepareProductionIssue(49);
+    git(workspace.worktree, "push", "origin", `HEAD:refs/heads/${workspace.branch}`);
+    const cleanup = {
+      mergeSucceeded: true,
+      workspace,
+      headRemote: "origin",
+      headBranch: workspace.branch,
+      sameRepository: true,
+    } as const;
+
+    await manager.cleanupAfterSuccessfulMerge(cleanup);
+    await manager.cleanupAfterSuccessfulMerge(cleanup);
+
+    assert.equal(existsSync(workspace.worktree), false);
+    assert.equal(git(fixture.repository, "for-each-ref", "--format=%(refname)", `refs/heads/${workspace.branch}`), "");
+    assert.equal(git(fixture.repository, "ls-remote", "--heads", "origin", `refs/heads/${workspace.branch}`), "");
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test("successful-merge cleanup never deletes a fork head branch", async () => {
+  const fixture = createRepositoryFixture();
+  try {
+    const manager = new WorkspaceManager({ repositoryRoot: fixture.repository });
+    const workspace = await manager.prepareProductionIssue(50);
+    git(workspace.worktree, "push", "origin", "HEAD:refs/heads/fork-owner/pr-50");
+
+    await manager.cleanupAfterSuccessfulMerge({
+      mergeSucceeded: true,
+      workspace,
+      headRemote: "origin",
+      headBranch: "fork-owner/pr-50",
+      sameRepository: false,
+    });
+
+    assert.equal(existsSync(workspace.worktree), false);
+    assert.notEqual(git(fixture.repository, "ls-remote", "--heads", "origin", "refs/heads/fork-owner/pr-50"), "");
+  } finally {
+    fixture.dispose();
+  }
+});

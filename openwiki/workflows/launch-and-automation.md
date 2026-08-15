@@ -28,10 +28,11 @@ flowchart LR
   H --> V[Fail-closed startup validation]
   V --> A[Capability Attestation Session]
   A --> M[Guarded Main Session]
-  M --> T[Ticket Sessions]
+  M --> C[Automode Coordinator boundary]
+  C --> T[Independent Ticket Sessions]
 ```
 
-*The launch handoff preserves the selected configuration while separating coordination from ticket work.*
+*The launch handoff preserves the selected configuration; the Main Session starts the Coordinator, which dispatches independent Ticket Sessions after startup succeeds.*
 
 
 The agent guidance and product README both say the entrypoint is:
@@ -54,9 +55,9 @@ The selector starts in Full-Auto, allows mode switching with `Tab`, stage focus 
 
 ## Startup ordering and change safety
 
-The child calls `startAutomodeMainSession`, which validates repository identity, GitHub origin/authentication/access, stage-dependent permission (`TRIAGE` for read-oriented stages and `WRITE` when implement or review is enabled), and required Pi/Claude Code execution profiles before acquiring the Coordinator or persisting the run record. Claude Code profiles are additionally checked by `attestClaudeCodeExecutionProfile`, which requires authentication and probes the exact configured model and reasoning level with no tools or session persistence; a reported probe error fails closed. The capability and Coordinator details are canonical on the [architecture overview](../architecture/overview.md) and [capability boundary](../architecture/capability-boundary.md).
+The child calls `startAutomodeMainSession`, which validates repository identity, GitHub origin/authentication/access, resolves and validates the authenticated GitHub actor, applies stage-dependent permission (`TRIAGE` for read-oriented stages and `WRITE` when implement or review is enabled), and checks required Pi/Claude Code execution profiles before acquiring the Coordinator or persisting the run record. Claude Code profiles are additionally checked by `attestClaudeCodeExecutionProfile`, which requires authentication and probes the exact configured model and reasoning level with no tools or session persistence; a reported probe error fails closed. The capability and Coordinator details are canonical on the [architecture overview](../architecture/overview.md) and [capability boundary](../architecture/capability-boundary.md).
 
-For launch changes, update bridge/selector serialization and child parsing together; focused tests cover cancellation, keyboard selection, digest tampering, environment tampering, and fresh-process ownership. `npm run prove:handoff` is conditional and required when terminal ownership or child handoff behavior changes.
+For launch changes, update bridge/selector serialization and child parsing together; focused tests cover cancellation, keyboard selection, digest tampering, environment tampering, and fresh-process ownership. Coordinator shutdown is two-phase: the first interrupt drains while preserving the repository lock, and the second forces active Ticket Sessions; disposal waits for Coordinator stop before releasing that lock. `npm run prove:handoff` is conditional and required when terminal ownership or child handoff behavior changes.
 
 ## Local documentation refresh
 

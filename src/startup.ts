@@ -31,6 +31,7 @@ export interface ValidatedAutomodeStartup {
   readonly repository: string;
   readonly repositoryId: string;
   readonly repositorySlug: string;
+  readonly actor: string;
 }
 
 export const processStartupCommandRunner: StartupCommandRunner = {
@@ -228,6 +229,13 @@ export async function validateAutomodeStartup(
   if (typeof viewed.viewerPermission !== "string" || !hasGitHubPermission(viewed.viewerPermission, permission)) {
     throw new Error(`GitHub repository access failed: Automode requires ${permission} permission`);
   }
+  const actor = (await withStartupErrorContext(
+    "GitHub authenticated identity failed",
+    () => runner.run("gh", ["api", "user", "--jq", ".login"], repository),
+  )).trim();
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/.test(actor)) {
+    throw new Error("GitHub authenticated identity failed: gh returned an invalid login");
+  }
 
   const profiles = requiredExecutionProfiles(options.configuration);
   try {
@@ -242,5 +250,6 @@ export async function validateAutomodeStartup(
     repository,
     repositoryId: viewed.id,
     repositorySlug: viewed.nameWithOwner,
+    actor,
   };
 }

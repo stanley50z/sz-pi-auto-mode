@@ -1,0 +1,181 @@
+import { spawn } from "node:child_process";
+import { resolve } from "node:path";
+import type {
+  PanelProcessResult,
+  PanelSeatLaunchRequest,
+  ProductionPanelProcessLauncher,
+} from "./panel-runtime.js";
+
+const MAX_PANEL_OUTPUT_BYTES = 10 * 1024 * 1024;
+const ALLOWED_PI_TOOLS = new Set(["read", "grep", "find", "ls"]);
+
+export interface PanelCommandRunner {
+  run(
+    command: string,
+    args: readonly string[],
+    cwd: string,
+    env: NodeJS.ProcessEnv,
+  ): Promise<PanelProcessResult>;
+}
+
+export const processPanelCommandRunner: PanelCommandRunner = {
+  run(command, args, cwd, env) {
+    return new Promise((resolveResult, rejectResult) => {
+      const child = spawn(command, [...args], {
+        cwd,
+        env,
+        shell: false,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      const stdout: Buffer[] = [];
+      const stderr: Buffer[] = [];
+      let outputBytes = 0;
+      const collect = (target: Buffer[], chunk: Buffer): void => {
+        outputBytes += chunk.length;
+        if (outputBytes > MAX_PANEL_OUTPUT_BYTES) {
+          child.kill("SIGKILL");
+          rejectResult(new Error(`Panel seat output exceeded ${MAX_PANEL_OUTPUT_BYTES} bytes`));
+          return;
+        }
+        target.push(chunk);
+      };
+      child.stdout.on("data", (chunk: Buffer) => collect(stdout, chunk));
+      child.stderr.on("data", (chunk: Buffer) => collect(stderr, chunk));
+      child.on("error", rejectResult);
+      child.on("exit", (exitCode, signal) => resolveResult({
+        exitCode,
+        signal,
+        stdout: Buffer.concat(stdout).toString("utf8"),
+        stderr: Buffer.concat(stderr).toString("utf8"),
+      }));
+    });
+  },
+};
+
+export interface CliPanelProcessLauncherOptions {
+  readonly cwd: string;
+  readonly normalAgentDir: string;
+  readonly runner?: PanelCommandRunner;
+  readonly env?: NodeJS.ProcessEnv;
+}
+
+function parseStructuredText(text: string, context: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) throw new Error(`${context} returned no structured answer`);
+  let value: unknown;
+  try {
+    value = JSON.parse(trimmed) as unknown;
+  } catch (error) {
+    throw new Error(`${context} returned invalid JSON`, { cause: error });
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${context} structured answer must be an object`);
+  }
+  return JSON.stringify(value);
+}
+
+function normalizePiOutput(output: string): string {
+  let finalText: string | undefined;
+  for (const line of output.split("\n")) {
+    if (line.trim().length === 0) continue;
+    let event: unknown;
+    try {
+      event = JSON.parse(line) as unknown;
+    } catch (error) {
+      throw new Error("Pi Panel seat emitted invalid JSONL", { cause: error });
+    }
+    if (!event || typeof event !== "object" || Array.isArray(event)) continue;
+    const record = event as { type?: unknown; message?: unknown };
+    if (record.type !== "message_end" || !record.message || typeof record.message !== "object") continue;
+    const message = record.message as { role?: unknown; content?: unknown };
+    if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
+    const text = message.content
+      .filter((part): part is { type: "text"; text: string } => (
+        !!part && typeof part === "object" && (part as { type?: unknown }).type === "text"
+        && typeof (part as { text?: unknown }).text === "string"
+      ))
+      .map((part) => part.text)
+      .join("");
+    if (text.length > 0) finalText = text;
+  }
+  if (finalText === undefined) throw new Error("Pi Panel seat did not emit a final assistant answer");
+  return parseStructuredText(finalText, "Pi Panel seat");
+}
+
+function normalizeClaudeOutput(output: string): string {
+  let envelope: unknown;
+  try {
+    envelope = JSON.parse(output.trim()) as unknown;
+  } catch (error) {
+    throw new Error("Claude Code Panel seat emitted invalid JSON", { cause: error });
+  }
+  const records = Array.isArray(envelope) ? envelope : [envelope];
+  const result = [...records].reverse().find((entry) => (
+    !!entry && typeof entry === "object" && typeof (entry as { result?: unknown }).result === "string"
+  )) as { result: string; is_error?: unknown } | undefined;
+  if (!result) throw new Error("Claude Code Panel seat did not emit a structured result");
+  if (result.is_error === true) throw new Error("Claude Code Panel seat reported an error");
+  return parseStructuredText(result.result, "Claude Code Panel seat");
+}
+
+function assertTools(tools: readonly string[]): void {
+  if (tools.length === 0 || tools.some((tool) => !ALLOWED_PI_TOOLS.has(tool))) {
+    throw new Error("Panel seat requested capabilities outside the controlled advisory tool set");
+  }
+}
+
+export class CliPanelProcessLauncher implements ProductionPanelProcessLauncher {
+  readonly #cwd: string;
+  readonly #normalAgentDir: string;
+  readonly #runner: PanelCommandRunner;
+  readonly #env: NodeJS.ProcessEnv;
+
+  constructor(options: CliPanelProcessLauncherOptions) {
+    this.#cwd = resolve(options.cwd);
+    this.#normalAgentDir = resolve(options.normalAgentDir);
+    this.#runner = options.runner ?? processPanelCommandRunner;
+    this.#env = { ...(options.env ?? process.env), PI_CODING_AGENT_DIR: this.#normalAgentDir };
+  }
+
+  async launch(request: PanelSeatLaunchRequest): Promise<PanelProcessResult> {
+    assertTools(request.tools);
+    if (request.attribution.harness === "pi") {
+      const result = await this.#runner.run("pi", [
+        "--mode", "json",
+        "-p",
+        "--no-session",
+        "--no-extensions",
+        "--no-skills",
+        "--no-prompt-templates",
+        "--no-themes",
+        "--no-context-files",
+        "--provider", request.attribution.providerSlug,
+        "--model", request.attribution.modelSlug,
+        "--thinking", request.attribution.reasoningLevel,
+        "--tools", request.tools.join(","),
+        request.prompt,
+      ], this.#cwd, this.#env);
+      if (result.exitCode !== 0 || result.signal !== null) return result;
+      return { ...result, stdout: normalizePiOutput(result.stdout) };
+    }
+
+    const claudeTools = [...new Set(request.tools.map((tool) => {
+      if (tool === "read") return "Read";
+      if (tool === "grep") return "Grep";
+      return "Glob";
+    }))];
+    const result = await this.#runner.run("claude", [
+      "--safe-mode",
+      "--model", request.attribution.modelSlug,
+      "--effort", request.attribution.reasoningLevel,
+      "--print",
+      "--output-format", "json",
+      "--tools", claudeTools.join(","),
+      "--no-session-persistence",
+      request.prompt,
+    ], this.#cwd, this.#env);
+    if (result.exitCode !== 0 || result.signal !== null) return result;
+    return { ...result, stdout: normalizeClaudeOutput(result.stdout) };
+  }
+}

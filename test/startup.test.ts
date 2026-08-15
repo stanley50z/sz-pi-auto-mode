@@ -27,6 +27,7 @@ class RecordedRunner implements StartupCommandRunner {
     if (command === "git" && args[0] === "rev-parse") return `${cwd}\n`;
     if (command === "git" && args[0] === "remote") return "https://github.com/owner/repository.git\n";
     if (command === "gh" && args[0] === "auth") return "github.com\n";
+    if (command === "gh" && args[0] === "api") return "automation-user\n";
     if (command === "gh" && args[0] === "repo") {
       return JSON.stringify({
         id: "repository-id",
@@ -56,11 +57,13 @@ test("startup verifies the GitHub repository and every required execution profil
   assert.equal(result.repository, repository);
   assert.equal(result.repositoryId, "repository-id");
   assert.equal(result.repositorySlug, "owner/repository");
+  assert.equal(result.actor, "automation-user");
   assert.deepEqual(runner.calls, [
     { command: "git", args: ["rev-parse", "--show-toplevel"], cwd: repository },
     { command: "git", args: ["remote", "get-url", "origin"], cwd: repository },
     { command: "gh", args: ["auth", "status", "--hostname", "github.com"], cwd: repository },
     { command: "gh", args: ["repo", "view", "--json", "id,nameWithOwner,url,viewerPermission"], cwd: repository },
+    { command: "gh", args: ["api", "user", "--jq", ".login"], cwd: repository },
   ]);
   assert.deepEqual(attested, [createAutomodeCapabilityProfile(half).ordinaryTicketExecution]);
 });

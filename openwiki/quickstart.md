@@ -16,12 +16,15 @@ This repository is an early-stage Pi extension centered on **Automode**, a disti
 
 - the product launches from **`/automode` inside normal Pi**
 - `pi automode` is obsolete in the agent guidance
-- Automode uses an immutable stage configuration, a confirmed handoff digest, and a repository-scoped Main Session / Ticket Session split
+- Automode uses an immutable stage configuration, a confirmed handoff digest, and a repository-scoped Main Session / Coordinator boundary; independent full-process Ticket Sessions perform stage work
 - startup fails closed until repository access, the Automode Capability Attestation Session, canonical skill provenance, and the repository Coordinator lock all validate
 - the MVP is organized into four Automation Stages: Auto-Triage, Auto-Grilling, Auto-Implement, and Auto-Review
 - panel-enabled startup authenticates Claude Code and probes each exact configured Claude Code model/reasoning profile
 - the Automode Run Record is shared through the Git common directory, independently of Pi home/config roots
+- the Coordinator reconciles all bookkeeping states before claims, uses complete snapshots whose revisions include `updated_at`, recovers missing, cross-home, or incompatible sessions and missing worktrees, requires merged proof before Auto-Review cleanup, preserves diagnostics after the fifth failed attempt, and fails fast on unwritable fork heads
+- shutdown is two-phase: the first interrupt drains while retaining the Coordinator lock, and the second force-terminates active Ticket Sessions; disposal releases the lock only after the Coordinator stops
 - Personal-WeChat integration is planned separately from the Automode MVP
+- Auto-Grilling and Auto-Review use fixed three-seat hidden-peer Panel runtimes for advisory work
 
 Start here, then follow the section pages below for the repository's runtime seams and change-routing guidance.
 
@@ -30,11 +33,14 @@ Start here, then follow the section pages below for the repository's runtime sea
 | Change area or user intent | Relevant wiki page | Exact source entry points | Important symbols or types | Focused tests | Minimal validation command |
 |---|---|---|---|---|---|
 | Change `/automode` launch or handoff | [Launch and automation](workflows/launch-and-automation.md) | `src/bridge.ts`, `src/launch.ts`, `src/automode-main.ts` | `startAutomodeMainSession`, `parseConfirmedAutomationStageConfiguration` | `test/bridge.test.ts`, `test/stage-configuration.test.ts`, `test/process-handoff.test.ts` | `npm run build && node --test dist/test/bridge.test.js dist/test/stage-configuration.test.js dist/test/process-handoff.test.js` |
-| Change startup safety, GitHub access, or Claude Code probes | [Architecture overview](architecture/overview.md) | `src/startup.ts`, `src/automode-main.ts` | `validateAutomodeStartup`, `attestClaudeCodeExecutionProfile` | `test/startup.test.ts` | `npm run build && node --test dist/test/startup.test.js` |
+| Change startup safety, GitHub access, actor binding, or Claude Code probes | [Architecture overview](architecture/overview.md) | `src/startup.ts`, `src/automode-main.ts` | `validateAutomodeStartup`, `attestClaudeCodeExecutionProfile`, `ValidatedAutomodeStartup.actor` | `test/startup.test.ts`, `test/main-session.test.ts` | `npm run build && node --test dist/test/startup.test.js dist/test/main-session.test.js` |
 | Change skills, tools, models, or resource isolation | [Capability boundary](architecture/capability-boundary.md) | `src/capability-profile.ts`, `src/capability-session.ts`, `src/controlled-services.ts`, `src/attestation.ts` | `createAutomodeCapabilityProfile`, `createCapabilitySession`, `attestCanonicalCommands` | `test/capability-profile.test.ts`, `test/capability-session.test.ts`, `test/attestation.test.ts` | `npm run build && node --test dist/test/capability-profile.test.js dist/test/capability-session.test.js dist/test/attestation.test.js` |
 | Add or route a bundled skill | [Skill catalog](skills/catalog.md) | `skills/native/*`, `skills/automode/*`, `src/capability-profile.ts` | `STAGE_SKILLS`, `CapabilitySkill` | `test/capability-profile.test.ts`, `test/capability-session.test.ts` | `npm run build && node --test dist/test/capability-profile.test.js dist/test/capability-session.test.js` |
 | Change Coordinator/run persistence or repository paths | [Architecture overview](architecture/overview.md) | `src/coordinator-lock.ts`, `src/paths.ts`, `src/automode-main.ts` | `acquireRepositoryCoordinator`, `persistAutomodeRunRecord`, `AutomodePaths.runRecordFile` | `test/coordinator-lock.test.ts`, `test/main-session.test.ts`, `test/paths.test.ts` | `npm run build && node --test dist/test/coordinator-lock.test.js dist/test/main-session.test.js dist/test/paths.test.js` |
+| Change work discovery, Ticket Sessions, GitHub bookkeeping, or worktrees | [Coordinator and Ticket Sessions](architecture/coordinator.md) | `src/coordinator.ts`, `src/ticket-session.ts`, `src/github-tracker.ts`, `src/workspace.ts` | `AutomodeCoordinator`, `AutomodeTicketSessionHost`, `GitHubTracker`, `WorkspaceManager` | `test/coordinator.test.ts`, `test/ticket-session.test.ts`, `test/ticket-session-result.test.ts`, `test/github-tracker.test.ts`, `test/workspace.test.ts` | `npm run build && node --test dist/test/coordinator.test.js dist/test/ticket-session.test.js dist/test/github-tracker.test.js dist/test/workspace.test.js` |
 | Change `/fast` or provider request behavior | [Fast mode](integrations/fast-mode.md) | `src/fast-mode.ts`, `src/controlled-services.ts` | `createAutomodeFastModeExtension` | `test/capability-session.test.ts`, `test/real-pi-smoke.test.ts` | `npm run build && node --test dist/test/capability-session.test.js dist/test/real-pi-smoke.test.js` |
+| Change local OpenWiki refresh or repository operating guidance | [Operations](operations.md) | `README.md`, `AGENTS.md`, `CLAUDE.md`, `package.json` | `OPENWIKI_PROVIDER=openai-chatgpt openwiki code --update --print` | none; documentation-only | no source validation; run the local OpenWiki command when regenerating |
+| Change Panel seats, hidden-peer execution, or review/grilling advisory tools | [Panel runtime](architecture/panels.md) | `src/panel-runtime.ts`, `src/panel-process.ts`, `src/ticket-panel-extension.ts` | `runGrillingPanel`, `runReviewPanel`, `CliPanelProcessLauncher`, `createTicketPanelExtension` | `test/panel-runtime.test.ts`, `test/panel-process.test.ts`, `test/ticket-panel-extension.test.ts` | `npm run build && node --test dist/test/panel-runtime.test.js dist/test/panel-process.test.js dist/test/ticket-panel-extension.test.js` |
 
 ## What this wiki covers
 
@@ -47,8 +53,10 @@ Start here, then follow the section pages below for the repository's runtime sea
 ## Major sections
 
 - [Architecture overview](architecture/overview.md)
+- [Coordinator and Ticket Sessions](architecture/coordinator.md)
 - [Launch and automation](workflows/launch-and-automation.md)
 - [Capability boundary](architecture/capability-boundary.md)
+- [Review Panel and controlled advisory seats](architecture/panels.md)
 - [Bundled skill catalog](skills/catalog.md)
 - [Fast mode integration](integrations/fast-mode.md)
 - [Personal WeChat integration](integrations/wechat.md)
@@ -70,9 +78,8 @@ Start here, then follow the section pages below for the repository's runtime sea
 
 ## Backlog
 
-- Work-queue discovery, ticket claiming, and Ticket Session recovery remain undocumented because the current implementation stops at the Main Session boundary (`src/automode-main.ts`); do not infer those workflows from the attestation session.
 - Personal-WeChat transport remains planned without implementation evidence (`README.md`); see [Personal WeChat](integrations/wechat.md).
 
 ## Notes for future updates
 
-The repository has TypeScript application code for startup validation, capability profiles and the Automode Capability Attestation Session, controlled services, fast mode, and repository Coordinator locking. Keep the durable persisted concept named the Automode Run Record; the capability profile is the allowlist used during session construction. The root `CONTEXT.md` remains the canonical vocabulary source.
+The repository has TypeScript application code for startup validation, capability profiles and the Automode Capability Attestation Session, controlled services, fast mode, repository Coordinator locking, GitHub tracking, Ticket Sessions, isolated workspaces, and the three-seat Panel runtime. Keep the durable persisted concept named the Automode Run Record; the capability profile is the allowlist used during session construction. The root `CONTEXT.md` remains the canonical vocabulary source.

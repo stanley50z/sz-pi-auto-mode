@@ -14,7 +14,7 @@ openwiki:
 
 # Bundled Automode and native skills
 
-The repository packages two skill trees. `skills/native` contains the baseline guidance available to the controlled profile; `skills/automode` contains stage-owned replacements used only when that stage is enabled. `src/capability-profile.ts` is the canonical registry and resolves each resource to an absolute source root so command provenance can be attested.
+The repository packages two skill trees. `skills/native` contains the baseline guidance available to the controlled profile; `skills/automode` contains stage-owned replacements used only when that stage is enabled. `src/capability-profile.ts` is the canonical registry and resolves each resource to an absolute source root so command provenance can be attested. Ticket Sessions receive one canonical `/skill:<name> <item-url>` command; the Coordinator selects the stage skill, while the child process loads the immutable capability configuration.
 
 ## Profile selection
 
@@ -27,7 +27,7 @@ The repository packages two skill trees. `skills/native` contains the baseline g
 | Auto-Implement | `prototype`, `implement`, `tdd` fallback | `prototype`, `implement`, `tdd` |
 | Auto-Review | `code-review` fallback | `code-review` |
 
-Disabled stage skills remain native rather than disappearing, while enabled stages switch ownership to the Automode tree. This selection is part of the immutable capability profile and is checked by `test/capability-profile.test.ts`.
+Disabled stage skills remain native rather than disappearing, while enabled stages switch ownership to the Automode tree. This selection is part of the immutable capability profile and is checked by `test/capability-profile.test.ts`. The Coordinator maps `auto-implement` to `prototype` when an item carries `wayfinder:prototype`, otherwise to `implement`; the remaining runtime mappings are `auto-triage` -> `triage`, `auto-grilling` -> `grilling`, and `auto-review` -> `code-review`. `createCanonicalTicketSessionPrompt` validates the skill slug and item URL before producing the child prompt.
 
 ## Change navigation
 

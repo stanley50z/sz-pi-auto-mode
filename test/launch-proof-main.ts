@@ -24,6 +24,7 @@ async function main(): Promise<void> {
           if (command === "git" && args[0] === "rev-parse") return cwd;
           if (command === "git" && args[0] === "remote") return "https://github.com/owner/repository.git";
           if (args[0] === "auth") return "github.com";
+          if (args[0] === "api") return "automation-user";
           return JSON.stringify({
             id: "repository-id",
             nameWithOwner: "owner/repository",
