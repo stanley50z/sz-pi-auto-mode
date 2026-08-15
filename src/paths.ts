@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
 
@@ -7,8 +7,8 @@ export interface AutomodePaths {
   normalAgentDir: string;
   automodeDir: string;
   sessionDir: string;
-  capabilityProfileFile: string;
   coordinatorDir: string;
+  runRecordFile: string;
 }
 
 export function repositoryRoot(cwd: string): string {
@@ -30,11 +30,11 @@ export function repositoryKey(cwd: string): string {
 export function gitCommonDirectory(cwd: string): string {
   const repository = repositoryRoot(cwd);
   const dotGit = join(repository, ".git");
-  let gitDirectory = dotGit;
+  let gitDirectory: string;
   if (!existsSync(dotGit)) throw new Error(`Git metadata is unavailable: ${dotGit}`);
-  try {
+  if (statSync(dotGit).isDirectory()) {
     gitDirectory = realpathSync(dotGit);
-  } catch {
+  } else {
     const pointer = readFileSync(dotGit, "utf8").trim().match(/^gitdir:\s*(.+)$/i)?.[1];
     if (!pointer) throw new Error(`Invalid Git metadata pointer: ${dotGit}`);
     gitDirectory = realpathSync(resolve(repository, pointer));
@@ -52,11 +52,12 @@ export function resolveAutomodePaths(
   normalAgentDir = join(home, ".pi", "agent"),
 ): AutomodePaths {
   const automodeDir = join(home, ".pi", "automode", repositoryKey(cwd));
+  const coordinatorDir = join(gitCommonDirectory(cwd), "automode");
   return {
     normalAgentDir: resolve(normalAgentDir),
     automodeDir,
     sessionDir: join(automodeDir, "sessions"),
-    capabilityProfileFile: join(automodeDir, "capability-profile.json"),
-    coordinatorDir: join(gitCommonDirectory(cwd), "automode"),
+    coordinatorDir,
+    runRecordFile: join(coordinatorDir, "automode-run.json"),
   };
 }

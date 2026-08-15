@@ -100,7 +100,7 @@ export async function createCapabilitySession(
     paths,
     skillPaths: [...profile.skills.map((skill) => skill.sourceRoot), ...projectSkillPaths],
     extensions: options.extensions,
-    systemPrompt: "You are an Automode Ticket Session. Execute only the deterministically invoked canonical stage skill.",
+    systemPrompt: "You are an Automode Capability Attestation Session. Inspect the controlled capability surface, then terminate without doing tracker work.",
   });
   const model = await resolveFixedModel(services, profile, options.model);
   const result = await createAgentSessionFromServices({

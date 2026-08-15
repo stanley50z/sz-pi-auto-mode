@@ -86,14 +86,15 @@ test("a fresh Main Session starts in the caller repository and durably records t
     });
     assert.ok(main.sessionFile);
     assert.equal(existsSync(main.sessionFile!), false);
-    assert.equal(existsSync(main.capabilityProfileFile), true);
+    assert.equal(existsSync(main.runRecordFile), true);
     assert.equal(existsSync(main.coordinatorIdentityFile), true);
     assert.equal(existsSync(main.coordinatorLockFile), true);
     assert.deepEqual(JSON.parse(readFileSync(main.coordinatorIdentityFile, "utf8")), {
       coordinatorId: main.coordinatorId,
     });
-    assert.deepEqual(JSON.parse(readFileSync(main.capabilityProfileFile, "utf8")), {
+    assert.deepEqual(JSON.parse(readFileSync(main.runRecordFile, "utf8")), {
       version: 1,
+      coordinatorId: main.coordinatorId,
       stageConfiguration: {
         mode: "half",
         stages: ["auto-triage", "auto-review"],
@@ -106,7 +107,7 @@ test("a fresh Main Session starts in the caller repository and durably records t
   assert.equal(existsSync(main.coordinatorLockFile), false);
 });
 
-test("failed startup validation does not persist a durable Automode Run profile", async () => {
+test("failed startup validation does not persist an Automode Run Record", async () => {
   const fixture = mkdtempSync(join(tmpdir(), "automode-failed-start-"));
   const repository = join(fixture, "repository");
   const home = join(fixture, "home");
@@ -129,7 +130,7 @@ test("failed startup validation does not persist a durable Automode Run profile"
     /repository validation failed/,
   );
   assert.equal(
-    existsSync(resolveAutomodePaths(repository, home).capabilityProfileFile),
+    existsSync(resolveAutomodePaths(repository, home).runRecordFile),
     false,
   );
 });
@@ -163,7 +164,46 @@ test("an Automode Run rejects changed project executable additions on restart", 
 
   await assert.rejects(
     () => startForTest({ repository, home, ...configuration }),
-    /Capability Profile is fixed for this Automode Run/,
+    /Automode Run Record is fixed for this Automode Run/,
+  );
+});
+
+test("linked worktrees share the Coordinator identity and fixed Automode Run Record", async () => {
+  const fixture = mkdtempSync(join(tmpdir(), "automode-linked-run-"));
+  const primary = join(fixture, "primary");
+  const linked = join(fixture, "linked");
+  const linkedGitDirectory = join(primary, ".git", "worktrees", "linked");
+  mkdirSync(linkedGitDirectory, { recursive: true });
+  mkdirSync(linked, { recursive: true });
+  writeFileSync(join(linked, ".git"), `gitdir: ${linkedGitDirectory}\n`);
+  writeFileSync(join(linkedGitDirectory, "commondir"), "../..\n");
+
+  const configuration = confirmedConfiguration("half", ["auto-triage"]);
+  const first = await startForTest({
+    repository: primary,
+    home: join(fixture, "first-home"),
+    ...configuration,
+  });
+  const coordinatorId = first.coordinatorId;
+  const runRecordFile = first.runRecordFile;
+  first.dispose();
+
+  const restarted = await startForTest({
+    repository: linked,
+    home: join(fixture, "second-home"),
+    ...configuration,
+  });
+  assert.equal(restarted.coordinatorId, coordinatorId);
+  assert.equal(restarted.runRecordFile, runRecordFile);
+  restarted.dispose();
+
+  await assert.rejects(
+    () => startForTest({
+      repository: linked,
+      home: join(fixture, "third-home"),
+      ...confirmedConfiguration("half", ["auto-review"]),
+    }),
+    /Automode Run Record is fixed for this Automode Run/,
   );
 });
 
@@ -191,9 +231,9 @@ test("an Automode Run rejects a different configuration on restart", async () =>
   await assert.rejects(
     () => startForTest({
       repository,
-      home,
+      home: join(fixture, "second-home"),
       ...confirmedConfiguration("half", ["auto-review"]),
     }),
-    /fixed for this Automode Run/,
+    /Automode Run Record is fixed for this Automode Run/,
   );
 });

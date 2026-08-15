@@ -43,4 +43,6 @@ test("Coordinator ownership is repository-scoped even when processes use differe
   const second = resolveAutomodePaths(repository, join(fixture, "home-two"));
   assert.notEqual(first.automodeDir, second.automodeDir);
   assert.equal(first.coordinatorDir, second.coordinatorDir);
+  assert.equal(first.runRecordFile, second.runRecordFile);
+  assert.ok(first.runRecordFile.startsWith(first.coordinatorDir));
 });

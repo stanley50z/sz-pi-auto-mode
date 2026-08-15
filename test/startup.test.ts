@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createAutomodeCapabilityProfile } from "../src/capability-profile.js";
-import { validateAutomodeStartup, type StartupCommandRunner } from "../src/startup.js";
+import {
+  attestClaudeCodeExecutionProfile,
+  validateAutomodeStartup,
+  type StartupCommandRunner,
+} from "../src/startup.js";
 import { createAutomationStageConfiguration } from "../src/stage-configuration.js";
 
 function repositoryFixture(): string {
@@ -78,6 +82,61 @@ test("panel execution profiles are startup requirements only when a panel stage 
 
   const profile = createAutomodeCapabilityProfile(configuration);
   assert.deepEqual(profiles, profile.panelExecutions);
+});
+
+test("Claude Code startup attestation executes the exact configured model and reasoning profile", async () => {
+  const repository = repositoryFixture();
+  const calls: Array<{ command: string; args: readonly string[]; cwd: string }> = [];
+  const runner: StartupCommandRunner = {
+    async run(command, args, cwd) {
+      calls.push({ command, args, cwd });
+      if (args[0] === "auth") return JSON.stringify({ loggedIn: true });
+      return JSON.stringify({ is_error: false, result: "AUTOMODE_PROFILE_READY" });
+    },
+  };
+
+  await attestClaudeCodeExecutionProfile(
+    { harness: "claude-code", model: "claude-fable-5", reasoning: "high" },
+    runner,
+    repository,
+  );
+
+  assert.deepEqual(calls, [
+    { command: "claude", args: ["auth", "status", "--json"], cwd: repository },
+    {
+      command: "claude",
+      args: [
+        "--safe-mode",
+        "--model", "claude-fable-5",
+        "--effort", "high",
+        "--print",
+        "--output-format", "json",
+        "--tools", "",
+        "--no-session-persistence",
+        "Reply exactly AUTOMODE_PROFILE_READY.",
+      ],
+      cwd: repository,
+    },
+  ]);
+});
+
+test("Claude Code startup attestation fails closed when the exact model probe reports an error", async () => {
+  const repository = repositoryFixture();
+  const runner: StartupCommandRunner = {
+    async run(_command, args) {
+      if (args[0] === "auth") return JSON.stringify({ loggedIn: true });
+      return JSON.stringify([{ type: "result", is_error: true }]);
+    },
+  };
+
+  await assert.rejects(
+    () => attestClaudeCodeExecutionProfile(
+      { harness: "claude-code", model: "claude-fable-5", reasoning: "high" },
+      runner,
+      repository,
+    ),
+    /model probe failed for claude-fable-5\/high/,
+  );
 });
 
 test("startup binds gh access to local origin and requires mutation permission", async () => {

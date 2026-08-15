@@ -54,6 +54,38 @@ function requiredExecutionProfiles(
   return needsPanel ? profile.panelExecutions : [profile.ordinaryTicketExecution];
 }
 
+export async function attestClaudeCodeExecutionProfile(
+  profile: ExecutionProfile,
+  runner: StartupCommandRunner,
+  repository: string,
+): Promise<void> {
+  if (profile.harness !== "claude-code") {
+    throw new Error(`Expected a Claude Code execution profile; received ${profile.harness}`);
+  }
+  const status = JSON.parse(await runner.run("claude", ["auth", "status", "--json"], repository)) as {
+    loggedIn?: unknown;
+  };
+  if (status.loggedIn !== true) throw new Error("Claude Code is not authenticated");
+
+  const output = await runner.run("claude", [
+    "--safe-mode",
+    "--model", profile.model,
+    "--effort", profile.reasoning,
+    "--print",
+    "--output-format", "json",
+    "--tools", "",
+    "--no-session-persistence",
+    "Reply exactly AUTOMODE_PROFILE_READY.",
+  ], repository);
+  const result = JSON.parse(output) as unknown;
+  const records = Array.isArray(result) ? result : [result];
+  if (records.some((record) =>
+    typeof record === "object" && record !== null && "is_error" in record && record.is_error === true
+  )) {
+    throw new Error(`Claude Code model probe failed for ${profile.model}/${profile.reasoning}`);
+  }
+}
+
 async function defaultExecutionAttestor(
   profiles: readonly ExecutionProfile[],
   options: ValidateAutomodeStartupOptions,
@@ -79,11 +111,8 @@ async function defaultExecutionAttestor(
     }
   }
 
-  if (profiles.some((profile) => profile.harness === "claude-code")) {
-    const status = JSON.parse(await runner.run("claude", ["auth", "status", "--json"], options.repository)) as {
-      loggedIn?: unknown;
-    };
-    if (status.loggedIn !== true) throw new Error("Claude Code is not authenticated");
+  for (const profile of profiles.filter((candidate) => candidate.harness === "claude-code")) {
+    await attestClaudeCodeExecutionProfile(profile, runner, options.repository);
   }
 }
 
@@ -118,7 +147,7 @@ function hasGitHubPermission(actual: string, required: "TRIAGE" | "WRITE"): bool
   return (rank[actual] ?? -1) >= rank[required]!;
 }
 
-async function checked(
+async function withStartupErrorContext(
   label: string,
   operation: () => Promise<string>,
 ): Promise<string> {
@@ -135,7 +164,7 @@ export async function validateAutomodeStartup(
 ): Promise<ValidatedAutomodeStartup> {
   const repository = repositoryRoot(options.repository);
   const runner = options.runner ?? processStartupCommandRunner;
-  const gitRootOutput = await checked(
+  const gitRootOutput = await withStartupErrorContext(
     "Automode repository validation failed",
     () => runner.run("git", ["rev-parse", "--show-toplevel"], repository),
   );
@@ -149,7 +178,7 @@ export async function validateAutomodeStartup(
     throw new Error(`Automode repository validation failed: expected ${repository}, received ${gitRoot}`);
   }
 
-  const remote = await checked(
+  const remote = await withStartupErrorContext(
     "GitHub repository access failed",
     () => runner.run("git", ["remote", "get-url", "origin"], repository),
   );
@@ -158,11 +187,11 @@ export async function validateAutomodeStartup(
     throw new Error("GitHub repository access failed: origin is not a github.com repository");
   }
 
-  await checked(
+  await withStartupErrorContext(
     "GitHub authentication failed",
     () => runner.run("gh", ["auth", "status", "--hostname", "github.com"], repository),
   );
-  const repositoryJson = await checked(
+  const repositoryJson = await withStartupErrorContext(
     "GitHub repository access failed",
     () => runner.run("gh", ["repo", "view", "--json", "id,nameWithOwner,url,viewerPermission"], repository),
   );

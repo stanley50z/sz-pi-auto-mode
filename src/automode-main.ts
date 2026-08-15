@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Model } from "@earendil-works/pi-ai";
@@ -37,7 +37,7 @@ export interface StartedAutomodeMainSession {
   configuration: AutomationStageConfiguration;
   sessionName: string;
   sessionFile: string | undefined;
-  capabilityProfileFile: string;
+  runRecordFile: string;
   coordinatorId: string;
   coordinatorIdentityFile: string;
   coordinatorLockFile: string;
@@ -53,17 +53,15 @@ export const automodeRunConfigurationGuard = {
   },
 } satisfies InlineExtension;
 
-function persistAutomodeCapabilityProfile(
-  repository: string,
+function persistAutomodeRunRecord(
+  runRecordFile: string,
+  coordinatorId: string,
   configuration: AutomationStageConfiguration,
   projectResources: ProjectResourceAllowlist | undefined,
-  home?: string,
-  normalAgentDir?: string,
 ): string {
-  const { automodeDir, capabilityProfileFile } = resolveAutomodePaths(repository, home, normalAgentDir);
-  mkdirSync(automodeDir, { recursive: true });
   const serialized = JSON.stringify({
     version: 1,
+    coordinatorId,
     stageConfiguration: configuration,
     projectResources: {
       trusted: projectResources?.trusted ?? false,
@@ -73,20 +71,20 @@ function persistAutomodeCapabilityProfile(
     },
   });
   try {
-    writeFileSync(capabilityProfileFile, `${serialized}\n`, { encoding: "utf8", flag: "wx" });
+    writeFileSync(runRecordFile, `${serialized}\n`, { encoding: "utf8", flag: "wx" });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     let persisted: string;
     try {
-      persisted = JSON.stringify(JSON.parse(readFileSync(capabilityProfileFile, "utf8")));
+      persisted = JSON.stringify(JSON.parse(readFileSync(runRecordFile, "utf8")));
     } catch (parseError) {
-      throw new Error("The durable Automode Capability Profile is invalid", { cause: parseError });
+      throw new Error("The durable Automode Run Record is invalid", { cause: parseError });
     }
     if (persisted !== serialized) {
-      throw new Error("The Automode Capability Profile is fixed for this Automode Run");
+      throw new Error("The Automode Run Record is fixed for this Automode Run");
     }
   }
-  return capabilityProfileFile;
+  return runRecordFile;
 }
 
 export async function startAutomodeMainSession(
@@ -111,7 +109,7 @@ export async function startAutomodeMainSession(
   );
   const lease = acquireRepositoryCoordinator(paths.coordinatorDir);
   let runtime;
-  let capabilityProfileFile!: string;
+  let runRecordFile!: string;
   try {
     const attestationSession = await createCapabilitySession({
       cwd: validated.repository,
@@ -133,12 +131,11 @@ export async function startAutomodeMainSession(
       normalAgentDir: options.normalAgentDir,
       extensions: [automodeRunConfigurationGuard],
     });
-    capabilityProfileFile = persistAutomodeCapabilityProfile(
-      validated.repository,
+    runRecordFile = persistAutomodeRunRecord(
+      paths.runRecordFile,
+      lease.coordinatorId,
       configuration,
       options.projectResources,
-      options.home,
-      options.normalAgentDir,
     );
   } catch (error) {
     runtime?.session.dispose();
@@ -167,7 +164,7 @@ export async function startAutomodeMainSession(
     configuration,
     sessionName,
     sessionFile: runtime.session.sessionFile,
-    capabilityProfileFile,
+    runRecordFile,
     coordinatorId: lease.coordinatorId,
     coordinatorIdentityFile: lease.identityFile,
     coordinatorLockFile: lease.lockFile,

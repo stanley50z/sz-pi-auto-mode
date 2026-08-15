@@ -1,3 +1,14 @@
+---
+type: "Planned Integration"
+title: "Integrations: personal WeChat"
+description: "Planned Personal-WeChat/OpenClaw channel integration; the repository contains no implementation or stable message contract yet."
+tags: [integration, wechat, planned]
+openwiki:
+  roles: [integration]
+  change_kinds: [public-api]
+  source_paths: [README.md]
+---
+
 # Integrations: personal WeChat
 
 The README lists a **personal WeChat channel** as a planned capability. The stated goal is to extract only OpenClaw's personal-WeChat channel integration so a Pi session can be accessed through personal WeChat.
@@ -8,7 +19,7 @@ This is only a planned integration. No implementation files, API contracts, or m
 
 ## Design implication
 
-Because the goal is to expose a Pi session through a personal chat surface, this integration is likely to need clear boundaries around:
+Because the goal is to expose a Pi session through a personal chat surface, a future implementation will need clear boundaries around:
 
 - authentication or account association
 - message transport between WeChat and the Pi session

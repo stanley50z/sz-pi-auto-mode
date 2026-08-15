@@ -57,6 +57,9 @@ test("a controlled Half-Auto session exposes only the attested capability surfac
     assert.equal(controlled.session.model?.provider, "openai-codex");
     assert.equal(controlled.session.model?.id, "gpt-5.6-sol");
     assert.equal(controlled.session.thinkingLevel, "high");
+    const sessionIdentity = controlled.session.agent.state.systemPrompt.split("\n", 1)[0]!;
+    assert.match(sessionIdentity, /Automode Capability Attestation Session/);
+    assert.doesNotMatch(sessionIdentity, /Ticket Session/);
     assert.deepEqual(controlled.session.scopedModels.map(({ model, thinkingLevel }) => ({
       provider: model.provider,
       model: model.id,
@@ -81,21 +84,62 @@ test("a controlled Half-Auto session exposes only the attested capability surfac
   }
 });
 
-test("a controlled Full-Auto session discovers every stage command from the Automode-owned root", async () => {
+test("a controlled Full-Auto session exposes the complete attested capability surface", async () => {
+  const home = mkdtempSync(join(tmpdir(), "automode-full-capability-"));
   const controlled = await createCapabilitySession({
     cwd: repository,
-    home: mkdtempSync(join(tmpdir(), "automode-full-capability-")),
+    home,
     configuration: full,
     model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
   });
   try {
     const commands = controlled.extensionsResult.runtime.getCommands();
-    for (const skill of controlled.profile.skills.filter((entry) => entry.kind === "stage")) {
-      assert.equal(skill.owner, "automode");
+    assert.deepEqual(
+      commands.map((command) => command.name),
+      [...controlled.profile.extensionCommands, ...controlled.profile.skills.map((skill) => `skill:${skill.name}`)],
+    );
+    assert.deepEqual(
+      commands.filter((command) => command.source === "extension").map((command) => ({
+        name: command.name,
+        path: command.sourceInfo.path,
+      })),
+      [{ name: "fast", path: "<inline:automode-openai-fast-mode>" }],
+    );
+    for (const skill of controlled.profile.skills) {
+      if (skill.kind === "stage") assert.equal(skill.owner, "automode");
       const command = commands.find((entry) => entry.name === `skill:${skill.name}`);
-      assert.ok(command?.sourceInfo.path.includes("skills\\automode\\")
-        || command?.sourceInfo.path.includes("skills/automode/"));
+      assert.ok(command);
+      assert.equal(command.source, "skill");
+      assert.equal(relative(skill.sourceRoot, command.sourceInfo.path).startsWith(".."), false);
+      assert.equal(command.sourceInfo.scope, "temporary");
     }
+    assert.deepEqual(controlled.session.getActiveToolNames(), controlled.profile.tools);
+    assert.deepEqual(controlled.services.resourceLoader.getPrompts().prompts, []);
+    assert.deepEqual(controlled.services.resourceLoader.getThemes().themes, []);
+    assert.equal(controlled.services.settingsManager.getDefaultThinkingLevel(), "high");
+    assert.equal(controlled.services.settingsManager.getEnableSkillCommands(), true);
+    assert.equal(controlled.services.settingsManager.getDefaultProjectTrust(), "never");
+    assert.equal(controlled.session.model?.provider, "openai-codex");
+    assert.equal(controlled.session.model?.id, "gpt-5.6-sol");
+    assert.equal(controlled.session.thinkingLevel, "high");
+    assert.deepEqual(controlled.session.scopedModels.map(({ model, thinkingLevel }) => ({
+      provider: model.provider,
+      model: model.id,
+      thinkingLevel,
+    })), [{ provider: "openai-codex", model: "gpt-5.6-sol", thinkingLevel: "high" }]);
+    const contextPaths = controlled.services.resourceLoader.getAgentsFiles().agentsFiles.map((file) =>
+      relative(repository, file.path).replaceAll("\\", "/")
+    );
+    assert.deepEqual(contextPaths, [
+      "AGENTS.md",
+      "CONTEXT.md",
+      "docs/agents/issue-tracker.md",
+      "docs/agents/triage-labels.md",
+      "docs/agents/domain.md",
+      "openwiki/quickstart.md",
+    ]);
+    assert.ok(controlled.session.sessionFile?.startsWith(join(home, ".pi", "automode")));
+    assert.equal(controlled.services.agentDir.startsWith(join(home, ".pi", "automode")), true);
   } finally {
     controlled.session.dispose();
   }
