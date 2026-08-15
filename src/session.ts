@@ -1,20 +1,16 @@
-import { mkdirSync, realpathSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync } from "node:fs";
 import {
   createAgentSessionFromServices,
   createAgentSessionRuntime,
-  createAgentSessionServices,
-  ModelRuntime,
   SessionManager,
-  SettingsManager,
   type AgentSessionRuntime,
   type CreateAgentSessionResult,
   type CreateAgentSessionRuntimeFactory,
   type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
-import { isPathInside } from "./attestation.js";
-import { repositoryRoot, resolveAutomodePaths, type AutomodePaths } from "./paths.js";
+import { createControlledServices } from "./controlled-services.js";
+import { resolveAutomodePaths, type AutomodePaths } from "./paths.js";
 
 export interface MainSessionOptions {
   cwd: string;
@@ -35,35 +31,14 @@ function prepareAutomodePaths(options: MainSessionOptions, cwd: string): Automod
 
 async function createMainSessionServices(options: MainSessionOptions, cwd: string) {
   const paths = prepareAutomodePaths(options, cwd);
-  const contextRoot = repositoryRoot(cwd);
-
   // Credentials deliberately come from normal Pi. Everything capable of loading
   // configuration or persisting context deliberately comes from the Automode root.
-  const modelRuntime = await ModelRuntime.create({
-    authPath: join(paths.normalAgentDir, "auth.json"),
-    modelsPath: join(paths.automodeDir, "models.json"),
-    signal: AbortSignal.timeout(30_000),
-  });
-  const settingsManager = SettingsManager.create(paths.automodeDir, paths.automodeDir);
-  const services = await createAgentSessionServices({
+  const services = await createControlledServices({
     cwd,
-    agentDir: paths.automodeDir,
-    modelRuntime,
-    settingsManager,
-    resourceLoaderOptions: {
-      additionalSkillPaths: options.skillPaths,
-      extensionFactories: options.extensions,
-      noExtensions: true,
-      noSkills: true,
-      noPromptTemplates: true,
-      noThemes: true,
-      noContextFiles: false,
-      agentsFilesOverride: ({ agentsFiles }) => ({
-        agentsFiles: agentsFiles.filter((file) => isPathInside(realpathSync(file.path), contextRoot)),
-      }),
-      systemPrompt: options.systemPrompt,
-      appendSystemPrompt: [],
-    },
+    paths,
+    skillPaths: options.skillPaths,
+    extensions: options.extensions,
+    systemPrompt: options.systemPrompt,
   });
   return { paths, services };
 }

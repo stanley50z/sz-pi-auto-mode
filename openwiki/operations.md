@@ -1,6 +1,22 @@
+---
+type: "Operations Guide"
+title: "Operations"
+description: "Repository operating conventions for GitHub issue coordination, local OpenWiki maintenance, and narrow validation of the TypeScript package."
+tags: [operations, github, openwiki, testing]
+openwiki:
+  roles: [operations, repository]
+  change_kinds: [configuration]
+  source_paths: [docs/agents/issue-tracker.md, AGENTS.md, package.json]
+  validation_commands: [npm run build]
+---
+
 # Operations
 
 This repository's current operating conventions come from the agent guidance files and the agent-domain docs.
+
+## Focused validation
+
+The package uses TypeScript compilation followed by Node's built-in test runner. `npm run build` is the smallest compile check. Focused tests run from `dist/test/*.test.js`; use the commands named by the relevant wiki page. `npm test` is the broad package check, while `npm run prove:handoff` is conditional for process-handoff changes because it builds and runs the terminal proof.
 
 ## Issue tracking
 

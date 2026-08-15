@@ -49,8 +49,12 @@ An extension-owned customization of a native Matt Pocock skill, loaded only when
 _Avoid_: Full-Auto Skill Suite, global skill
 
 **Automode Run**:
-The durable, repository-scoped operating lifetime of Automode under one fixed Automation Stage configuration. It spans ordinary Coordinator process restarts; the MVP defines process stopping and best-effort restart recovery, not run retirement or reconfiguration.
+The durable, repository-scoped operating lifetime of Automode under one fixed Automation Stage Configuration. It spans ordinary Coordinator process restarts; the MVP defines process stopping and best-effort restart recovery, not run retirement or reconfiguration.
 _Avoid_: Single-ticket session, disposable process execution
+
+**Automode Run Record**:
+The Coordinator-bound durable record that identifies an Automode Run and stores its fixed Automation Stage Configuration plus explicitly allowlisted project skill files. It lives beside the durable Coordinator identity under the Git common directory, so linked worktrees and different Pi homes cannot accept divergent run settings.
+_Avoid_: Automode Capability Profile, stage profile, `capability-profile.json`
 
 **Automode Coordinator**:
 The repository-singleton orchestrator for an Automode Run. At most one live Coordinator process owns the repository at a time; it discovers and claims eligible work, supervises independent Ticket Sessions without a concurrency limit, and reconstructs active work best-effort after restart from tracker, Git, worktree, and Pi session state. It runs in the Main Session and never performs ticket work itself.

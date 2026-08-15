@@ -104,14 +104,14 @@ test("fresh child owns the terminal and composes only isolated SDK state", async
   assert.equal(proof.cwd, repository);
   assert.notEqual(proof.pid, process.pid);
   assert.notEqual(proof.pid, result.bridgePid);
-  assert.deepEqual(proof.commands, ["skill:canonical-one", "skill:canonical-two"]);
-  assert.deepEqual(proof.commandPaths.map((path) => resolve(path)), [
+  assert.deepEqual(proof.commands, ["fast", "skill:canonical-one", "skill:canonical-two"]);
+  assert.deepEqual(proof.commandPaths.slice(1).map((path) => resolve(path)), [
     resolve(sourceSkills, "canonical-one", "SKILL.md"),
     resolve(sourceSkills, "canonical-two", "SKILL.md"),
   ]);
   assert.deepEqual(proof.activeTools, []);
   assert.deepEqual(proof.credentialProviders, ["proof-credential"]);
-  assert.equal(proof.settingsDefaultThinkingLevel, "low");
+  assert.equal(proof.settingsDefaultThinkingLevel, "high");
   assert.deepEqual(proof.appendSystemPrompts, []);
   assert.deepEqual(proof.contextFilePaths.map((path) => resolve(path)), [resolve(repository, "AGENTS.md")]);
   assert.equal(proof.credentialEnvironmentPresent, true);

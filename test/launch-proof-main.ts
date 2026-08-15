@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
 import { startAutomodeMainSession } from "../src/automode-main.js";
 import type { AutomationStage, AutomationStageConfiguration } from "../src/stage-configuration.js";
 
@@ -16,6 +17,23 @@ async function main(): Promise<void> {
     serializedConfiguration,
     configurationConfirmation,
     normalAgentDir,
+    model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
+    startupValidation: {
+      runner: {
+        async run(command, args, cwd) {
+          if (command === "git" && args[0] === "rev-parse") return cwd;
+          if (command === "git" && args[0] === "remote") return "https://github.com/owner/repository.git";
+          if (args[0] === "auth") return "github.com";
+          return JSON.stringify({
+            id: "repository-id",
+            nameWithOwner: "owner/repository",
+            url: "https://github.com/owner/repository",
+            viewerPermission: "ADMIN",
+          });
+        },
+      },
+      attestExecutions: async () => undefined,
+    },
   });
   let mutationRejected = false;
   try {
