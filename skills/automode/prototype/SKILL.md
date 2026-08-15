@@ -1,6 +1,7 @@
 ---
 name: prototype
 description: Run one claimed Wayfinder prototype ticket through asynchronous tracker feedback with throwaway evidence.
+disable-model-invocation: true
 ---
 
 # Auto-Implement Prototype
@@ -28,3 +29,5 @@ When an external issue update arrives, resume this same Ticket Session and re-re
 - **Ambiguous feedback:** do not guess; clarify and wait.
 
 Preserve the prototype branch as durable evidence. Never copy, merge, or refactor prototype code into production. A later production ticket implements the validated decision independently.
+
+After publishing or clarifying an artifact and verifying the tracker comment, call `automode_ticket_result` exactly once with `status: "waiting"`; this is successful idle waiting. After approval or rejection is durably resolved and fresh tracker state proves ineligibility, call it with `status: "complete"`. Do not substitute prose for the structured result.

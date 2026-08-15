@@ -4,9 +4,13 @@ import { fileURLToPath } from "node:url";
 import type { Model } from "@earendil-works/pi-ai";
 import { InteractiveMode, type InlineExtension } from "@earendil-works/pi-coding-agent";
 import { createCapabilitySession, type ProjectResourceAllowlist } from "./capability-session.js";
+import { AutomodeCoordinator, type CoordinatorClock } from "./coordinator.js";
 import { acquireRepositoryCoordinator } from "./coordinator-lock.js";
+import { GitHubTracker } from "./github-tracker.js";
 import { resolveAutomodePaths } from "./paths.js";
 import { createMainSessionRuntime } from "./session.js";
+import { AutomodeTicketSessionHost } from "./ticket-session.js";
+import { WorkspaceManager } from "./workspace.js";
 import {
   validateAutomodeStartup,
   type ExecutionProfileAttestor,
@@ -30,6 +34,8 @@ export interface StartAutomodeMainOptions {
     runner?: StartupCommandRunner;
     attestExecutions?: ExecutionProfileAttestor;
   };
+  coordinator?: AutomodeCoordinator;
+  coordinatorClock?: CoordinatorClock;
 }
 
 export interface StartedAutomodeMainSession {
@@ -41,6 +47,8 @@ export interface StartedAutomodeMainSession {
   coordinatorId: string;
   coordinatorIdentityFile: string;
   coordinatorLockFile: string;
+  startCoordinator(): Promise<void>;
+  interruptCoordinator(): "draining" | "forcing";
   runInteractive(): Promise<void>;
   dispose(): void;
 }
@@ -143,6 +151,28 @@ export async function startAutomodeMainSession(
     throw error;
   }
 
+  const coordinator = options.coordinator ?? new AutomodeCoordinator({
+    configuration,
+    actor: validated.actor,
+    coordinatorId: lease.coordinatorId,
+    tracker: new GitHubTracker({
+      cwd: validated.repository,
+      repository: validated.repositorySlug,
+      actor: validated.actor,
+    }),
+    sessions: new AutomodeTicketSessionHost({
+      repository: validated.repository,
+      configuration,
+      home: options.home,
+      normalAgentDir: options.normalAgentDir,
+    }),
+    workspaces: new WorkspaceManager({
+      repositoryRoot: validated.repository,
+      repositorySlug: validated.repositorySlug,
+    }),
+    clock: options.coordinatorClock,
+  });
+
   const sessionName = `Automode Main — ${AUTOMODE_MODE_LABELS[configuration.mode]}`;
   runtime.session.setSessionName(sessionName);
   runtime.session.sessionManager.appendCustomEntry("automode.stage-configuration", configuration);
@@ -150,7 +180,21 @@ export async function startAutomodeMainSession(
     coordinatorId: lease.coordinatorId,
   });
   let disposed = false;
-  const dispose = () => {
+  let disposeRequested = false;
+  let coordinatorStarted = false;
+  let coordinatorStopped = false;
+  let coordinatorInterrupts = 0;
+  const startCoordinator = async () => {
+    if (coordinatorStarted) return;
+    coordinatorStarted = true;
+    await coordinator.start();
+  };
+  const interruptCoordinator = () => {
+    if (!coordinatorStarted) throw new Error("Automode Coordinator has not started");
+    coordinatorInterrupts += 1;
+    return coordinator.interrupt();
+  };
+  const finalizeDispose = () => {
     if (disposed) return;
     try {
       runtime.session.dispose();
@@ -158,6 +202,19 @@ export async function startAutomodeMainSession(
       lease.release();
       disposed = true;
     }
+  };
+  const dispose = () => {
+    if (disposed || disposeRequested) return;
+    disposeRequested = true;
+    if (!coordinatorStarted || coordinatorStopped) {
+      finalizeDispose();
+      return;
+    }
+    while (coordinatorInterrupts < 2) interruptCoordinator();
+    void coordinator.whenStopped().then(() => {
+      coordinatorStopped = true;
+      finalizeDispose();
+    });
   };
   return {
     cwd: runtime.cwd,
@@ -168,14 +225,23 @@ export async function startAutomodeMainSession(
     coordinatorId: lease.coordinatorId,
     coordinatorIdentityFile: lease.identityFile,
     coordinatorLockFile: lease.lockFile,
+    startCoordinator,
+    interruptCoordinator,
     runInteractive: async () => {
       const interactiveMode = new InteractiveMode(runtime, {
         initialMessages: [],
         verbose: false,
       });
+      const onInterrupt = () => { interruptCoordinator(); };
+      process.on("SIGINT", onInterrupt);
       try {
+        await startCoordinator();
         await interactiveMode.run();
+        if (coordinatorInterrupts === 0) interruptCoordinator();
+        await coordinator.whenStopped();
+        coordinatorStopped = true;
       } finally {
+        process.off("SIGINT", onInterrupt);
         dispose();
       }
     },

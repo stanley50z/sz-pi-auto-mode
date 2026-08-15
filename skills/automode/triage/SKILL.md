@@ -33,3 +33,5 @@ Every generated tracker comment must start with:
 5. Re-read and verify the final tracker state.
 
 Unavailable access/tooling required by the agent is a failure: preserve `needs-triage` and the claim with diagnostics. Missing reporter facts are not tooling failure; produce `needs-info`.
+
+After the final tracker re-read proves the issue is no longer Auto-Triage eligible, call `automode_ticket_result` exactly once with `status: "complete"` and a concise evidence summary. Do not report completion before proof and do not substitute prose for the structured result.

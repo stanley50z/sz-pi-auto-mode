@@ -19,3 +19,5 @@ You receive one claimed issue URL and an existing deterministic item branch/work
 7. Stop at pull-request creation. Auto-Review exclusively owns panel findings, warranted fixes, merge, and cleanup.
 
 Fail explicitly on conflicting requirements, failed validation, unavailable credentials, required human operation, or unrecoverable tooling. Preserve diagnostics, tracker state, branch, worktree, and session history. Never open a knowingly broken pull request and never silently change implementation approach after repeated failure.
+
+After a fresh tracker read proves the linked non-draft pull request exists and the issue is no longer Auto-Implement eligible, call `automode_ticket_result` exactly once with `status: "complete"` and summarize the pull request and validation evidence. Do not substitute prose for the structured result.

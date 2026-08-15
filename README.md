@@ -26,7 +26,7 @@ The MVP has four independently selectable **Automation Stages**:
 - **Auto-Implement** — handles `wayfinder:prototype` tickets and implements `ready-for-agent` issues through non-draft pull-request creation.
 - **Auto-Review** — reviews open non-draft pull requests with an in-house Review Panel, applies warranted fixes, validates, merges, and cleans up.
 
-Full-Auto enables all four stages. Half-Auto enables one to three. The selected Automation Stage Configuration stays fixed for the durable Automode Run. The Main Session hosts a repository-singleton Automode Coordinator; independent Ticket Sessions perform ticket work. GitHub is the workflow source of truth, with best-effort recovery from tracker, Git/worktree, and native Pi session state.
+Full-Auto enables all four stages. Half-Auto enables one to three. The selected Automation Stage Configuration stays fixed for the durable Automode Run. The Main Session hosts a repository-singleton Automode Coordinator; independent full-process Ticket Sessions perform ticket work through deterministic canonical skill dispatch. The Coordinator reconciles durable bookkeeping before new claims, polls complete GitHub snapshots every 30 seconds, processes unrelated eligible items independently, requires clean turns plus fresh tracker proof, and enforces a five-attempt budget with two-phase shutdown. GitHub is the workflow source of truth, with best-effort recovery from tracker bookkeeping, deterministic `.worktree` branches, and native Pi session state. Auto-Grilling and Auto-Review use three fixed, independent, hidden-peer Panel seats; Auto-Implement creates non-draft pull requests and Auto-Review alone validates, fixes, merges, and cleans up.
 
 Planning remains human-controlled: Wayfinder map creation, `to-spec`, and approved `to-tickets` decomposition are outside the automated stages.
 
@@ -39,3 +39,5 @@ Personal-WeChat/OpenClaw channel integration is outside the Automode workflow MV
 ## Development proof
 
 The `/automode` launch flow is documented in [docs/automode-launch.md](docs/automode-launch.md). The underlying isolated process-handoff seam is documented in [docs/process-handoff-proof.md](docs/process-handoff-proof.md).
+
+Refresh generated OpenWiki documentation locally with `OPENWIKI_PROVIDER=openai-chatgpt openwiki code --update --print`. This repository intentionally has no OpenWiki CI or scheduled GitHub Actions workflow; do not hand-edit generated OpenWiki pages or generated agent-file blocks.

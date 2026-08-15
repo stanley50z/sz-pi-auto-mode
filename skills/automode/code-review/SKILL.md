@@ -1,6 +1,7 @@
 ---
 name: code-review
 description: Review, fix, validate, and merge one open non-draft pull request through the three-seat Automode Review Panel.
+disable-model-invocation: true
 ---
 
 # Auto-Review
@@ -15,7 +16,7 @@ You are the authoritative Review Session for one open non-draft pull request. Th
 
 ## Review Panel round
 
-1. Dispatch all three configured Reviewer seats concurrently against the same head SHA and identical context. Hide same-round peer reports.
+1. Call `automode_panel` once with `kind: "review"` and the complete structured exact-head context. That controlled tool dispatches all three configured Reviewer seats concurrently with hidden same-round peers. Do not launch reviewer processes or subagents through any other path.
 2. Round one is exhaustive. Later rounds include prior findings, Review Session dispositions, fix diff, and directly affected invariant paths.
 3. Require three usable attributable reports. Each report identifies round, head SHA, seat, harness, provider, model, reasoning, and either substantiated root-cause findings with violated requirement/rule/invariant plus concrete evidence, or no actionable findings. A missing report fails the Ticket Session attempt.
 4. Post each complete report as its own pull-request comment.
@@ -40,3 +41,4 @@ You are the authoritative Review Session for one open non-draft pull request. Th
 3. If another concurrently reviewed pull request caused a base conflict, perform one terminal Conflict-Fix Round: integrate the latest base, resolve only resulting conflicts, validate, push, and recheck without another panel round. A design/requirement conflict, failed validation, or second conflict fails explicitly.
 4. Squash-merge through repository controls.
 5. Remove the worktree and delete same-repository local/remote head branches. Never delete a fork branch. Report cleanup failure without pretending the merge was undone.
+6. Freshly verify the pull request is merged, then call `automode_ticket_result` exactly once with `status: "complete"` and summarize the exact merged head, validation, and cleanup result. Do not substitute prose for the structured result.

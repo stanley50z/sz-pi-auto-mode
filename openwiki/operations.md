@@ -16,11 +16,11 @@ This repository's current operating conventions come from the agent guidance fil
 
 ## Focused validation
 
-The package uses TypeScript compilation followed by Node's built-in test runner. `npm run build` is the smallest compile check. Focused tests run from `dist/test/*.test.js`; use the commands named by the relevant wiki page. `npm test` is the broad package check, while `npm run prove:handoff` is conditional for process-handoff changes because it builds and runs the terminal proof.
+The package uses TypeScript compilation followed by Node's built-in test runner. `npm run build` is the smallest compile check. Focused tests run from `dist/test/*.test.js`; use the commands named by the relevant wiki page. `npm test` is the broad package check, while `npm run prove:handoff` is conditional for process-handoff changes because it builds and runs the terminal proof. The deterministic Full-Auto journey is the narrow cross-stage smoke test when Coordinator, workspace, or Panel wiring changes; use the full suite only for package-wide lifecycle or shipped-surface changes. Coordinator, tracker, workspace, Ticket Session, and Panel changes have narrower commands in their page metadata; use broader checks only for cross-boundary or package registration changes.
 
 ## Issue tracking
 
-The repo treats GitHub Issues as the system of record for issues and specs. `docs/agents/issue-tracker.md` is the canonical source for the `gh`-based issue workflow, including:
+The repo treats GitHub Issues as the system of record for issues and specs. The live Automode Coordinator also consumes complete GitHub snapshots and writes one updateable Automode bookkeeping comment per item through `GitHubTracker`; `architecture/coordinator.md` is canonical for that runtime contract. `docs/agents/issue-tracker.md` remains the canonical source for the human `gh`-based issue workflow, including:
 
 - creating issues
 - reading issues and comments
