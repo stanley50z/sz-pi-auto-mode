@@ -17,12 +17,16 @@ The explicit allowlist of tools and skills available to an Automode Run. The MVP
 _Avoid_: Global skill discovery, inherited Pi setup, general configuration schema
 
 **Automation Stage**:
-One independently configurable part of the repository workflow: Auto-Triage, Auto-Grilling, Auto-Implement, or Auto-Review. A stage's setting is fixed for an Automode Run; enabled stages are handled automatically and disabled stages remain human-controlled.
+One independently configurable part of the repository workflow: Auto-Triage, Auto-Grilling, Auto-Implement, or Auto-Review. Its launch baseline comes from the Automation Stage Configuration, while its live behavior comes from process-local Automation Stage Operating State.
 _Avoid_: Sub-mode, workflow phase
 
 **Automation Stage Configuration**:
-The immutable Full-Auto or Half-Auto selection of enabled Automation Stages confirmed when an Automode Run launches. It is serialized across the Automode Bridge process boundary and remains fixed for that run.
-_Avoid_: Stage profile, Automode Capability Profile
+The Full-Auto or Half-Auto baseline selection confirmed when an Automode Run launches. It is serialized across the Automode Bridge process boundary and restored when a Coordinator process starts; the live process may temporarily override individual Stages through their Automation Stage Operating State.
+_Avoid_: Stage profile, Automode Capability Profile, current Stage state
+
+**Automation Stage Operating State**:
+The process-local `ON`, `DRAINING`, or `OFF` state of one Automation Stage. `DRAINING` stops new dispatches while active Ticket Sessions settle; `OFF` leaves matching work human-controlled. All four Stages may be `OFF`. Operating State resets to the Automation Stage Configuration when the Coordinator process restarts.
+_Avoid_: Sub-mode, persisted Stage configuration, dashboard filter
 
 **Auto-Triage**:
 The Automation Stage that discovers and processes tracker items marked `needs-triage`.
@@ -49,20 +53,32 @@ An extension-owned customization of a native Matt Pocock skill, loaded only when
 _Avoid_: Full-Auto Skill Suite, global skill
 
 **Automode Run**:
-The durable, repository-scoped operating lifetime of Automode under one fixed Automation Stage Configuration. It spans ordinary Coordinator process restarts; the MVP defines process stopping and best-effort restart recovery, not run retirement or reconfiguration.
-_Avoid_: Single-ticket session, disposable process execution
+The durable, repository-scoped operating lifetime of Automode under one baseline Automation Stage Configuration. It spans ordinary Coordinator process restarts. The live process may change Automation Stage Operating State, but restart restores the baseline; run retirement and baseline reconfiguration remain undefined.
+_Avoid_: Single-ticket session, disposable process execution, Coordinator process
 
 **Automode Run Record**:
-The Coordinator-bound durable record that identifies an Automode Run and stores its fixed Automation Stage Configuration plus explicitly allowlisted project skill files. It lives beside the durable Coordinator identity under the Git common directory, so linked worktrees and different Pi homes cannot accept divergent run settings.
-_Avoid_: Automode Capability Profile, stage profile, `capability-profile.json`
+The Coordinator-bound durable record that identifies an Automode Run and stores its baseline Automation Stage Configuration plus explicitly allowlisted project skill files. It does not store process-local Automation Stage Operating State. It lives beside the durable Coordinator identity under the Git common directory, so linked worktrees and different Pi homes recover the same launch baseline.
+_Avoid_: Automode Capability Profile, current Stage state, `capability-profile.json`
 
 **Automode Coordinator**:
 The repository-singleton orchestrator for an Automode Run. At most one live Coordinator process owns the repository at a time; it discovers and claims eligible work, supervises independent Ticket Sessions without a concurrency limit, and reconstructs active work best-effort after restart from tracker, Git, worktree, and Pi session state. It runs in the Main Session and never performs ticket work itself.
 _Avoid_: Ticket worker, subagent
 
 **Main Session**:
-The repository-scoped coordinator session that hosts the Automode Coordinator for an Automode Run. It supervises work but does not stand in for a stage-specific Ticket Session.
-_Avoid_: Grilling Session, Review Session, ticket worker
+The repository-scoped coordinator session that hosts the Automode Coordinator for an Automode Run. Its TUI shows compact run statistics, shutdown guidance, and links to the Automode Dashboard. It supervises work but does not stand in for a stage-specific Ticket Session.
+_Avoid_: Grilling Session, Review Session, ticket worker, dashboard
+
+**Automode Dashboard**:
+The Coordinator-owned repository dashboard served on fixed localhost port `41738` and optionally exposed inside the user's tailnet. It is the comprehensive graphical supervision surface for Stage Candidates, Ticket Session activity, safe run controls, and process-local Automation Stage Operating State. GitHub and the Coordinator remain authoritative; the dashboard is not a workflow database.
+_Avoid_: Main Session, Ticket Session, hosted control plane
+
+**Stage Candidate**:
+An open issue or pull request recognized by one Automation Stage, whether or not Automode may dispatch it now. A Stage Candidate may be queued, claimed, running, waiting, retrying, blocked, exhausted, or human-owned. If one item matches several Stages, workflow precedence assigns it to one lane.
+_Avoid_: Eligible item, active Ticket Session, every repository issue
+
+**Ticket Session Activity View**:
+The read-only Automode Dashboard view of one Ticket Session's live structured events and process-local prior-attempt history. It makes background work inspectable without attaching a second Pi process or importing Ticket Session context into the Main Session.
+_Avoid_: Resumed session, shared context, interactive Ticket Session
 
 **Ticket Session**:
 One durable logical Pi session that owns one eligible tracker ticket or pull request through its applicable Automode Stage Skill. It normally runs in an independent full background Pi process, persists conversation history through native Pi session storage, and may resume in a replacement process without sharing context with other items. It is not a subagent. A stage-specific Ticket Session keeps its stage-specific name, such as Grilling Session or Review Session.
@@ -85,12 +101,12 @@ One independently executed advisory seat in the Review Panel. A Reviewer examine
 _Avoid_: Panel Member, Review Session, voter
 
 **Half-Auto Mode**:
-An Automode operating mode with one to three of the four Automation Stages enabled. At least one stage remains human-controlled and uses its native Matt Pocock skill unchanged.
-_Avoid_: Assisted mode, manual mode
+An Automode launch mode whose baseline Automation Stage Configuration enables one to three of the four Automation Stages. The live process may temporarily set any Stage `ON`, `DRAINING`, or `OFF`; the launch mode label does not change.
+_Avoid_: Assisted mode, manual mode, current Stage state
 
 **Full-Auto Mode**:
-An Automode operating mode with all four Automation Stages enabled. The Automode Coordinator supervises independent Ticket Sessions; each authoritative stage session advances its own work without ordinary human direction.
-_Avoid_: Unattended mode, headless mode
+An Automode launch mode whose baseline Automation Stage Configuration enables all four Automation Stages. The live process may temporarily set any Stage `ON`, `DRAINING`, or `OFF`; the launch mode label does not change.
+_Avoid_: Unattended mode, headless mode, current Stage state
 
 **Deliberation Panel**:
 A configurable set of independent Panel Members that produces candidate answers whenever Auto-Grilling is enabled, without members seeing one another's answers.
