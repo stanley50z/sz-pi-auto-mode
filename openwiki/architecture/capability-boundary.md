@@ -15,7 +15,7 @@ openwiki:
 
 # Automode capability boundary
 
-Automode does not inherit the normal Pi resource surface. `createAutomodeCapabilityProfile` builds an immutable profile from shared native skills, support skills, and stage skills. Enabled stages use the corresponding `skills/automode/<stage>` implementation; disabled stages resolve to `skills/native/<stage>`. The fixed surface exposes `read`, `bash`, `edit`, `write`, `grep`, `find`, and `ls`, the `fast` extension command, high reasoning, and `defaultProjectTrust: "never"`.
+Automode does not inherit the normal Pi resource surface. `createAutomodeCapabilityProfile` builds an immutable profile from shared native skills, support skills, and pre-attested Automode Stage Skills. Every Automode Stage Skill is preloaded so Automation Stage Operating State can change without widening the capability boundary; the profile exposes `read`, `bash`, `edit`, `write`, `grep`, `find`, and `ls`, the `fast` extension command, high reasoning, and `defaultProjectTrust: "never"`.
 
 ## Session construction
 
@@ -25,7 +25,7 @@ Project executable resources are accepted only when `trusted` is true, each path
 
 ```mermaid
 flowchart TD
-  C[Stage configuration] --> P[Immutable capability profile]
+  C[Fail-closed startup] --> P[Immutable capability profile]
   P --> S[Allowlisted skill roots]
   P --> T[Fixed tools, settings, and models]
   S --> R[Controlled resource loader]
@@ -38,7 +38,7 @@ flowchart TD
 
 ## Extension recipe and validation
 
-To add a stage capability, update `STAGE_SKILLS`, add the canonical skill under `skills/automode` and its native fallback under `skills/native` when appropriate, then extend profile/session tests. To add an always-available skill, update the shared or support lists and test command provenance. To change tools, settings, or execution profiles, update `capability-profile.ts`, the controlled session tests, and startup profile attestation; do not validate only the defining module because shipped capability correctness includes resource-loader registration and canonical command provenance. Use the narrow focused command in the front matter; run `npm test` only for package-wide runtime or public-surface changes.
+To add a stage capability, update `STAGE_SKILLS`, add the canonical skill under `skills/automode` and its native counterpart under `skills/native` when appropriate, then extend profile/session tests. To add an always-available skill, update the shared or support lists and test command provenance. To change tools, settings, or execution profiles, update `capability-profile.ts`, the controlled session tests, and startup profile attestation; do not validate only the defining module because shipped capability correctness includes resource-loader registration and canonical command provenance. Use the narrow focused command in the front matter; run `npm test` only for package-wide runtime or public-surface changes.
 
 ## Relationships and evidence
 

@@ -16,16 +16,16 @@ This repository is an early-stage Pi extension centered on **Automode**, a disti
 
 - the product launches from **`/automode` inside normal Pi**
 - `pi automode` is obsolete in the agent guidance
-- Automode uses an immutable stage configuration, a confirmed handoff digest, and a repository-scoped Main Session / Coordinator boundary; independent full-process Ticket Sessions perform stage work
-- the `/automode` bridge hands off to a fresh child process that confirms the serialized stage configuration, keeps terminal ownership in the launch seam, and starts from a selector that defaults to Full-Auto but allows Half-Auto to use any non-empty stage selection, including all four stages
+- Automode uses a fixed launch-baseline Automation Stage Configuration, a separate process-local Automation Stage Operating State (`ON`, `DRAINING`, `OFF`), and a repository-scoped Main Session / Coordinator boundary; independent full-process Ticket Sessions perform stage work
+- the `/automode` bridge hands off to a fresh child process that confirms the serialized launch baseline, keeps terminal ownership in the launch seam, and starts from a selector that defaults to Full-Auto but allows Half-Auto to use any non-empty stage selection, including all four stages; the dashboard design and supervision ADR document the coordinator web surface
 - startup fails closed until repository access, the Automode Capability Attestation Session, canonical skill provenance, and the repository Coordinator lock all validate; GitHub actor binding comes from `gh auth status --active` metadata, and transient GitHub startup failures are retried for up to 30 seconds before the startup path fails closed
 - the MVP is organized into four Automation Stages: Auto-Triage, Auto-Grilling, Auto-Implement, and Auto-Review
-- panel-enabled startup authenticates Claude Code and probes each exact configured Claude Code model/reasoning profile
+- startup attests every configured Panel execution profile regardless of the launch baseline, while Auto-Grilling and Auto-Review use the launch-time default Pi seat plus configurable Pi / `github-copilot/claude-fable-5` and Pi / `openai-codex/gpt-5.6-sol` seats
 - the Automode Run Record is shared through the Git common directory, independently of Pi home/config roots, and is the durable Coordinator-bound record rather than the capability allowlist
 - the Coordinator reconciles all bookkeeping states before claims, uses complete snapshots whose revisions include `updated_at`, recovers missing, cross-home, or incompatible sessions and missing worktrees, requires merged proof before Auto-Review cleanup, preserves diagnostics after the fifth failed attempt, and fails fast on unwritable fork heads
 - shutdown is two-phase: the first interrupt drains while retaining the Coordinator lock, and the second force-terminates active Ticket Sessions; disposal releases the lock only after the Coordinator stops
 - Personal-WeChat integration is planned separately from the Automode MVP
-- Auto-Grilling and Auto-Review use configurable hidden-peer Panel runtimes; the current MVP uses three seats: the launch-time default Pi seat plus Pi / `github-copilot/claude-fable-5` and Pi / `openai-codex/gpt-5.6-sol`
+- Auto-Grilling and Auto-Review use configurable hidden-peer Panel runtimes; the current MVP uses the launch-time default Pi seat plus Pi / `github-copilot/claude-fable-5` and Pi / `openai-codex/gpt-5.6-sol`
 
 Start here, then follow the section pages below for the repository's runtime seams and change-routing guidance.
 
@@ -41,7 +41,7 @@ Start here, then follow the section pages below for the repository's runtime sea
 | Change work discovery, Ticket Sessions, GitHub bookkeeping, or worktrees | [Coordinator and Ticket Sessions](architecture/coordinator.md) | `src/coordinator.ts`, `src/ticket-session.ts`, `src/github-tracker.ts`, `src/workspace.ts` | `AutomodeCoordinator`, `AutomodeTicketSessionHost`, `GitHubTracker`, `WorkspaceManager` | `test/coordinator.test.ts`, `test/ticket-session.test.ts`, `test/ticket-session-result.test.ts`, `test/github-tracker.test.ts`, `test/workspace.test.ts` | `npm run build && node --test dist/test/coordinator.test.js dist/test/ticket-session.test.js dist/test/github-tracker.test.js dist/test/workspace.test.js` |
 | Change `/fast` or provider request behavior | [Fast mode](integrations/fast-mode.md) | `src/fast-mode.ts`, `src/controlled-services.ts` | `createAutomodeFastModeExtension` | `test/capability-session.test.ts`, `test/real-pi-smoke.test.ts` | `npm run build && node --test dist/test/capability-session.test.js dist/test/real-pi-smoke.test.js` |
 | Change local OpenWiki refresh or repository operating guidance | [Operations](operations.md) | `README.md`, `AGENTS.md`, `CLAUDE.md`, `package.json` | `OPENWIKI_PROVIDER=openai-chatgpt openwiki code --update --print` | none; documentation-only | no source validation; run the local OpenWiki command when regenerating |
-| Change Panel seats, hidden-peer execution, or review/grilling advisory tools | [Panel runtime](architecture/panels.md) | `src/panel-runtime.ts`, `src/panel-process.ts`, `src/ticket-panel-extension.ts` | `runGrillingPanel`, `runReviewPanel`, `CliPanelProcessLauncher`, `createTicketPanelExtension` | `test/panel-runtime.test.ts`, `test/panel-process.test.ts`, `test/ticket-panel-extension.test.ts` | `npm run build && node --test dist/test/panel-runtime.test.js dist/test/panel-process.test.js dist/test/ticket-panel-extension.test.js` |
+| Change Panel seats, hidden-peer execution, or review/grilling advisory tools | [Review Panel and controlled advisory seats](architecture/panels.md) | `src/panel-runtime.ts`, `src/panel-process.ts`, `src/ticket-panel-extension.ts` | `runGrillingPanel`, `runReviewPanel`, `CliPanelProcessLauncher`, `createTicketPanelExtension` | `test/panel-runtime.test.ts`, `test/panel-process.test.ts`, `test/ticket-panel-extension.test.ts` | `npm run build && node --test dist/test/panel-runtime.test.js dist/test/panel-process.test.js dist/test/ticket-panel-extension.test.js` |
 
 ## What this wiki covers
 
@@ -58,6 +58,8 @@ Start here, then follow the section pages below for the repository's runtime sea
 - [Launch and automation](workflows/launch-and-automation.md)
 - [Capability boundary](architecture/capability-boundary.md)
 - [Review Panel and controlled advisory seats](architecture/panels.md)
+- [Coordinator dashboard design](../docs/automode-dashboard-design.md)
+- [Coordinator supervision ADR](../docs/adr/0001-use-a-local-web-dashboard-for-coordinator-supervision.md)
 - [Bundled skill catalog](skills/catalog.md)
 - [Fast mode integration](integrations/fast-mode.md)
 - [Personal WeChat integration](integrations/wechat.md)
@@ -83,4 +85,4 @@ Start here, then follow the section pages below for the repository's runtime sea
 
 ## Notes for future updates
 
-The repository has TypeScript application code for startup validation, capability profiles and the Automode Capability Attestation Session, controlled services, fast mode, repository Coordinator locking, GitHub tracking, Ticket Sessions, isolated workspaces, and the three-seat Panel runtime. Keep the durable persisted concept named the Automode Run Record; the capability profile is the allowlist used during session construction. The root `CONTEXT.md` remains the canonical vocabulary source.
+The repository has TypeScript application code for startup validation, capability profiles and the Automode Capability Attestation Session, controlled services, fast mode, repository Coordinator locking, GitHub tracking, Ticket Sessions, isolated workspaces, and the configurable Panel runtime. Keep the durable persisted concept named the Automode Run Record; the capability profile is the allowlist used during session construction. The root `CONTEXT.md` remains the canonical vocabulary source.

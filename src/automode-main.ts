@@ -20,7 +20,9 @@ import {
 import {
   AUTOMODE_MODE_LABELS,
   parseConfirmedAutomationStageConfiguration,
+  restoreAutomationStageOperatingState,
   type AutomationStageConfiguration,
+  type AutomationStageOperatingState,
 } from "./stage-configuration.js";
 
 export interface StartAutomodeMainOptions {
@@ -43,6 +45,7 @@ export interface StartAutomodeMainOptions {
 export interface StartedAutomodeMainSession {
   cwd: string;
   configuration: AutomationStageConfiguration;
+  operatingState: AutomationStageOperatingState;
   sessionName: string;
   sessionFile: string | undefined;
   runRecordFile: string;
@@ -106,9 +109,9 @@ export async function startAutomodeMainSession(
     options.serializedConfiguration,
     options.configurationConfirmation,
   );
+  const operatingState = restoreAutomationStageOperatingState(configuration);
   const validated = await validateAutomodeStartup({
     repository: options.repository,
-    configuration,
     defaultReviewerExecution: options.defaultReviewerExecution,
     home: options.home,
     normalAgentDir: options.normalAgentDir,
@@ -126,7 +129,6 @@ export async function startAutomodeMainSession(
   try {
     const attestationSession = await createCapabilitySession({
       cwd: validated.repository,
-      configuration,
       defaultReviewerExecution: options.defaultReviewerExecution,
       model: options.model,
       home: options.home,
@@ -227,6 +229,7 @@ export async function startAutomodeMainSession(
   return {
     cwd: runtime.cwd,
     configuration,
+    operatingState,
     sessionName,
     sessionFile: runtime.session.sessionFile,
     runRecordFile,
@@ -261,7 +264,7 @@ async function main(): Promise<void> {
   const repository = process.argv[2];
   if (!repository) throw new Error("Missing caller repository path");
   const serializedConfiguration = process.env.AUTOMODE_STAGE_CONFIGURATION;
-  if (!serializedConfiguration) throw new Error("Missing immutable Automation Stage Configuration");
+  if (!serializedConfiguration) throw new Error("Missing launch-baseline Automation Stage Configuration");
   const configurationConfirmation = process.env.AUTOMODE_STAGE_CONFIGURATION_CONFIRMATION;
   if (!configurationConfirmation) throw new Error("Missing Automation Stage Configuration confirmation");
   const serializedDefaultReviewer = process.env.AUTOMODE_DEFAULT_REVIEWER_EXECUTION;

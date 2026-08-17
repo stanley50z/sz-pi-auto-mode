@@ -6,12 +6,10 @@ import { setTimeout as delay } from "node:timers/promises";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
   createAutomodeCapabilityProfile,
-  ORDINARY_TICKET_EXECUTION,
   type ExecutionProfile,
   type PiExecutionProfile,
 } from "./capability-profile.js";
 import { repositoryRoot, resolveAutomodePaths } from "./paths.js";
-import type { AutomationStageConfiguration } from "./stage-configuration.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -23,8 +21,7 @@ export type ExecutionProfileAttestor = (profiles: readonly ExecutionProfile[]) =
 
 export interface ValidateAutomodeStartupOptions {
   repository: string;
-  configuration: AutomationStageConfiguration;
-  defaultReviewerExecution?: PiExecutionProfile;
+  defaultReviewerExecution: PiExecutionProfile;
   home?: string;
   normalAgentDir?: string;
   runner?: StartupCommandRunner;
@@ -51,16 +48,12 @@ export const processStartupCommandRunner: StartupCommandRunner = {
 };
 
 function requiredExecutionProfiles(
-  configuration: AutomationStageConfiguration,
   defaultReviewerExecution: PiExecutionProfile | undefined,
 ): readonly ExecutionProfile[] {
-  const needsPanel = configuration.stages.includes("auto-grilling")
-    || configuration.stages.includes("auto-review");
-  if (!needsPanel) return [ORDINARY_TICKET_EXECUTION];
   if (!defaultReviewerExecution) {
-    throw new Error("Panel-enabled Automode requires the default Reviewer execution profile");
+    throw new Error("Automode requires the default Reviewer execution profile");
   }
-  return createAutomodeCapabilityProfile(configuration, defaultReviewerExecution).panelExecutions;
+  return createAutomodeCapabilityProfile(defaultReviewerExecution).panelExecutions;
 }
 
 export async function attestClaudeCodeExecutionProfile(
@@ -137,12 +130,6 @@ function githubSlugFromRemote(remote: string): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-function requiredGitHubPermission(configuration: AutomationStageConfiguration): "TRIAGE" | "WRITE" {
-  return configuration.stages.includes("auto-implement") || configuration.stages.includes("auto-review")
-    ? "WRITE"
-    : "TRIAGE";
 }
 
 function hasGitHubPermission(actual: string, required: "TRIAGE" | "WRITE"): boolean {
@@ -274,11 +261,11 @@ export async function validateAutomodeStartup(
   ) {
     throw new Error("GitHub repository access failed: local origin and gh repository identity do not match");
   }
-  const permission = requiredGitHubPermission(options.configuration);
+  const permission = "WRITE";
   if (typeof viewed.viewerPermission !== "string" || !hasGitHubPermission(viewed.viewerPermission, permission)) {
     throw new Error(`GitHub repository access failed: Automode requires ${permission} permission`);
   }
-  const profiles = requiredExecutionProfiles(options.configuration, options.defaultReviewerExecution);
+  const profiles = requiredExecutionProfiles(options.defaultReviewerExecution);
   try {
     if (options.attestExecutions) await options.attestExecutions(profiles);
     else await defaultExecutionAttestor(profiles, options, runner);

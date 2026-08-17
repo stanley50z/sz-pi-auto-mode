@@ -52,7 +52,7 @@ test("startup verifies the GitHub repository and every required execution profil
 
   const result = await validateAutomodeStartup({
     repository,
-    configuration: half,
+    defaultReviewerExecution,
     runner,
     attestExecutions: async (profiles) => {
       attested.push(...profiles);
@@ -76,9 +76,10 @@ test("startup verifies the GitHub repository and every required execution profil
     },
     { command: "gh", args: ["repo", "view", "--json", "id,nameWithOwner,url,viewerPermission"], cwd: repository },
   ]);
-  assert.deepEqual(attested, [
-    createAutomodeCapabilityProfile(half, defaultReviewerExecution).ordinaryTicketExecution,
-  ]);
+  assert.deepEqual(
+    attested,
+    createAutomodeCapabilityProfile(defaultReviewerExecution).panelExecutions,
+  );
 });
 
 test("startup does not depend on the intermittently unavailable REST user endpoint", async () => {
@@ -93,33 +94,13 @@ test("startup does not depend on the intermittently unavailable REST user endpoi
 
   const result = await validateAutomodeStartup({
     repository,
-    configuration: half,
+    defaultReviewerExecution,
     runner,
     attestExecutions: async () => undefined,
   });
 
   assert.equal(result.actor, "automation-user");
   assert.equal(runner.calls.some(({ command, args }) => command === "gh" && args[0] === "api"), false);
-});
-
-test("panel execution profiles are startup requirements only when a panel stage is enabled", async () => {
-  const repository = repositoryFixture();
-  const runner = new RecordedRunner();
-  const profiles: unknown[] = [];
-  const configuration = createAutomationStageConfiguration("half", ["auto-review"]);
-
-  await validateAutomodeStartup({
-    repository,
-    configuration,
-    defaultReviewerExecution,
-    runner,
-    attestExecutions: async (required) => {
-      profiles.push(...required);
-    },
-  });
-
-  const profile = createAutomodeCapabilityProfile(configuration, defaultReviewerExecution);
-  assert.deepEqual(profiles, profile.panelExecutions);
 });
 
 test("Claude Code startup attestation executes the exact configured model and reasoning profile", async () => {
@@ -195,7 +176,7 @@ test("startup binds gh access to local origin and requires mutation permission",
   await assert.rejects(
     () => validateAutomodeStartup({
       repository,
-      configuration: half,
+      defaultReviewerExecution,
       runner: mismatch,
       attestExecutions: async () => undefined,
     }),
@@ -218,11 +199,11 @@ test("startup binds gh access to local origin and requires mutation permission",
   await assert.rejects(
     () => validateAutomodeStartup({
       repository,
-      configuration: half,
+      defaultReviewerExecution,
       runner: readOnly,
       attestExecutions: async () => undefined,
     }),
-    /requires TRIAGE permission/,
+    /requires WRITE permission/,
   );
 });
 
@@ -244,7 +225,7 @@ test("startup polls through consecutive transient GitHub service failures instea
 
   const result = await validateAutomodeStartup({
     repository,
-    configuration: half,
+    defaultReviewerExecution,
     runner,
     attestExecutions: async () => undefined,
   });
@@ -280,7 +261,7 @@ test("repository, GitHub authentication/access, and execution failures abort sta
     await assert.rejects(
       () => validateAutomodeStartup({
         repository,
-        configuration: half,
+        defaultReviewerExecution,
         runner,
         attestExecutions: async () => undefined,
       }),
@@ -291,7 +272,7 @@ test("repository, GitHub authentication/access, and execution failures abort sta
   await assert.rejects(
     () => validateAutomodeStartup({
       repository: repositoryFixture(),
-      configuration: half,
+      defaultReviewerExecution,
       runner: new RecordedRunner(),
       attestExecutions: async () => {
         throw new Error("missing model");

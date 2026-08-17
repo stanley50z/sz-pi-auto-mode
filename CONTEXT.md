@@ -17,12 +17,16 @@ The explicit allowlist of tools and skills available to an Automode Run. The MVP
 _Avoid_: Global skill discovery, inherited Pi setup, general configuration schema
 
 **Automation Stage**:
-One independently configurable part of the repository workflow: Auto-Triage, Auto-Grilling, Auto-Implement, or Auto-Review. A stage's setting is fixed for an Automode Run; enabled stages are handled automatically and disabled stages remain human-controlled.
+One independently controllable part of the repository workflow: Auto-Triage, Auto-Grilling, Auto-Implement, or Auto-Review. Its launch baseline comes from the Automation Stage Configuration, while its current process behavior comes from its Automation Stage Operating State.
 _Avoid_: Sub-mode, workflow phase
 
 **Automation Stage Configuration**:
-The immutable launch selection containing the Full-Auto or Half-Auto label and the enabled Automation Stages confirmed when an Automode Run launches. Runtime behavior is determined by the enabled stages. The configuration is serialized across the Automode Bridge process boundary and remains fixed for that run.
-_Avoid_: Stage profile, Automode Capability Profile
+The fixed launch baseline containing the Full-Auto or Half-Auto label and the baseline-enabled Automation Stages confirmed when an Automode Run launches. It is serialized across the Automode Bridge process boundary and stored in the Automode Run Record. It does not represent process-local Stage changes.
+_Avoid_: Automation Stage Operating State, stage profile, Automode Capability Profile
+
+**Automation Stage Operating State**:
+The process-local `ON`, `DRAINING`, or `OFF` state of one Automation Stage. `ON` permits discovery and dispatch, `DRAINING` prevents new dispatch while active Ticket Sessions settle, and `OFF` leaves matching work human-controlled. All four Stages may be `OFF`. The state is not stored in the Automode Run Record and is restored from the Automation Stage Configuration whenever the Coordinator process restarts.
+_Avoid_: Automation Stage Configuration, pause flag, durable Stage setting
 
 **Auto-Triage**:
 The Automation Stage that discovers and processes tracker items marked `needs-triage`.
@@ -45,7 +49,7 @@ The human-controlled creation of a Wayfinder map, synthesis with `to-spec`, and 
 _Avoid_: Auto-Plan, planning stage
 
 **Automode Stage Skill**:
-An extension-owned customization of a native Matt Pocock skill, loaded only when its Automation Stage is enabled. It retains the canonical identity of its native counterpart; disabled stages use the unchanged native skill.
+An extension-owned customization of a native Matt Pocock skill that retains the canonical identity of its native counterpart. Every Automode Stage Skill is preloaded so a process-local Stage can be enabled without changing the capability boundary; an `OFF` Stage prevents Coordinator dispatch rather than substituting a native skill inside Automode.
 _Avoid_: Full-Auto Skill Suite, global skill
 
 **Automode Run**:
@@ -85,11 +89,11 @@ One independently executed advisory seat in the Review Panel. A Reviewer examine
 _Avoid_: Panel Member, Review Session, voter
 
 **Half-Auto Mode**:
-The launch preset that initially enables Auto-Implement and Auto-Review while leaving Auto-Triage and Auto-Grilling disabled. The user may enable any non-empty selection, including all four Automation Stages. Runtime behavior comes from the enabled-stage toggles; disabled stages remain human-controlled and use their native Matt Pocock skills unchanged.
+The launch label whose selector preset initially enables Auto-Implement and Auto-Review while leaving Auto-Triage and Auto-Grilling off. The user may confirm any non-empty launch baseline, including all four Automation Stages. The label remains fixed even when process-local Automation Stage Operating State changes.
 _Avoid_: Assisted mode, manual mode, proper subset
 
 **Full-Auto Mode**:
-The launch preset with all four Automation Stages enabled. A Half-Auto selection with all four enabled has the same stage automation behavior; the label records the user's launch selection rather than a different execution mechanism.
+The launch label whose baseline enables all four Automation Stages. It remains fixed even when one or all process-local Stage states become `OFF`; a Half-Auto launch baseline with all four Stages has the same initial operating state.
 _Avoid_: Unattended mode, headless mode
 
 **Deliberation Panel**:
