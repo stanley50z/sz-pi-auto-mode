@@ -147,13 +147,16 @@ function defaultChildEntrypoint(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "ticket-session-main.js");
 }
 
-const defaultLauncher: TicketSessionProcessLauncher = ({ entrypoint, cwd, env }) =>
-  spawn(process.execPath, [entrypoint], {
+const defaultLauncher: TicketSessionProcessLauncher = ({ entrypoint, cwd, env }) => {
+  const runtimeLoader = env.AUTOMODE_PI_RUNTIME_LOADER;
+  if (!runtimeLoader) throw new Error("Ticket Session is missing the launching Pi runtime loader");
+  return spawn(process.execPath, ["--import", runtimeLoader, entrypoint], {
     cwd,
     env,
     stdio: ["ignore", "inherit", "inherit", "ipc"],
     windowsHide: true,
   }) as TicketSessionProcess;
+};
 
 export function createCanonicalTicketSessionPrompt(skillName: string, itemUrl: string): string {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(skillName)) {

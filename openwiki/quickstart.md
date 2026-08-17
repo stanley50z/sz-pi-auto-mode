@@ -17,6 +17,7 @@ This repository is an early-stage Pi extension centered on **Automode**, a disti
 - the product launches from **`/automode` inside normal Pi**
 - `pi automode` is obsolete in the agent guidance
 - Automode uses an immutable stage configuration, a confirmed handoff digest, and a repository-scoped Main Session / Coordinator boundary; independent full-process Ticket Sessions perform stage work
+- the `/automode` bridge hands off to a fresh child process that confirms the serialized stage configuration and keeps terminal ownership in the launch seam
 - startup fails closed until repository access, the Automode Capability Attestation Session, canonical skill provenance, and the repository Coordinator lock all validate
 - the MVP is organized into four Automation Stages: Auto-Triage, Auto-Grilling, Auto-Implement, and Auto-Review
 - panel-enabled startup authenticates Claude Code and probes each exact configured Claude Code model/reasoning profile

@@ -18,6 +18,9 @@ function exitCode(code: number | null, signal: NodeJS.Signals | null): number {
  * This function never returns control to the caller's interactive experience.
  */
 export async function handoffTerminal(options: HandoffOptions): Promise<never> {
+  // Stop normal Pi's active TUI reader before the Automode child inherits the
+  // same console. Otherwise both processes consume keystrokes on Windows.
+  process.stdin.pause();
   const child = spawn(options.command, options.args, {
     cwd: options.cwd,
     env: options.env ?? process.env,

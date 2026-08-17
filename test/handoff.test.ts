@@ -43,18 +43,21 @@ setInterval(() => {}, 1000);
     ? 'process.emit("SIGTERM", "SIGTERM")'
     : 'process.emit("SIGINT", "SIGINT"); setTimeout(() => process.emit("SIGTERM", "SIGTERM"), 25)';
   writeFileSync(bridgeScript, `
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { handoffTerminal } from ${JSON.stringify(pathToFileURL(handoffModule).href)};
-process.stdin.once("data", () => { ${trigger}; });
+const signalWhenReady = setInterval(() => {
+  if (!existsSync(${JSON.stringify(readyFile)})) return;
+  clearInterval(signalWhenReady);
+  ${trigger};
+}, 10);
 await handoffTerminal({ command: process.execPath, args: [${JSON.stringify(childScript)}], cwd: ${JSON.stringify(fixture)} });
 writeFileSync(${JSON.stringify(resumeFile)}, "resumed");
 `);
 
-  const bridge = spawn(process.execPath, [bridgeScript], { stdio: ["pipe", "ignore", "pipe"] });
+  const bridge = spawn(process.execPath, [bridgeScript], { stdio: ["ignore", "ignore", "pipe"] });
   let stderr = "";
   bridge.stderr.on("data", (chunk) => { stderr += chunk; });
   await waitForFile(readyFile);
-  bridge.stdin.end("terminate\n");
   const code = await new Promise<number | null>((resolveExit, reject) => {
     bridge.once("error", reject);
     bridge.once("exit", resolveExit);

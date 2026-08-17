@@ -4,7 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, write
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   AutomodeTicketSessionHost,
   TicketSessionHost,
@@ -396,9 +396,19 @@ test("the public host seam completes a full child-process run with persistent hi
   const cwd = mkdtempSync(join(tmpdir(), "ticket-process-e2e-"));
   mkdirSync(join(cwd, ".git"));
   const events: unknown[] = [];
+  const preloadMarker = join(cwd, "launching-pi-runtime-loaded");
+  const runtimeLoader = join(cwd, "launching-pi-runtime-loader.mjs");
+  writeFileSync(runtimeLoader, `
+import { writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(preloadMarker)}, "loaded");
+`);
   const host = new TicketSessionHost({
     childEntrypoint: fileURLToPath(import.meta.url),
-    env: { ...process.env, AUTOMODE_TICKET_SESSION_FIXTURE_CHILD: "1" },
+    env: {
+      ...process.env,
+      AUTOMODE_PI_RUNTIME_LOADER: pathToFileURL(runtimeLoader).href,
+      AUTOMODE_TICKET_SESSION_FIXTURE_CHILD: "1",
+    },
   });
   const run = host.launch({
     cwd,
@@ -419,6 +429,7 @@ test("the public host seam completes a full child-process run with persistent hi
     /\/skill:triage https:\/\/github\.com\/owner\/repository\/issues\/22/,
   );
   assert.notEqual(run.processId, process.pid);
+  assert.equal(readFileSync(preloadMarker, "utf8"), "loaded");
   assert.equal(events.some((event) =>
     (event as { type?: string; state?: string }).type === "lifecycle"
     && (event as { state?: string }).state === "ready"), true);

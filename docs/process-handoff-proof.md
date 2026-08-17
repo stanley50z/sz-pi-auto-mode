@@ -2,7 +2,7 @@
 
 The `prove:handoff` fixture proves the launch seam required before the Automode Coordinator performs tracker work. That fixture intentionally performs no GitHub access, issue discovery, claim, or mutation; production startup validation is documented separately in `docs/automode-launch.md`.
 
-Run on the pinned Node baseline (`22.19.0` in `.node-version`; `package.json` accepts compatible newer releases) with the pinned Pi SDK:
+Run on the pinned Node baseline (`22.19.0` in `.node-version`; `package.json` accepts compatible newer releases). Development pins a Pi SDK only for compilation and tests; `/automode` binds the child to the same Pi package installation that launched the Bridge:
 
 ```sh
 npm ci
@@ -10,7 +10,7 @@ npm test
 npm run prove:handoff
 ```
 
-`prove:handoff` starts a fresh Node/Pi process in the caller's working directory with inherited terminal streams. On POSIX, the Automode process receives a separate process group so terminal-generated signals reach the waiting bridge once and are forwarded once. Windows retains the inherited console: console `Ctrl-C` already reaches both processes and is therefore not re-forwarded, while non-console termination requests use an IPC control channel so cleanup can run instead of calling Windows' forceful `child.kill()`. The bridge exits with the Automode process's status and cannot resume normal Pi.
+`prove:handoff` starts a fresh Node/Pi process in the caller's working directory with inherited terminal streams. The production Bridge passes the launching Pi package directory across that boundary and preloads a fail-closed resolver so the Main Session and descendant Ticket Session processes load Pi core, AI, TUI, and shared schema imports from that exact installation rather than this package's development dependencies. On POSIX, the Automode process receives a separate process group so terminal-generated signals reach the waiting bridge once and are forwarded once. Windows retains the inherited console: normal Pi pauses its stdin reader before spawn so only Automode consumes keystrokes; console `Ctrl-C` already reaches both processes and is therefore not re-forwarded, while non-console termination requests use an IPC control channel so cleanup can run instead of calling Windows' forceful `child.kill()`. The bridge exits with the Automode process's status and cannot resume normal Pi.
 
 The Automode process composes Pi through public SDK APIs:
 

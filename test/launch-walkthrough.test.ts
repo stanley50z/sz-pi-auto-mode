@@ -43,7 +43,10 @@ export default function (pi) {
     selectConfiguration: selectAutomationStageConfiguration,
     launch: async (request) => {
       const plan = createAutomodeLaunchPlan(request);
-      return handoffTerminal({ ...plan, args: [proofEntrypoint, ...plan.args.slice(1)] });
+      return handoffTerminal({
+        ...plan,
+        args: [...plan.args.slice(0, 2), proofEntrypoint, ...plan.args.slice(3)],
+      });
     },
   });
 }
@@ -111,6 +114,7 @@ test("the Main Session rejects environment tampering between confirmation and ch
   const plan = createAutomodeLaunchPlan({
     cwd: repository,
     serializedConfiguration: confirmed,
+    piPackageDir: resolve(dirname(fileURLToPath(import.meta.url)), "../../node_modules/@earendil-works/pi-coding-agent"),
     defaultReviewerExecution: {
       harness: "pi",
       provider: "openai-codex",

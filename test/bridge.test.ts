@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { getPackageDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import automodeBridge, {
   selectAutomationStageConfiguration,
   type AutomodeBridgeDependencies,
@@ -79,6 +79,7 @@ test("a confirmed configuration is serialized and launches from the repository r
       model: string;
       reasoning: "high";
     };
+    piPackageDir: string;
   }> = [];
   automodeBridge(harness.pi, {
     selectConfiguration: async () => ({ mode: "full", stages: AUTOMATION_STAGES }),
@@ -98,5 +99,6 @@ test("a confirmed configuration is serialized and launches from the repository r
       model: "claude-opus-4-8",
       reasoning: "high",
     },
+    piPackageDir: getPackageDir(),
   }]);
 });
