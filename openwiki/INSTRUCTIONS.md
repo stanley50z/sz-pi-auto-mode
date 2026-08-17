@@ -8,4 +8,5 @@ Repository-specific constraints:
 - The capability session used during startup is an **Automode Capability Attestation Session**, not a Ticket Session. Never describe `src/capability-session.ts` or `createCapabilitySession` as constructing or wiring Ticket Sessions.
 - OpenWiki refresh is intentionally local-only with `OPENWIKI_PROVIDER=openai-chatgpt openwiki code --update --print`. This repository must not have or recommend a scheduled OpenWiki CI workflow.
 - Preserve `/automode` as the launch entrypoint; `pi automode` is obsolete.
+- Panel seat counts are configurable. Every panel includes the Pi provider/model active when `/automode` launches; the current additional seats are Pi / `github-copilot/claude-fable-5` and Pi / `openai-codex/gpt-5.6-sol`, all at high reasoning.
 - Keep Personal-WeChat outside the Automode MVP.

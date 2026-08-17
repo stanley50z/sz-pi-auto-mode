@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  createPanelSeats,
   createProductionPanelSeatLauncher,
   runGrillingPanel,
   runReviewPanel,
@@ -9,6 +10,13 @@ import {
   type PanelSeatLauncher,
   type ProductionPanelProcessLauncher,
 } from "../src/panel-runtime.js";
+
+const panelExecutions = [
+  { harness: "pi", provider: "anthropic", model: "claude-opus-4-8", reasoning: "high" },
+  { harness: "pi", provider: "github-copilot", model: "claude-fable-5", reasoning: "high" },
+  { harness: "pi", provider: "openai-codex", model: "gpt-5.6-sol", reasoning: "high" },
+] as const;
+const panelSeats = createPanelSeats(panelExecutions);
 
 function assertGrillingLaunch(request: PanelSeatLaunchRequest): asserts request is GrillingSeatLaunchRequest {
   assert.equal(request.kind, "grilling");
@@ -27,7 +35,23 @@ function usableGrillingAnswer(proposedAnswer: string) {
   };
 }
 
-test("a grilling round launches exactly the three configured seats concurrently with one immutable context", async () => {
+test("panel attribution supports any positive configured seat count", () => {
+  assert.deepEqual(createPanelSeats([{
+    harness: "pi",
+    provider: "anthropic",
+    model: "claude-opus-4-8",
+    reasoning: "high",
+  }]).map(({ seat }) => seat), ["seat-1"]);
+  assert.deepEqual(createPanelSeats([...panelExecutions, {
+    harness: "pi",
+    provider: "openai-codex",
+    model: "gpt-5.6-terra",
+    reasoning: "high",
+  }]).map(({ seat }) => seat), ["seat-1", "seat-2", "seat-3", "seat-4"]);
+  assert.throws(() => createPanelSeats([]), /at least one configured seat/);
+});
+
+test("a grilling round launches every configured seat concurrently with one immutable context", async () => {
   const launches: PanelSeatLaunchRequest[] = [];
   const completions: Array<(value: unknown) => void> = [];
   const launcher: PanelSeatLauncher = (request) => {
@@ -50,33 +74,11 @@ test("a grilling round launches exactly the three configured seats concurrently 
         }],
       },
     },
-  }, launcher);
+  }, launcher, panelSeats);
 
   await Promise.resolve();
   assert.equal(launches.length, 3);
-  assert.deepEqual(launches.map(({ attribution }) => attribution), [
-    {
-      seat: "seat-1",
-      harness: "pi",
-      providerSlug: "openai-codex",
-      modelSlug: "gpt-5.6-sol",
-      reasoningLevel: "high",
-    },
-    {
-      seat: "seat-2",
-      harness: "pi",
-      providerSlug: "kimi-coding",
-      modelSlug: "k3",
-      reasoningLevel: "high",
-    },
-    {
-      seat: "seat-3",
-      harness: "claude-code",
-      providerSlug: "anthropic",
-      modelSlug: "claude-fable-5",
-      reasoningLevel: "high",
-    },
-  ]);
+  assert.deepEqual(launches.map(({ attribution }) => attribution), panelSeats);
   assert.equal(launches[0]!.context, launches[1]!.context);
   assert.equal(launches[1]!.context, launches[2]!.context);
   assert.equal(Object.isFrozen(launches[0]!.context), true);
@@ -110,7 +112,7 @@ test("grilling seats receive verbatim questions without recommendations, peers, 
         }],
       },
     },
-  }, launcher);
+  }, launcher, panelSeats);
 
   const first = launches[0]!;
   assertGrillingLaunch(first);
@@ -138,7 +140,7 @@ test("grilling rejects incomplete prior-round context before launching a seat", 
         priorFinalAnswers: [],
         round: { number: 2, questions: [{ number: 1, question: "Current question?" }] },
       },
-    }, launcher),
+    }, launcher, panelSeats),
     /complete final answers for every prior round/,
   );
   assert.equal(launches, 0);
@@ -176,7 +178,7 @@ test("grilling validates every question and continues with one success while rec
         ],
       },
     },
-  }, launcher);
+  }, launcher, panelSeats);
 
   assert.deepEqual(result.answers.map(({ attribution }) => attribution.seat), ["seat-3"]);
   assert.deepEqual(result.failures.map(({ attribution, error }) => [attribution.seat, error]), [
@@ -185,7 +187,7 @@ test("grilling validates every question and continues with one success while rec
   ]);
 });
 
-test("grilling fails only after all three seats fail and never retries or substitutes", async () => {
+test("grilling fails only after every configured seat fails and never retries or substitutes", async () => {
   const calls: string[] = [];
   const launcher: PanelSeatLauncher = async ({ attribution }) => {
     calls.push(attribution.seat);
@@ -200,10 +202,10 @@ test("grilling fails only after all three seats fail and never retries or substi
         priorFinalAnswers: [],
         round: { number: 1, questions: [{ number: 1, question: "Proceed?" }] },
       },
-    }, launcher),
+    }, launcher, panelSeats),
     (error: unknown) => {
       assert.equal(error instanceof Error, true);
-      assert.match((error as Error).message, /all three.*failed/i);
+      assert.match((error as Error).message, /every configured seat failed/i);
       assert.deepEqual(
         (error as Error & { failures: Array<{ attribution: { seat: string } }> }).failures
           .map(({ attribution }) => attribution.seat),
@@ -215,7 +217,7 @@ test("grilling fails only after all three seats fail and never retries or substi
   assert.deepEqual(calls, ["seat-1", "seat-2", "seat-3"]);
 });
 
-test("review launches all three seats concurrently on one immutable exact-head context and returns exact attribution", async () => {
+test("review launches every configured seat concurrently on one immutable exact-head context and returns exact attribution", async () => {
   const launches: PanelSeatLaunchRequest[] = [];
   const completions: Array<(value: unknown) => void> = [];
   const launcher: PanelSeatLauncher = (request) => {
@@ -234,7 +236,7 @@ test("review launches all three seats concurrently on one immutable exact-head c
       commits: ["abc123 Implement runtime"],
       validationEvidence: ["npm test passed"],
     },
-  }, launcher);
+  }, launcher, panelSeats);
 
   await Promise.resolve();
   assert.equal(launches.length, 3);
@@ -246,44 +248,16 @@ test("review launches all three seats concurrently on one immutable exact-head c
 
   completions.forEach((complete) => complete({ outcome: "no-actionable-findings", findings: [] }));
   const result = await running;
-  assert.deepEqual(result.reports, [
-    {
-      round: 1,
-      headSha: "0123456789abcdef",
-      seat: "seat-1",
-      harness: "pi",
-      providerSlug: "openai-codex",
-      modelSlug: "gpt-5.6-sol",
-      reasoningLevel: "high",
-      outcome: "no-actionable-findings",
-      findings: [],
-    },
-    {
-      round: 1,
-      headSha: "0123456789abcdef",
-      seat: "seat-2",
-      harness: "pi",
-      providerSlug: "kimi-coding",
-      modelSlug: "k3",
-      reasoningLevel: "high",
-      outcome: "no-actionable-findings",
-      findings: [],
-    },
-    {
-      round: 1,
-      headSha: "0123456789abcdef",
-      seat: "seat-3",
-      harness: "claude-code",
-      providerSlug: "anthropic",
-      modelSlug: "claude-fable-5",
-      reasoningLevel: "high",
-      outcome: "no-actionable-findings",
-      findings: [],
-    },
-  ]);
+  assert.deepEqual(result.reports, panelSeats.map((seat) => ({
+    round: 1,
+    headSha: "0123456789abcdef",
+    ...seat,
+    outcome: "no-actionable-findings",
+    findings: [],
+  })));
 });
 
-test("review fails after every seat terminates unless all three reports are usable", async () => {
+test("review fails after every seat terminates unless every report is usable", async () => {
   const calls: string[] = [];
   const launcher: PanelSeatLauncher = async ({ attribution }) => {
     calls.push(attribution.seat);
@@ -318,13 +292,13 @@ test("review fails after every seat terminates unless all three reports are usab
         reviewSessionDispositions: ["Valid and in scope"],
         fixDiff: "diff --git a/src/parser.ts b/src/parser.ts",
       },
-    }, launcher),
+    }, launcher, panelSeats),
     (error: unknown) => {
       const failure = error as Error & {
         failures: Array<{ attribution: { seat: string }; error: string }>;
         successfulResults: unknown[];
       };
-      assert.match(failure.message, /all three configured seats/i);
+      assert.match(failure.message, /every configured seat/i);
       assert.deepEqual(failure.failures.map(({ attribution }) => attribution.seat), ["seat-2"]);
       assert.match(failure.failures[0]!.error, /requires a root cause, violated requirement, and evidence/);
       assert.equal(failure.successfulResults.length, 2);

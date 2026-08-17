@@ -132,6 +132,7 @@ test("a deterministic /automode journey advances triage, grilling, implementatio
         repository: request.cwd,
         serializedConfiguration: request.serializedConfiguration,
         configurationConfirmation: confirmSerializedAutomationStageConfiguration(request.serializedConfiguration),
+        defaultReviewerExecution: request.defaultReviewerExecution,
         home,
         model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
         coordinator,
@@ -170,6 +171,7 @@ test("a deterministic /automode journey advances triage, grilling, implementatio
     () => command!("", {
       cwd: repository,
       mode: "tui",
+      model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
       waitForIdle: async () => undefined,
       ui: { notify() {} },
     }),

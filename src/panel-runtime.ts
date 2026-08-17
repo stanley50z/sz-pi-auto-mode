@@ -1,7 +1,7 @@
-import { PANEL_EXECUTIONS, type ExecutionProfile } from "./capability-profile.js";
+import type { ExecutionProfile } from "./capability-profile.js";
 
 export interface PanelSeatAttribution {
-  readonly seat: "seat-1" | "seat-2" | "seat-3";
+  readonly seat: `seat-${number}`;
   readonly harness: ExecutionProfile["harness"];
   readonly providerSlug: string;
   readonly modelSlug: string;
@@ -167,20 +167,18 @@ export class PanelRuntimeError extends Error {
   }
 }
 
-function attribution(profile: ExecutionProfile, index: number): PanelSeatAttribution {
-  if (index < 0 || index > 2) throw new Error("The panel requires exactly three configured seats");
-  return Object.freeze({
-    seat: `seat-${index + 1}` as PanelSeatAttribution["seat"],
+export function createPanelSeats(
+  executions: readonly ExecutionProfile[],
+): readonly PanelSeatAttribution[] {
+  if (executions.length === 0) throw new Error("The panel requires at least one configured seat");
+  return Object.freeze(executions.map((profile, index) => Object.freeze({
+    seat: `seat-${index + 1}` as const,
     harness: profile.harness,
     providerSlug: profile.provider ?? "anthropic",
     modelSlug: profile.model,
     reasoningLevel: profile.reasoning,
-  });
+  })));
 }
-
-export const PANEL_SEATS: readonly PanelSeatAttribution[] = Object.freeze(
-  PANEL_EXECUTIONS.map(attribution),
-);
 
 function deepFreeze<T>(value: T): T {
   if (value && typeof value === "object" && !Object.isFrozen(value)) {
@@ -304,13 +302,13 @@ function grillingPrompt(context: GrillingRoundContext): string {
 export async function runGrillingPanel(
   request: GrillingPanelRequest,
   launcher: PanelSeatLauncher,
+  seats: readonly PanelSeatAttribution[],
 ): Promise<GrillingPanelResult> {
-  if (PANEL_SEATS.length !== 3) throw new Error("The panel requires exactly three configured seats");
   const context = deepFreeze(withoutRecommendations(structuredClone(request.context)));
   const questionNumbers = validateGrillingContext(context);
   const prompt = grillingPrompt(context);
   const tools = Object.freeze(["read", "grep", "find", "ls"]);
-  const settled = await Promise.allSettled(PANEL_SEATS.map((seat) => launcher({
+  const settled = await Promise.allSettled(seats.map((seat) => launcher({
     kind: "grilling",
     attribution: seat,
     context,
@@ -320,7 +318,7 @@ export async function runGrillingPanel(
   const answers: AttributedPanelAnswer[] = [];
   const failures: PanelSeatFailure[] = [];
   settled.forEach((result, index) => {
-    const seat = PANEL_SEATS[index]!;
+    const seat = seats[index]!;
     if (result.status === "fulfilled") {
       try {
         answers.push(Object.freeze({
@@ -341,7 +339,7 @@ export async function runGrillingPanel(
     }
   });
   if (answers.length === 0) {
-    throw new PanelRuntimeError("Grilling round failed because all three configured seats failed", failures);
+    throw new PanelRuntimeError("Grilling round failed because every configured seat failed", failures);
   }
   return deepFreeze({ answers, failures });
 }
@@ -416,13 +414,13 @@ function validateReviewReport(value: unknown): {
 export async function runReviewPanel(
   request: ReviewPanelRequest,
   launcher: PanelSeatLauncher,
+  seats: readonly PanelSeatAttribution[],
 ): Promise<ReviewPanelResult> {
-  if (PANEL_SEATS.length !== 3) throw new Error("The panel requires exactly three configured seats");
   const context = immutableClone(request.context);
   validateReviewContext(context);
   const prompt = reviewPrompt(context);
   const tools = Object.freeze(["read", "grep", "find", "ls"]);
-  const settled = await Promise.allSettled(PANEL_SEATS.map((seat) => launcher({
+  const settled = await Promise.allSettled(seats.map((seat) => launcher({
     kind: "review",
     attribution: seat,
     context,
@@ -432,7 +430,7 @@ export async function runReviewPanel(
   const reports: AttributedReviewReport[] = [];
   const failures: PanelSeatFailure[] = [];
   settled.forEach((result, index) => {
-    const seat = PANEL_SEATS[index]!;
+    const seat = seats[index]!;
     if (result.status === "rejected") {
       failures.push(Object.freeze({
         attribution: seat,
@@ -456,9 +454,9 @@ export async function runReviewPanel(
       }));
     }
   });
-  if (reports.length !== 3) {
+  if (reports.length !== seats.length) {
     throw new PanelRuntimeError(
-      "Review round requires usable reports from all three configured seats",
+      "Review round requires usable reports from every configured seat",
       failures,
       reports,
     );

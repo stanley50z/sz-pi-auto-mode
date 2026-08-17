@@ -31,7 +31,13 @@ function bridgeHarness() {
 }
 
 function commandContext(cwd: string) {
-  return { cwd, mode: "tui", waitForIdle: async () => {}, ui: { notify() {} } };
+  return {
+    cwd,
+    mode: "tui",
+    model: { provider: "anthropic", id: "claude-opus-4-8" },
+    waitForIdle: async () => {},
+    ui: { notify() {} },
+  };
 }
 
 test("the bridge registers /automode and cancellation has no launch side effects", async () => {
@@ -64,7 +70,16 @@ test("a confirmed configuration is serialized and launches from the repository r
   mkdirSync(join(repository, ".git"), { recursive: true });
   mkdirSync(nestedDirectory, { recursive: true });
   const harness = bridgeHarness();
-  const launches: Array<{ cwd: string; serializedConfiguration: string }> = [];
+  const launches: Array<{
+    cwd: string;
+    serializedConfiguration: string;
+    defaultReviewerExecution: {
+      harness: "pi";
+      provider: string;
+      model: string;
+      reasoning: "high";
+    };
+  }> = [];
   automodeBridge(harness.pi, {
     selectConfiguration: async () => ({ mode: "full", stages: AUTOMATION_STAGES }),
     launch: async (request) => { launches.push(request); throw new Error("handoff test stop"); },
@@ -77,5 +92,11 @@ test("a confirmed configuration is serialized and launches from the repository r
   assert.deepEqual(launches, [{
     cwd: repository,
     serializedConfiguration: '{"mode":"full","stages":["auto-triage","auto-grilling","auto-implement","auto-review"]}',
+    defaultReviewerExecution: {
+      harness: "pi",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      reasoning: "high",
+    },
   }]);
 });

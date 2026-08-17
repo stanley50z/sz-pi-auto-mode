@@ -12,6 +12,7 @@ import { attestCanonicalCommands, isPathInside } from "./attestation.js";
 import {
   createAutomodeCapabilityProfile,
   type AutomodeCapabilityProfile,
+  type PiExecutionProfile,
 } from "./capability-profile.js";
 import { createControlledServices } from "./controlled-services.js";
 import { repositoryRoot, resolveAutomodePaths } from "./paths.js";
@@ -25,6 +26,7 @@ export interface ProjectResourceAllowlist {
 export interface CapabilitySessionOptions {
   cwd: string;
   configuration: AutomationStageConfiguration;
+  defaultReviewerExecution: PiExecutionProfile;
   model?: Model<any>;
   home?: string;
   normalAgentDir?: string;
@@ -90,7 +92,7 @@ export async function createCapabilitySession(
   options: CapabilitySessionOptions,
 ): Promise<CapabilitySession> {
   const repository = repositoryRoot(options.cwd);
-  const profile = createAutomodeCapabilityProfile(options.configuration);
+  const profile = createAutomodeCapabilityProfile(options.configuration, options.defaultReviewerExecution);
   const paths = resolveAutomodePaths(repository, options.home, options.normalAgentDir);
   mkdirSync(paths.automodeDir, { recursive: true });
   mkdirSync(paths.sessionDir, { recursive: true });

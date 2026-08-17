@@ -18,6 +18,12 @@ function repositoryFixture(): string {
 }
 
 const half = createAutomationStageConfiguration("half", ["auto-triage"]);
+const defaultReviewerExecution = {
+  harness: "pi",
+  provider: "anthropic",
+  model: "claude-opus-4-8",
+  reasoning: "high",
+} as const;
 
 class RecordedRunner implements StartupCommandRunner {
   readonly calls: Array<{ command: string; args: readonly string[]; cwd: string }> = [];
@@ -65,7 +71,9 @@ test("startup verifies the GitHub repository and every required execution profil
     { command: "gh", args: ["repo", "view", "--json", "id,nameWithOwner,url,viewerPermission"], cwd: repository },
     { command: "gh", args: ["api", "user", "--jq", ".login"], cwd: repository },
   ]);
-  assert.deepEqual(attested, [createAutomodeCapabilityProfile(half).ordinaryTicketExecution]);
+  assert.deepEqual(attested, [
+    createAutomodeCapabilityProfile(half, defaultReviewerExecution).ordinaryTicketExecution,
+  ]);
 });
 
 test("panel execution profiles are startup requirements only when a panel stage is enabled", async () => {
@@ -77,13 +85,14 @@ test("panel execution profiles are startup requirements only when a panel stage 
   await validateAutomodeStartup({
     repository,
     configuration,
+    defaultReviewerExecution,
     runner,
     attestExecutions: async (required) => {
       profiles.push(...required);
     },
   });
 
-  const profile = createAutomodeCapabilityProfile(configuration);
+  const profile = createAutomodeCapabilityProfile(configuration, defaultReviewerExecution);
   assert.deepEqual(profiles, profile.panelExecutions);
 });
 

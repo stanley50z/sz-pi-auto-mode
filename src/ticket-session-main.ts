@@ -180,7 +180,7 @@ export const createControlledTicketSession: TicketSessionChildSessionFactory = a
     request.configuration.mode,
     request.configuration.stages,
   );
-  const profile = createAutomodeCapabilityProfile(configuration);
+  const profile = createAutomodeCapabilityProfile(configuration, request.defaultReviewerExecution);
   const requestedSkill = profile.skills.find((skill) => skill.name === request.skillName);
   if (!requestedSkill || requestedSkill.kind !== "stage" || requestedSkill.owner !== "automode") {
     throw new Error(`Skill is not owned by an enabled Automation Stage: ${request.skillName}`);
@@ -196,7 +196,7 @@ export const createControlledTicketSession: TicketSessionChildSessionFactory = a
       cwd,
       normalAgentDir: paths.normalAgentDir,
     }));
-    extensions.push(createTicketPanelExtension(panelLauncher));
+    extensions.push(createTicketPanelExtension(panelLauncher, profile.panelExecutions));
     tools.push("automode_panel");
   }
   const services = await createControlledServices({

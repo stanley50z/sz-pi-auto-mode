@@ -19,6 +19,11 @@ export interface ExecutionProfile {
   readonly reasoning: "high";
 }
 
+export interface PiExecutionProfile extends ExecutionProfile {
+  readonly harness: "pi";
+  readonly provider: string;
+}
+
 export interface AutomodeSettings {
   readonly defaultThinkingLevel: "high";
   readonly enableSkillCommands: true;
@@ -72,18 +77,46 @@ export const AUTOMODE_SETTINGS: AutomodeSettings = Object.freeze({
   defaultProjectTrust: "never",
 });
 
-export const ORDINARY_TICKET_EXECUTION: ExecutionProfile = Object.freeze({
+export const ORDINARY_TICKET_EXECUTION: PiExecutionProfile = Object.freeze({
   harness: "pi",
   provider: "openai-codex",
   model: "gpt-5.6-sol",
   reasoning: "high",
 });
 
-export const PANEL_EXECUTIONS: readonly ExecutionProfile[] = Object.freeze([
+export const ADDITIONAL_PANEL_EXECUTIONS: readonly ExecutionProfile[] = Object.freeze([
+  Object.freeze({ harness: "pi", provider: "github-copilot", model: "claude-fable-5", reasoning: "high" }),
   ORDINARY_TICKET_EXECUTION,
-  Object.freeze({ harness: "pi", provider: "kimi-coding", model: "k3", reasoning: "high" }),
-  Object.freeze({ harness: "claude-code", model: "claude-fable-5", reasoning: "high" }),
 ]);
+
+export function parsePiExecutionProfile(serialized: string): PiExecutionProfile {
+  let value: unknown;
+  try {
+    value = JSON.parse(serialized);
+  } catch (error) {
+    throw new Error("The default Reviewer execution profile is not valid JSON", { cause: error });
+  }
+  if (typeof value !== "object" || value === null) {
+    throw new Error("The default Reviewer execution profile must be an object");
+  }
+  const candidate = value as Record<string, unknown>;
+  if (
+    candidate.harness !== "pi"
+    || typeof candidate.provider !== "string"
+    || candidate.provider.length === 0
+    || typeof candidate.model !== "string"
+    || candidate.model.length === 0
+    || candidate.reasoning !== "high"
+  ) {
+    throw new Error("The default Reviewer execution profile is invalid");
+  }
+  return Object.freeze({
+    harness: "pi",
+    provider: candidate.provider,
+    model: candidate.model,
+    reasoning: "high",
+  });
+}
 
 function packageSkillRoot(owner: CapabilitySkillOwner, name: string): string {
   const sourceDirectory = dirname(fileURLToPath(import.meta.url));
@@ -92,8 +125,10 @@ function packageSkillRoot(owner: CapabilitySkillOwner, name: string): string {
 
 export function createAutomodeCapabilityProfile(
   configuration: AutomationStageConfiguration,
+  defaultReviewerExecution: PiExecutionProfile,
 ): AutomodeCapabilityProfile {
   const enabledStages = new Set(configuration.stages);
+  const defaultReviewer = Object.freeze({ ...defaultReviewerExecution });
   const skills: CapabilitySkill[] = SHARED_SKILLS.map((name) => Object.freeze({
     name,
     owner: "native" as const,
@@ -129,6 +164,6 @@ export function createAutomodeCapabilityProfile(
     prompts: Object.freeze([]),
     settings: AUTOMODE_SETTINGS,
     ordinaryTicketExecution: ORDINARY_TICKET_EXECUTION,
-    panelExecutions: PANEL_EXECUTIONS,
+    panelExecutions: Object.freeze([defaultReviewer, ...ADDITIONAL_PANEL_EXECUTIONS]),
   });
 }

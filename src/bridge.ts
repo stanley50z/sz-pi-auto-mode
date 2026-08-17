@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { createAutomodeSelector, type SelectorTheme } from "./selector.js";
+import type { PiExecutionProfile } from "./capability-profile.js";
 import { launchAutomode } from "./launch.js";
 import { repositoryRoot } from "./paths.js";
 import { serializeAutomationStageConfiguration, type AutomationStageConfiguration } from "./stage-configuration.js";
@@ -7,6 +8,7 @@ import { serializeAutomationStageConfiguration, type AutomationStageConfiguratio
 export interface AutomodeLaunchRequest {
   cwd: string;
   serializedConfiguration: string;
+  defaultReviewerExecution: PiExecutionProfile;
 }
 
 export interface AutomodeBridgeDependencies {
@@ -59,9 +61,16 @@ export default function automodeBridge(
       await ctx.waitForIdle();
       const configuration = await dependencies.selectConfiguration(ctx);
       if (configuration === null) return;
+      if (!ctx.model) throw new Error("/automode requires an active Pi model for the default Reviewer seat");
       await dependencies.launch({
         cwd: repositoryRoot(ctx.cwd),
         serializedConfiguration: serializeAutomationStageConfiguration(configuration),
+        defaultReviewerExecution: {
+          harness: "pi",
+          provider: ctx.model.provider,
+          model: ctx.model.id,
+          reasoning: "high",
+        },
       });
     },
   });

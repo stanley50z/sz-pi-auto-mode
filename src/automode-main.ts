@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { Model } from "@earendil-works/pi-ai";
 import { InteractiveMode, type InlineExtension } from "@earendil-works/pi-coding-agent";
 import { createCapabilitySession, type ProjectResourceAllowlist } from "./capability-session.js";
+import { parsePiExecutionProfile, type PiExecutionProfile } from "./capability-profile.js";
 import { AutomodeCoordinator, type CoordinatorClock } from "./coordinator.js";
 import { acquireRepositoryCoordinator } from "./coordinator-lock.js";
 import { GitHubTracker } from "./github-tracker.js";
@@ -26,6 +27,7 @@ export interface StartAutomodeMainOptions {
   repository: string;
   serializedConfiguration: string;
   configurationConfirmation: string;
+  defaultReviewerExecution: PiExecutionProfile;
   home?: string;
   normalAgentDir?: string;
   model?: Model<any>;
@@ -65,12 +67,14 @@ function persistAutomodeRunRecord(
   runRecordFile: string,
   coordinatorId: string,
   configuration: AutomationStageConfiguration,
+  defaultReviewerExecution: PiExecutionProfile,
   projectResources: ProjectResourceAllowlist | undefined,
 ): string {
   const serialized = JSON.stringify({
     version: 1,
     coordinatorId,
     stageConfiguration: configuration,
+    defaultReviewerExecution,
     projectResources: {
       trusted: projectResources?.trusted ?? false,
       skillFiles: [...(projectResources?.skillPaths ?? [])]
@@ -105,6 +109,7 @@ export async function startAutomodeMainSession(
   const validated = await validateAutomodeStartup({
     repository: options.repository,
     configuration,
+    defaultReviewerExecution: options.defaultReviewerExecution,
     home: options.home,
     normalAgentDir: options.normalAgentDir,
     runner: options.startupValidation?.runner,
@@ -122,6 +127,7 @@ export async function startAutomodeMainSession(
     const attestationSession = await createCapabilitySession({
       cwd: validated.repository,
       configuration,
+      defaultReviewerExecution: options.defaultReviewerExecution,
       model: options.model,
       home: options.home,
       normalAgentDir: options.normalAgentDir,
@@ -143,6 +149,7 @@ export async function startAutomodeMainSession(
       paths.runRecordFile,
       lease.coordinatorId,
       configuration,
+      options.defaultReviewerExecution,
       options.projectResources,
     );
   } catch (error) {
@@ -163,6 +170,7 @@ export async function startAutomodeMainSession(
     sessions: new AutomodeTicketSessionHost({
       repository: validated.repository,
       configuration,
+      defaultReviewerExecution: options.defaultReviewerExecution,
       home: options.home,
       normalAgentDir: options.normalAgentDir,
     }),
@@ -256,11 +264,15 @@ async function main(): Promise<void> {
   if (!serializedConfiguration) throw new Error("Missing immutable Automation Stage Configuration");
   const configurationConfirmation = process.env.AUTOMODE_STAGE_CONFIGURATION_CONFIRMATION;
   if (!configurationConfirmation) throw new Error("Missing Automation Stage Configuration confirmation");
+  const serializedDefaultReviewer = process.env.AUTOMODE_DEFAULT_REVIEWER_EXECUTION;
+  if (!serializedDefaultReviewer) throw new Error("Missing default Reviewer execution profile");
+  const defaultReviewerExecution = parsePiExecutionProfile(serializedDefaultReviewer);
   const normalAgentDir = process.argv[3] || undefined;
   const mainSession = await startAutomodeMainSession({
     repository,
     serializedConfiguration,
     configurationConfirmation,
+    defaultReviewerExecution,
     normalAgentDir,
   });
   await mainSession.runInteractive();

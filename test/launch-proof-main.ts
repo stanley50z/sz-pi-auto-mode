@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
 import { startAutomodeMainSession } from "../src/automode-main.js";
+import { parsePiExecutionProfile, type ExecutionProfile } from "../src/capability-profile.js";
 import type { AutomationStage, AutomationStageConfiguration } from "../src/stage-configuration.js";
 
 async function main(): Promise<void> {
@@ -11,11 +12,16 @@ async function main(): Promise<void> {
   if (!serializedConfiguration) throw new Error("Missing immutable Automation Stage Configuration");
   const configurationConfirmation = process.env.AUTOMODE_STAGE_CONFIGURATION_CONFIRMATION;
   if (!configurationConfirmation) throw new Error("Missing Automation Stage Configuration confirmation");
+  const serializedDefaultReviewer = process.env.AUTOMODE_DEFAULT_REVIEWER_EXECUTION;
+  if (!serializedDefaultReviewer) throw new Error("Missing default Reviewer execution profile");
+  const defaultReviewerExecution = parsePiExecutionProfile(serializedDefaultReviewer);
   const normalAgentDir = process.argv[3] || undefined;
+  let panelExecutions: readonly ExecutionProfile[] = [];
   const mainSession = await startAutomodeMainSession({
     repository,
     serializedConfiguration,
     configurationConfirmation,
+    defaultReviewerExecution,
     normalAgentDir,
     model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
     startupValidation: {
@@ -33,7 +39,7 @@ async function main(): Promise<void> {
           });
         },
       },
-      attestExecutions: async () => undefined,
+      attestExecutions: async (profiles) => { panelExecutions = profiles; },
     },
   });
   let mutationRejected = false;
@@ -47,6 +53,7 @@ async function main(): Promise<void> {
     configuration: mainSession.configuration,
     configurationFrozen: Object.isFrozen(mainSession.configuration) && Object.isFrozen(mainSession.configuration.stages),
     mutationRejected,
+    panelExecutions,
     sessionName: mainSession.sessionName,
     sessionFile: mainSession.sessionFile,
     pid: process.pid,

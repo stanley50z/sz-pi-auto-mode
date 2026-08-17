@@ -24,7 +24,7 @@ This repository is an early-stage Pi extension centered on **Automode**, a disti
 - the Coordinator reconciles all bookkeeping states before claims, uses complete snapshots whose revisions include `updated_at`, recovers missing, cross-home, or incompatible sessions and missing worktrees, requires merged proof before Auto-Review cleanup, preserves diagnostics after the fifth failed attempt, and fails fast on unwritable fork heads
 - shutdown is two-phase: the first interrupt drains while retaining the Coordinator lock, and the second force-terminates active Ticket Sessions; disposal releases the lock only after the Coordinator stops
 - Personal-WeChat integration is planned separately from the Automode MVP
-- Auto-Grilling and Auto-Review use fixed three-seat hidden-peer Panel runtimes for advisory work
+- Auto-Grilling and Auto-Review use configurable hidden-peer Panel runtimes; the current MVP uses three seats: the launch-time default Pi seat plus Pi / `github-copilot/claude-fable-5` and Pi / `openai-codex/gpt-5.6-sol`
 
 Start here, then follow the section pages below for the repository's runtime seams and change-routing guidance.
 

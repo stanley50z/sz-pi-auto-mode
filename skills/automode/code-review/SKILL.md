@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Review, fix, validate, and merge one open non-draft pull request through the three-seat Automode Review Panel.
+description: Review, fix, validate, and merge one open non-draft pull request through the configured Automode Review Panel.
 disable-model-invocation: true
 ---
 
@@ -16,9 +16,9 @@ You are the authoritative Review Session for one open non-draft pull request. Th
 
 ## Review Panel round
 
-1. Call `automode_panel` once with `kind: "review"` and the complete structured exact-head context. That controlled tool dispatches all three configured Reviewer seats concurrently with hidden same-round peers. Do not launch reviewer processes or subagents through any other path.
+1. Call `automode_panel` once with `kind: "review"` and the complete structured exact-head context. That controlled tool dispatches every configured Reviewer seat concurrently against the same head SHA and identical context, with hidden same-round peers. Do not launch reviewer processes or subagents through any other path.
 2. Round one is exhaustive. Later rounds include prior findings, Review Session dispositions, fix diff, and directly affected invariant paths.
-3. Require three usable attributable reports. Each report identifies round, head SHA, seat, harness, provider, model, reasoning, and either substantiated root-cause findings with violated requirement/rule/invariant plus concrete evidence, or no actionable findings. A missing report fails the Ticket Session attempt.
+3. Require one usable attributable report from every configured seat. Each report identifies round, head SHA, seat, harness, provider, model, reasoning, and either substantiated root-cause findings with violated requirement/rule/invariant plus concrete evidence, or no actionable findings. A missing report from any seat fails the Ticket Session attempt.
 4. Post each complete report as its own pull-request comment.
 5. Group findings by root cause and post a disposition comment classifying each as:
    - valid/in scope

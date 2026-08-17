@@ -17,6 +17,12 @@ const full = createAutomationStageConfiguration("full", [
   "auto-implement",
   "auto-review",
 ]);
+const defaultReviewerExecution = {
+  harness: "pi",
+  provider: "anthropic",
+  model: "claude-opus-4-8",
+  reasoning: "high",
+} as const;
 
 test("a controlled Half-Auto session exposes only the attested capability surface", async () => {
   const home = mkdtempSync(join(tmpdir(), "automode-capability-"));
@@ -24,6 +30,7 @@ test("a controlled Half-Auto session exposes only the attested capability surfac
     cwd: repository,
     home,
     configuration: half,
+    defaultReviewerExecution,
     model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
   });
 
@@ -90,6 +97,7 @@ test("a controlled Full-Auto session exposes the complete attested capability su
     cwd: repository,
     home,
     configuration: full,
+    defaultReviewerExecution,
     model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
   });
   try {
@@ -189,6 +197,7 @@ test("ambient user and project executable resources never enter the controlled s
     cwd: isolatedRepository,
     home,
     configuration: half,
+    defaultReviewerExecution,
     model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
   });
   try {
@@ -212,6 +221,7 @@ test("project executable resources require both explicit trust and an allowlist"
       cwd: repository,
       home: mkdtempSync(join(tmpdir(), "automode-untrusted-")),
       configuration: half,
+      defaultReviewerExecution,
       model,
       projectResources: {
         trusted: false,
@@ -225,6 +235,7 @@ test("project executable resources require both explicit trust and an allowlist"
       cwd: repository,
       home: mkdtempSync(join(tmpdir(), "automode-shadowed-")),
       configuration: half,
+      defaultReviewerExecution,
       model,
       projectResources: {
         trusted: true,
@@ -238,6 +249,7 @@ test("project executable resources require both explicit trust and an allowlist"
     cwd: repository,
     home: mkdtempSync(join(tmpdir(), "automode-allowlist-")),
     configuration: half,
+    defaultReviewerExecution,
     model,
     projectResources: {
       trusted: true,

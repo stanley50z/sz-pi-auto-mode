@@ -17,6 +17,12 @@ interface MainProof {
   configuration: { mode: "full" | "half"; stages: string[] };
   configurationFrozen: boolean;
   mutationRejected: boolean;
+  panelExecutions: Array<{
+    harness: "pi";
+    provider: string;
+    model: string;
+    reasoning: "high";
+  }>;
   sessionName: string;
   sessionFile: string;
   pid: number;
@@ -43,7 +49,13 @@ export default function (pi) {
 }
 `);
     const command = process.platform === "win32" ? `${process.env.APPDATA}/npm/pi.cmd` : "pi";
-    const piArgs = ["--no-session", "--no-extensions", "--offline", "-e", proofExtension];
+    const piArgs = [
+      "--no-session",
+      "--no-extensions",
+      "--offline",
+      "--model", "openai-codex/gpt-5.6-sol",
+      "-e", proofExtension,
+    ];
     const terminal = spawnPty(command, piArgs, {
       cwd: repository,
       env: { ...process.env, PI_OFFLINE: "1" },
@@ -96,11 +108,24 @@ test("the Main Session rejects environment tampering between confirmation and ch
   const confirmed = serializeAutomationStageConfiguration(
     createAutomationStageConfiguration("full", ["auto-triage", "auto-grilling", "auto-implement", "auto-review"]),
   );
-  const plan = createAutomodeLaunchPlan({ cwd: repository, serializedConfiguration: confirmed }, {
+  const plan = createAutomodeLaunchPlan({
+    cwd: repository,
+    serializedConfiguration: confirmed,
+    defaultReviewerExecution: {
+      harness: "pi",
+      provider: "openai-codex",
+      model: "gpt-5.6-sol",
+      reasoning: "high",
+    },
+  }, {
     ...process.env,
     HOME: join(fixture, "home"),
     USERPROFILE: join(fixture, "home"),
   });
+  assert.equal(
+    plan.env!.AUTOMODE_DEFAULT_REVIEWER_EXECUTION,
+    '{"harness":"pi","provider":"openai-codex","model":"gpt-5.6-sol","reasoning":"high"}',
+  );
   plan.env!.AUTOMODE_STAGE_CONFIGURATION = serializeAutomationStageConfiguration(
     createAutomationStageConfiguration("half", ["auto-review"]),
   );
@@ -135,6 +160,11 @@ test("PTY walkthrough launches Full-Auto and Half-Auto in fresh Main Sessions", 
   assert.doesNotMatch(full.output, /UNEXPECTED_AGENT_START/);
   assert.equal(full.proof.configurationFrozen, true);
   assert.equal(full.proof.mutationRejected, true);
+  assert.deepEqual(full.proof.panelExecutions, [
+    { harness: "pi", provider: "openai-codex", model: "gpt-5.6-sol", reasoning: "high" },
+    { harness: "pi", provider: "github-copilot", model: "claude-fable-5", reasoning: "high" },
+    { harness: "pi", provider: "openai-codex", model: "gpt-5.6-sol", reasoning: "high" },
+  ]);
   assert.notEqual(full.proof.pid, full.bridgePid);
   assert.equal(full.proof.sessionName, "Automode Main — Full-Auto");
 

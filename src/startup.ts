@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
   createAutomodeCapabilityProfile,
+  ORDINARY_TICKET_EXECUTION,
   type ExecutionProfile,
+  type PiExecutionProfile,
 } from "./capability-profile.js";
 import { repositoryRoot, resolveAutomodePaths } from "./paths.js";
 import type { AutomationStageConfiguration } from "./stage-configuration.js";
@@ -21,6 +23,7 @@ export type ExecutionProfileAttestor = (profiles: readonly ExecutionProfile[]) =
 export interface ValidateAutomodeStartupOptions {
   repository: string;
   configuration: AutomationStageConfiguration;
+  defaultReviewerExecution?: PiExecutionProfile;
   home?: string;
   normalAgentDir?: string;
   runner?: StartupCommandRunner;
@@ -48,11 +51,15 @@ export const processStartupCommandRunner: StartupCommandRunner = {
 
 function requiredExecutionProfiles(
   configuration: AutomationStageConfiguration,
+  defaultReviewerExecution: PiExecutionProfile | undefined,
 ): readonly ExecutionProfile[] {
-  const profile = createAutomodeCapabilityProfile(configuration);
   const needsPanel = configuration.stages.includes("auto-grilling")
     || configuration.stages.includes("auto-review");
-  return needsPanel ? profile.panelExecutions : [profile.ordinaryTicketExecution];
+  if (!needsPanel) return [ORDINARY_TICKET_EXECUTION];
+  if (!defaultReviewerExecution) {
+    throw new Error("Panel-enabled Automode requires the default Reviewer execution profile");
+  }
+  return createAutomodeCapabilityProfile(configuration, defaultReviewerExecution).panelExecutions;
 }
 
 export async function attestClaudeCodeExecutionProfile(
@@ -237,7 +244,7 @@ export async function validateAutomodeStartup(
     throw new Error("GitHub authenticated identity failed: gh returned an invalid login");
   }
 
-  const profiles = requiredExecutionProfiles(options.configuration);
+  const profiles = requiredExecutionProfiles(options.configuration, options.defaultReviewerExecution);
   try {
     if (options.attestExecutions) await options.attestExecutions(profiles);
     else await defaultExecutionAttestor(profiles, options, runner);

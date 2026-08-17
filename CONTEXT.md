@@ -53,7 +53,7 @@ The durable, repository-scoped operating lifetime of Automode under one fixed Au
 _Avoid_: Single-ticket session, disposable process execution
 
 **Automode Run Record**:
-The Coordinator-bound durable record that identifies an Automode Run and stores its fixed Automation Stage Configuration plus explicitly allowlisted project skill files. It lives beside the durable Coordinator identity under the Git common directory, so linked worktrees and different Pi homes cannot accept divergent run settings.
+The Coordinator-bound durable record that identifies an Automode Run and stores its fixed Automation Stage Configuration, default Reviewer execution profile, and explicitly allowlisted project skill files. It lives beside the durable Coordinator identity under the Git common directory, so linked worktrees and different Pi homes cannot accept divergent run settings.
 _Avoid_: Automode Capability Profile, stage profile, `capability-profile.json`
 
 **Automode Coordinator**:
@@ -77,7 +77,7 @@ The authoritative Ticket Session for one pull request processed by Auto-Review. 
 _Avoid_: Main Session, Automode Coordinator, Reviewer
 
 **Review Panel**:
-The three independent Reviewer seats used by Auto-Review. The seats retain the Deliberation Panel's configured harnesses, models, and reasoning levels but receive review-specific prompts, context, and capabilities.
+The configured set of independent Reviewer seats used by Auto-Review. It always includes a default Pi Reviewer using the provider and model active when `/automode` launches, plus zero or more additional configured seats. The seats retain the Deliberation Panel's execution profiles but receive review-specific prompts, context, and capabilities.
 _Avoid_: Deliberation Panel, Codex Cloud review
 
 **Reviewer**:
@@ -93,7 +93,7 @@ An Automode operating mode with all four Automation Stages enabled. The Automode
 _Avoid_: Unattended mode, headless mode
 
 **Deliberation Panel**:
-A configurable set of independent Panel Members that produces candidate answers whenever Auto-Grilling is enabled, without members seeing one another's answers.
+A configurable set of independent Panel Members that produces candidate answers whenever Auto-Grilling is enabled, without members seeing one another's answers. It always includes the default Pi seat captured from the provider and model active when `/automode` launches, plus zero or more additional configured seats.
 _Avoid_: Agent swarm, voting committee
 
 **Panel Member**:

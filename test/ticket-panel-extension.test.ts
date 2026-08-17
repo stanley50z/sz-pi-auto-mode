@@ -17,11 +17,16 @@ function answer() {
   };
 }
 
-test("the controlled panel tool returns a complete three-seat grilling result", async () => {
+test("the controlled panel tool returns a result from every configured grilling seat", async () => {
   const launcher: PanelSeatLauncher = async () => answer();
   let tool: ToolDefinition | undefined;
   const pi = { registerTool(value: ToolDefinition) { tool = value; } } as unknown as ExtensionAPI;
-  const extension = createTicketPanelExtension(launcher);
+  const extension = createTicketPanelExtension(launcher, [{
+    harness: "pi",
+    provider: "github-copilot",
+    model: "claude-fable-5",
+    reasoning: "high",
+  }]);
   if (typeof extension === "function") await extension(pi);
   else await extension.factory(pi);
 
@@ -36,5 +41,5 @@ test("the controlled panel tool returns a complete three-seat grilling result", 
   }, undefined, undefined, {} as never);
 
   assert.equal(tool!.name, "automode_panel");
-  assert.equal((result.details as { answers: unknown[] }).answers.length, 3);
+  assert.equal((result.details as { answers: unknown[] }).answers.length, 1);
 });

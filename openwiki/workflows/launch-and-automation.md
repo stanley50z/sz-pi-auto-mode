@@ -15,7 +15,7 @@ openwiki:
 
 # Launch and automation
 
-This repo's concrete workflow docs now center on the `/automode` launch bridge, the immutable stage configuration that survives the process handoff, and the fail-closed startup checks implemented in `src/startup.ts` before work discovery begins. The child persists the repository-scoped **Automode Run Record** only after startup validation and the **Automode Capability Attestation Session** succeed; `src/paths.ts` owns the repository-keyed Automode and Git common-directory paths.
+This repo's concrete workflow docs now center on the `/automode` launch bridge, the immutable stage configuration that survives the process handoff, and the fail-closed startup checks implemented in `src/startup.ts` before work discovery begins. The child persists the repository-scoped **Automode Run Record** only after startup validation and the **Automode Capability Attestation Session** succeed; `src/paths.ts` owns the repository-keyed Automode and Git common-directory paths. Panel-enabled startup attests the fixed panel execution profiles before work discovery, and the current MVP uses the default Pi seat active at launch plus the configured Pi / `github-copilot/claude-fable-5` and Pi / `openai-codex/gpt-5.6-sol` seats for grilling and review.
 
 ## Launch path
 

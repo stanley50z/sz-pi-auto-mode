@@ -17,9 +17,17 @@ import {
   serializeAutomationStageConfiguration,
 } from "../src/stage-configuration.js";
 
-function startForTest(options: StartAutomodeMainOptions) {
+const defaultReviewerExecution = {
+  harness: "pi",
+  provider: "anthropic",
+  model: "claude-opus-4-8",
+  reasoning: "high",
+} as const;
+
+function startForTest(options: Omit<StartAutomodeMainOptions, "defaultReviewerExecution">) {
   return startAutomodeMainSession({
     ...options,
+    defaultReviewerExecution,
     model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
     startupValidation: {
       runner: {
@@ -100,6 +108,7 @@ test("a fresh Main Session starts in the caller repository and durably records t
         mode: "half",
         stages: ["auto-triage", "auto-review"],
       },
+      defaultReviewerExecution,
       projectResources: { trusted: false, skillFiles: [] },
     });
   } finally {
@@ -120,6 +129,7 @@ test("failed startup validation does not persist an Automode Run Record", async 
       repository,
       home,
       ...configuration,
+      defaultReviewerExecution,
       startupValidation: {
         runner: {
           async run() {
