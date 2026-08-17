@@ -40,6 +40,23 @@ test("selector starts in focused Full-Auto with all stages visible", () => {
   assert.match(output, /all four stages enabled/i);
 });
 
+test("Half-Auto defaults to Auto-Implement and Auto-Review only", () => {
+  const view = selector();
+  view.component.handleInput("\t");
+  const output = view.component.render(80).join("\n");
+
+  assert.match(output, /Auto-Triage.*disabled/);
+  assert.match(output, /Auto-Grilling.*disabled/);
+  assert.match(output, /Auto-Implement.*enabled/);
+  assert.match(output, /Auto-Review.*enabled/);
+
+  view.component.handleInput("\r");
+  assert.deepEqual(view.result(), {
+    mode: "half",
+    stages: ["auto-implement", "auto-review"],
+  });
+});
+
 test("Tab changes mode, arrows move focus, and Space only toggles Half-Auto stages", () => {
   const view = selector();
   view.component.handleInput(" ");
@@ -52,35 +69,32 @@ test("Tab changes mode, arrows move focus, and Space only toggles Half-Auto stag
 
   assert.match(output, /\[Half-Auto\]/);
   assert.match(output, /> .*Auto-Grilling/);
-  assert.match(output, /Auto-Grilling.*disabled/);
+  assert.match(output, /Auto-Grilling.*enabled/);
   assert.ok(view.renders() >= 3);
 });
 
-test("Half-Auto visibly rejects zero and four stages and launches one to three", () => {
-  const invalidFour = selector();
-  invalidFour.component.handleInput("\t");
-  invalidFour.component.handleInput("\r");
-  assert.equal(invalidFour.result(), undefined);
-  assert.match(invalidFour.component.render(80).join("\n"), /requires one to three/i);
-
-  const valid = selector();
-  valid.component.handleInput("\t");
-  valid.component.handleInput(" ");
-  valid.component.handleInput("\r");
-  assert.deepEqual(valid.result(), {
+test("Half-Auto launches with all four stages and visibly rejects an empty selection", () => {
+  const allFour = selector();
+  allFour.component.handleInput("\t");
+  allFour.component.handleInput(" ");
+  allFour.component.handleInput("\x1b[B");
+  allFour.component.handleInput(" ");
+  allFour.component.handleInput("\r");
+  assert.deepEqual(allFour.result(), {
     mode: "half",
-    stages: ["auto-grilling", "auto-implement", "auto-review"],
+    stages: ["auto-triage", "auto-grilling", "auto-implement", "auto-review"],
   });
 
   const invalidZero = selector();
   invalidZero.component.handleInput("\t");
-  for (let index = 0; index < 4; index += 1) {
-    invalidZero.component.handleInput(" ");
-    invalidZero.component.handleInput("\x1b[B");
-  }
+  invalidZero.component.handleInput("\x1b[B");
+  invalidZero.component.handleInput("\x1b[B");
+  invalidZero.component.handleInput(" ");
+  invalidZero.component.handleInput("\x1b[B");
+  invalidZero.component.handleInput(" ");
   invalidZero.component.handleInput("\r");
   assert.equal(invalidZero.result(), undefined);
-  assert.match(invalidZero.component.render(80).join("\n"), /requires one to three/i);
+  assert.match(invalidZero.component.render(80).join("\n"), /requires at least one/i);
 });
 
 test("Escape cancels and minimum-size rendering keeps every label and control readable", () => {
@@ -111,9 +125,14 @@ test("Escape cancels and minimum-size rendering keeps every label and control re
 
   const invalid = selector();
   invalid.component.handleInput("\t");
+  invalid.component.handleInput("\x1b[B");
+  invalid.component.handleInput("\x1b[B");
+  invalid.component.handleInput(" ");
+  invalid.component.handleInput("\x1b[B");
+  invalid.component.handleInput(" ");
   invalid.component.handleInput("\r");
   const invalidLines = invalid.component.render(minimumTerminal.columns);
   assert.ok(invalidLines.length <= minimumTerminal.rows - minimumTerminal.piReservedRows);
   for (const line of invalidLines) assert.ok(visibleWidth(line) <= minimumTerminal.columns, line);
-  assert.match(invalidLines.join(" ").replace(/\s+/g, " "), /Half-Auto requires one to three Automation Stages/);
+  assert.match(invalidLines.join(" ").replace(/\s+/g, " "), /Half-Auto requires at least one Automation Stage/);
 });

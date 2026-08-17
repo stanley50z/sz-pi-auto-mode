@@ -144,16 +144,20 @@ test("the Main Session rejects environment tampering between confirmation and ch
   assert.match(child.stderr, /changed after confirmation/);
 });
 
-test("PTY walkthrough launches Full-Auto and Half-Auto in fresh Main Sessions", async () => {
+test("PTY walkthrough launches Full-Auto and Half-Auto stage selections in fresh Main Sessions", async () => {
   const fixture = mkdtempSync(join(tmpdir(), "automode-launch-"));
   const fullRepository = join(fixture, "full-repository");
   const fullNestedDirectory = join(fullRepository, "src", "feature");
   const halfRepository = join(fixture, "half-repository");
   const halfNestedDirectory = join(halfRepository, "src", "feature");
+  const halfAllRepository = join(fixture, "half-all-repository");
+  const halfAllNestedDirectory = join(halfAllRepository, "src", "feature");
   mkdirSync(join(fullRepository, ".git"), { recursive: true });
   mkdirSync(fullNestedDirectory, { recursive: true });
   mkdirSync(join(halfRepository, ".git"), { recursive: true });
   mkdirSync(halfNestedDirectory, { recursive: true });
+  mkdirSync(join(halfAllRepository, ".git"), { recursive: true });
+  mkdirSync(halfAllNestedDirectory, { recursive: true });
 
   const full = await runBridge(fullNestedDirectory, "\r");
   assert.deepEqual(full.proof.configuration, {
@@ -172,10 +176,10 @@ test("PTY walkthrough launches Full-Auto and Half-Auto in fresh Main Sessions", 
   assert.notEqual(full.proof.pid, full.bridgePid);
   assert.equal(full.proof.sessionName, "Automode Main — Full-Auto");
 
-  const half = await runBridge(halfNestedDirectory, "\t \r");
+  const half = await runBridge(halfNestedDirectory, "\t\r");
   assert.deepEqual(half.proof.configuration, {
     mode: "half",
-    stages: ["auto-grilling", "auto-implement", "auto-review"],
+    stages: ["auto-implement", "auto-review"],
   });
   assert.equal(half.proof.cwd, halfRepository);
   assert.doesNotMatch(half.output, /UNEXPECTED_AGENT_START/);
@@ -183,4 +187,16 @@ test("PTY walkthrough launches Full-Auto and Half-Auto in fresh Main Sessions", 
   assert.equal(half.proof.mutationRejected, true);
   assert.notEqual(half.proof.pid, half.bridgePid);
   assert.equal(half.proof.sessionName, "Automode Main — Half-Auto");
+
+  const halfAll = await runBridge(halfAllNestedDirectory, "\t \x1b[B \r");
+  assert.deepEqual(halfAll.proof.configuration, {
+    mode: "half",
+    stages: ["auto-triage", "auto-grilling", "auto-implement", "auto-review"],
+  });
+  assert.equal(halfAll.proof.cwd, halfAllRepository);
+  assert.doesNotMatch(halfAll.output, /UNEXPECTED_AGENT_START/);
+  assert.equal(halfAll.proof.configurationFrozen, true);
+  assert.equal(halfAll.proof.mutationRejected, true);
+  assert.notEqual(halfAll.proof.pid, halfAll.bridgePid);
+  assert.equal(halfAll.proof.sessionName, "Automode Main — Half-Auto");
 });

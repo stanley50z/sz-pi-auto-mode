@@ -22,7 +22,7 @@ export const AUTOMODE_MODE_LABELS: Readonly<Record<AutomodeMode, string>> = Obje
   half: "Half-Auto",
 });
 
-export const HALF_AUTO_SELECTION_REQUIREMENT = "Half-Auto requires one to three Automation Stages.";
+export const HALF_AUTO_SELECTION_REQUIREMENT = "Half-Auto requires at least one Automation Stage.";
 
 export interface AutomationStageConfiguration {
   readonly mode: AutomodeMode;
@@ -35,7 +35,7 @@ function isAutomationStage(value: unknown): value is AutomationStage {
 
 export function isValidHalfAutoSelection(stages: ReadonlySet<AutomationStage> | readonly AutomationStage[]): boolean {
   const count = "size" in stages ? stages.size : stages.length;
-  return count >= 1 && count <= 3;
+  return count >= 1 && count <= AUTOMATION_STAGES.length;
 }
 
 export function createAutomationStageConfiguration(

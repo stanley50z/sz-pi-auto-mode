@@ -11,8 +11,8 @@ The selector starts in Full-Auto with all four stages enabled. The minimum suppo
 
 - `Tab` switches Full-Auto/Half-Auto mode.
 - Up, down, left, and right arrow keys move stage focus.
-- `Space` toggles the focused stage only in Half-Auto.
-- Half-Auto launches only with one to three enabled stages; zero and four show a validation message.
+- `Space` toggles the focused stage only in Half-Auto, which defaults to Auto-Implement and Auto-Review enabled and the other two stages disabled.
+- Half-Auto launches with any non-empty stage selection, including all four; an empty selection shows a validation message. Enabled-stage toggles determine runtime behavior, so enabling all four is operationally equivalent to Full-Auto.
 - `Escape` cancels without launching a process.
 - `Enter` confirms a valid configuration.
 
@@ -25,7 +25,7 @@ After every startup check and canonical-resource attestation succeeds, the child
 Before work discovery, startup fails closed unless all of these checks succeed:
 
 - Git identifies the same repository root selected by the Bridge.
-- `gh` is authenticated for `github.com`, resolves the same repository as the local `origin`, and grants the mutation permission required by the enabled stages.
+- `gh` is authenticated for `github.com`, resolves the same repository as the local `origin`, and grants the mutation permission required by the enabled stages. Startup derives the actor from the active authenticated account rather than issuing a separate REST `/user` request, and polls transient GitHub HTTP or connection failures for up to 30 seconds before failing closed.
 - Pi can resolve the fixed ordinary Ticket Session model; panel-enabled configurations can also resolve the captured default Reviewer profile and every additional configured profile.
 - Pi's public command registry and resource diagnostics show exactly one canonical command per controlled skill, from the expected native or Automode-owned source root.
 - The repository's Agent guidance, domain context, and directly referenced tracker/domain documents load while ambient extensions, skills, prompts, themes, and project settings remain excluded; the controlled `/fast` extension explicitly reuses normal Pi's synchronized OpenAI fast-mode state.

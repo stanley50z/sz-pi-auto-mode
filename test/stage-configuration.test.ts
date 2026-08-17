@@ -23,7 +23,7 @@ test("Full-Auto serializes all four stages into an immutable launch configuratio
   assert.throws(() => launched.stages.pop(), TypeError);
 });
 
-test("Half-Auto permits one to three stages and rejects zero or four", () => {
+test("Half-Auto permits any non-empty Automation Stage selection, including all four", () => {
   assert.deepEqual(createAutomationStageConfiguration("half", ["auto-implement"]), {
     mode: "half",
     stages: ["auto-implement"],
@@ -32,8 +32,11 @@ test("Half-Auto permits one to three stages and rejects zero or four", () => {
     mode: "half",
     stages: ["auto-triage", "auto-grilling", "auto-review"],
   });
-  assert.throws(() => createAutomationStageConfiguration("half", []), /one to three/);
-  assert.throws(() => createAutomationStageConfiguration("half", AUTOMATION_STAGES), /one to three/);
+  assert.deepEqual(createAutomationStageConfiguration("half", AUTOMATION_STAGES), {
+    mode: "half",
+    stages: ["auto-triage", "auto-grilling", "auto-implement", "auto-review"],
+  });
+  assert.throws(() => createAutomationStageConfiguration("half", []), /at least one/);
   assert.throws(() => createAutomationStageConfiguration("full", ["auto-triage"]), /all four/);
 });
 
@@ -52,7 +55,7 @@ test("the child rejects a serialized configuration changed after confirmation", 
 test("serialized configurations are validated rather than trusted", () => {
   assert.throws(
     () => parseAutomationStageConfiguration('{"mode":"half","stages":[]}'),
-    /one to three/,
+    /at least one/,
   );
   assert.throws(
     () => parseAutomationStageConfiguration('{"mode":"full","stages":["auto-triage"]}'),

@@ -21,7 +21,7 @@ One independently configurable part of the repository workflow: Auto-Triage, Aut
 _Avoid_: Sub-mode, workflow phase
 
 **Automation Stage Configuration**:
-The immutable Full-Auto or Half-Auto selection of enabled Automation Stages confirmed when an Automode Run launches. It is serialized across the Automode Bridge process boundary and remains fixed for that run.
+The immutable launch selection containing the Full-Auto or Half-Auto label and the enabled Automation Stages confirmed when an Automode Run launches. Runtime behavior is determined by the enabled stages. The configuration is serialized across the Automode Bridge process boundary and remains fixed for that run.
 _Avoid_: Stage profile, Automode Capability Profile
 
 **Auto-Triage**:
@@ -85,11 +85,11 @@ One independently executed advisory seat in the Review Panel. A Reviewer examine
 _Avoid_: Panel Member, Review Session, voter
 
 **Half-Auto Mode**:
-An Automode operating mode with one to three of the four Automation Stages enabled. At least one stage remains human-controlled and uses its native Matt Pocock skill unchanged.
-_Avoid_: Assisted mode, manual mode
+The launch preset that initially enables Auto-Implement and Auto-Review while leaving Auto-Triage and Auto-Grilling disabled. The user may enable any non-empty selection, including all four Automation Stages. Runtime behavior comes from the enabled-stage toggles; disabled stages remain human-controlled and use their native Matt Pocock skills unchanged.
+_Avoid_: Assisted mode, manual mode, proper subset
 
 **Full-Auto Mode**:
-An Automode operating mode with all four Automation Stages enabled. The Automode Coordinator supervises independent Ticket Sessions; each authoritative stage session advances its own work without ordinary human direction.
+The launch preset with all four Automation Stages enabled. A Half-Auto selection with all four enabled has the same stage automation behavior; the label records the user's launch selection rather than a different execution mechanism.
 _Avoid_: Unattended mode, headless mode
 
 **Deliberation Panel**:

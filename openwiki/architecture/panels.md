@@ -15,7 +15,7 @@ openwiki:
 
 # Review Panel and controlled advisory seats
 
-Auto-Grilling and Auto-Review use a controlled Panel runtime rather than allowing the Main Session or Coordinator to make stage decisions. `runGrillingPanel` and `runReviewPanel` fan out to a configurable set of independent seats, and the current MVP uses three seats: the default Pi seat captured from the provider and model active when `/automode` launches, plus the configured Pi / `github-copilot/claude-fable-5` and Pi / `openai-codex/gpt-5.6-sol` seats, all at high reasoning. Production launches are supplied through the `PanelSeatLauncher` seam and `CliPanelProcessLauncher`; peers do not see one another's answers. The authoritative Grilling Session or Review Session receives the advisory results and remains responsible for decisions and tracker progression.
+Auto-Grilling and Auto-Review use a controlled Panel runtime rather than allowing the Main Session or Coordinator to make stage decisions. `runGrillingPanel` and `runReviewPanel` fan out to a configurable set of independent seats, and the current MVP uses the default Pi seat captured from the provider and model active when `/automode` launches, plus the configured Pi / `github-copilot/claude-fable-5` and Pi / `openai-codex/gpt-5.6-sol` seats, all at high reasoning. Production launches are supplied through the `PanelSeatLauncher` seam and `CliPanelProcessLauncher`; peers do not see one another's answers. The authoritative Grilling Session or Review Session receives the advisory results and remains responsible for decisions and tracker progression.
 
 ```mermaid
 sequenceDiagram

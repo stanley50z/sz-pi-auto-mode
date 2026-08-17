@@ -17,11 +17,11 @@ This repository is an early-stage Pi extension centered on **Automode**, a disti
 - the product launches from **`/automode` inside normal Pi**
 - `pi automode` is obsolete in the agent guidance
 - Automode uses an immutable stage configuration, a confirmed handoff digest, and a repository-scoped Main Session / Coordinator boundary; independent full-process Ticket Sessions perform stage work
-- the `/automode` bridge hands off to a fresh child process that confirms the serialized stage configuration and keeps terminal ownership in the launch seam
-- startup fails closed until repository access, the Automode Capability Attestation Session, canonical skill provenance, and the repository Coordinator lock all validate
+- the `/automode` bridge hands off to a fresh child process that confirms the serialized stage configuration, keeps terminal ownership in the launch seam, and starts from a selector that defaults to Full-Auto but allows Half-Auto to use any non-empty stage selection, including all four stages
+- startup fails closed until repository access, the Automode Capability Attestation Session, canonical skill provenance, and the repository Coordinator lock all validate; GitHub actor binding comes from `gh auth status --active` metadata, and transient GitHub startup failures are retried for up to 30 seconds before the startup path fails closed
 - the MVP is organized into four Automation Stages: Auto-Triage, Auto-Grilling, Auto-Implement, and Auto-Review
 - panel-enabled startup authenticates Claude Code and probes each exact configured Claude Code model/reasoning profile
-- the Automode Run Record is shared through the Git common directory, independently of Pi home/config roots
+- the Automode Run Record is shared through the Git common directory, independently of Pi home/config roots, and is the durable Coordinator-bound record rather than the capability allowlist
 - the Coordinator reconciles all bookkeeping states before claims, uses complete snapshots whose revisions include `updated_at`, recovers missing, cross-home, or incompatible sessions and missing worktrees, requires merged proof before Auto-Review cleanup, preserves diagnostics after the fifth failed attempt, and fails fast on unwritable fork heads
 - shutdown is two-phase: the first interrupt drains while retaining the Coordinator lock, and the second force-terminates active Ticket Sessions; disposal releases the lock only after the Coordinator stops
 - Personal-WeChat integration is planned separately from the Automode MVP

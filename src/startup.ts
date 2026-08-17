@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { realpathSync } from "node:fs";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
   createAutomodeCapabilityProfile,
@@ -155,6 +156,32 @@ function hasGitHubPermission(actual: string, required: "TRIAGE" | "WRITE"): bool
   return (rank[actual] ?? -1) >= rank[required]!;
 }
 
+const GITHUB_STARTUP_RETRY_WINDOW_MS = 30_000;
+const GITHUB_STARTUP_POLL_INTERVAL_MS = 1_000;
+
+function isTransientGitHubFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\bHTTP (?:429|5\d\d)\b|ECONNRESET|ETIMEDOUT|EAI_AGAIN|timed? out|connection (?:reset|closed)/i.test(message);
+}
+
+async function runGitHubStartupCommand(
+  runner: StartupCommandRunner,
+  args: readonly string[],
+  repository: string,
+): Promise<string> {
+  const retryDeadline = Date.now() + GITHUB_STARTUP_RETRY_WINDOW_MS;
+  for (;;) {
+    try {
+      return await runner.run("gh", args, repository);
+    } catch (error) {
+      if (!isTransientGitHubFailure(error)) throw error;
+      const remaining = retryDeadline - Date.now();
+      if (remaining <= 0) throw error;
+      await delay(Math.min(GITHUB_STARTUP_POLL_INTERVAL_MS, remaining));
+    }
+  }
+}
+
 async function withStartupErrorContext(
   label: string,
   operation: () => Promise<string>,
@@ -195,13 +222,28 @@ export async function validateAutomodeStartup(
     throw new Error("GitHub repository access failed: origin is not a github.com repository");
   }
 
-  await withStartupErrorContext(
+  const actor = (await withStartupErrorContext(
     "GitHub authentication failed",
-    () => runner.run("gh", ["auth", "status", "--hostname", "github.com"], repository),
-  );
+    () => runGitHubStartupCommand(
+      runner,
+      [
+        "auth", "status", "--active", "--hostname", "github.com", "--json", "hosts",
+        "--jq", '.hosts["github.com"][] | select(.active == true and .state == "success") | .login',
+      ],
+      repository,
+    ),
+  )).trim();
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/.test(actor)) {
+    throw new Error("GitHub authenticated identity failed: gh returned an invalid login");
+  }
+
   const repositoryJson = await withStartupErrorContext(
     "GitHub repository access failed",
-    () => runner.run("gh", ["repo", "view", "--json", "id,nameWithOwner,url,viewerPermission"], repository),
+    () => runGitHubStartupCommand(
+      runner,
+      ["repo", "view", "--json", "id,nameWithOwner,url,viewerPermission"],
+      repository,
+    ),
   );
   let viewed: { id?: unknown; nameWithOwner?: unknown; url?: unknown; viewerPermission?: unknown };
   try {
@@ -236,14 +278,6 @@ export async function validateAutomodeStartup(
   if (typeof viewed.viewerPermission !== "string" || !hasGitHubPermission(viewed.viewerPermission, permission)) {
     throw new Error(`GitHub repository access failed: Automode requires ${permission} permission`);
   }
-  const actor = (await withStartupErrorContext(
-    "GitHub authenticated identity failed",
-    () => runner.run("gh", ["api", "user", "--jq", ".login"], repository),
-  )).trim();
-  if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/.test(actor)) {
-    throw new Error("GitHub authenticated identity failed: gh returned an invalid login");
-  }
-
   const profiles = requiredExecutionProfiles(options.configuration, options.defaultReviewerExecution);
   try {
     if (options.attestExecutions) await options.attestExecutions(profiles);

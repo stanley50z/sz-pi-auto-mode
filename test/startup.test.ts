@@ -32,8 +32,7 @@ class RecordedRunner implements StartupCommandRunner {
     this.calls.push({ command, args, cwd });
     if (command === "git" && args[0] === "rev-parse") return `${cwd}\n`;
     if (command === "git" && args[0] === "remote") return "https://github.com/owner/repository.git\n";
-    if (command === "gh" && args[0] === "auth") return "github.com\n";
-    if (command === "gh" && args[0] === "api") return "automation-user\n";
+    if (command === "gh" && args[0] === "auth") return "automation-user\n";
     if (command === "gh" && args[0] === "repo") {
       return JSON.stringify({
         id: "repository-id",
@@ -67,13 +66,40 @@ test("startup verifies the GitHub repository and every required execution profil
   assert.deepEqual(runner.calls, [
     { command: "git", args: ["rev-parse", "--show-toplevel"], cwd: repository },
     { command: "git", args: ["remote", "get-url", "origin"], cwd: repository },
-    { command: "gh", args: ["auth", "status", "--hostname", "github.com"], cwd: repository },
+    {
+      command: "gh",
+      args: [
+        "auth", "status", "--active", "--hostname", "github.com", "--json", "hosts",
+        "--jq", '.hosts["github.com"][] | select(.active == true and .state == "success") | .login',
+      ],
+      cwd: repository,
+    },
     { command: "gh", args: ["repo", "view", "--json", "id,nameWithOwner,url,viewerPermission"], cwd: repository },
-    { command: "gh", args: ["api", "user", "--jq", ".login"], cwd: repository },
   ]);
   assert.deepEqual(attested, [
     createAutomodeCapabilityProfile(half, defaultReviewerExecution).ordinaryTicketExecution,
   ]);
+});
+
+test("startup does not depend on the intermittently unavailable REST user endpoint", async () => {
+  const repository = repositoryFixture();
+  const runner = new RecordedRunner();
+  runner.run = async function (command, args, cwd) {
+    if (command === "gh" && args[0] === "api") {
+      throw new Error("gh: No server is currently available to service your request. (HTTP 503)");
+    }
+    return RecordedRunner.prototype.run.call(this, command, args, cwd);
+  };
+
+  const result = await validateAutomodeStartup({
+    repository,
+    configuration: half,
+    runner,
+    attestExecutions: async () => undefined,
+  });
+
+  assert.equal(result.actor, "automation-user");
+  assert.equal(runner.calls.some(({ command, args }) => command === "gh" && args[0] === "api"), false);
 });
 
 test("panel execution profiles are startup requirements only when a panel stage is enabled", async () => {
@@ -158,7 +184,7 @@ test("startup binds gh access to local origin and requires mutation permission",
     this.calls.push({ command, args, cwd });
     if (command === "git" && args[0] === "rev-parse") return cwd;
     if (command === "git") return "https://github.com/other/repository.git";
-    if (args[0] === "auth") return "github.com";
+    if (args[0] === "auth") return "automation-user";
     return JSON.stringify({
       id: "repository-id",
       nameWithOwner: "owner/repository",
@@ -200,6 +226,33 @@ test("startup binds gh access to local origin and requires mutation permission",
   );
 });
 
+test("startup polls through consecutive transient GitHub service failures instead of aborting Automode", async () => {
+  const repository = repositoryFixture();
+  const runner = new RecordedRunner();
+  let authenticationAttempts = 0;
+  runner.run = async function (command, args, cwd) {
+    if (command === "gh" && args[0] === "auth") {
+      this.calls.push({ command, args, cwd });
+      authenticationAttempts += 1;
+      if (authenticationAttempts <= 3) {
+        throw new Error("gh: No server is currently available to service your request. (HTTP 503)");
+      }
+      return "automation-user\n";
+    }
+    return RecordedRunner.prototype.run.call(this, command, args, cwd);
+  };
+
+  const result = await validateAutomodeStartup({
+    repository,
+    configuration: half,
+    runner,
+    attestExecutions: async () => undefined,
+  });
+
+  assert.equal(result.actor, "automation-user");
+  assert.equal(authenticationAttempts, 4);
+});
+
 test("repository, GitHub authentication/access, and execution failures abort startup", async () => {
   const cases = [
     { failAt: "git", message: /repository validation failed/ },
@@ -215,7 +268,7 @@ test("repository, GitHub authentication/access, and execution failures abort sta
         if (step === scenario.failAt) throw new Error("unavailable");
         if (command === "git" && args[0] === "rev-parse") return `${cwd}\n`;
         if (command === "git" && args[0] === "remote") return "https://github.com/owner/repository.git\n";
-        if (args[0] === "auth") return "github.com\n";
+        if (args[0] === "auth") return "automation-user\n";
         return JSON.stringify({
           id: "repository-id",
           nameWithOwner: "owner/repository",

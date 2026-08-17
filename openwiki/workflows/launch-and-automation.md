@@ -9,14 +9,15 @@ openwiki:
   source_paths: [src/bridge.ts, src/launch.ts, src/stage-configuration.ts, src/automode-main.ts, src/startup.ts]
   symbols: [createAutomationStageConfiguration, confirmSerializedAutomationStageConfiguration, startAutomodeMainSession]
   test_paths: [test/bridge.test.ts, test/selector.test.ts, test/stage-configuration.test.ts, test/launch-walkthrough.test.ts]
-  invariants: [Full-Auto selects all four stages and Half-Auto selects one to three., The child rejects configuration or environment tampering before Main Session startup., Main Session is not a Ticket Session.]
+  invariants: [Full-Auto selects all four stages and Half-Auto permits any non-empty stage selection, including all four., The child rejects configuration or environment tampering before Main Session startup., Main Session is not a Ticket Session.]
   validation_commands: [npm run build, "node --test dist/test/bridge.test.js dist/test/selector.test.js dist/test/stage-configuration.test.js dist/test/launch-walkthrough.test.js"]
 ---
 
 # Launch and automation
 
-This repo's concrete workflow docs now center on the `/automode` launch bridge, the immutable stage configuration that survives the process handoff, and the fail-closed startup checks implemented in `src/startup.ts` before work discovery begins. The child persists the repository-scoped **Automode Run Record** only after startup validation and the **Automode Capability Attestation Session** succeed; `src/paths.ts` owns the repository-keyed Automode and Git common-directory paths. Panel-enabled startup attests the fixed panel execution profiles before work discovery, and the current MVP uses the default Pi seat active at launch plus the configured Pi / `github-copilot/claude-fable-5` and Pi / `openai-codex/gpt-5.6-sol` seats for grilling and review.
-`docs/automode-launch.md` and `docs/process-handoff-proof.md` now describe the launch and handoff seam in more detail, including the terminal handoff, environment confirmation, and fresh child-process ownership.
+This repo's concrete workflow docs now center on the `/automode` launch bridge, the immutable stage configuration that survives the process handoff, and the fail-closed startup checks implemented in `src/startup.ts` before work discovery begins. The child persists the repository-scoped **Automode Run Record** only after startup validation and the **Automode Capability Attestation Session** succeed; `src/paths.ts` owns the repository-keyed Automode and Git common-directory paths. The selector starts in Full-Auto, uses `Tab` to switch between Full-Auto and Half-Auto, lets the arrow keys move focus, only allows `Space` toggles in Half-Auto, and defaults Half-Auto to Auto-Implement plus Auto-Review while permitting any non-empty Half-Auto selection, including all four stages. Full-Auto requires all four stages, while Half-Auto accepts any non-empty subset and can also launch with all four enabled; enabled-stage toggles determine runtime behavior. Panel-enabled startup attests the fixed panel execution profiles before work discovery, and the current MVP uses the default Pi seat active at launch plus the configured Pi / `github-copilot/claude-fable-5` and Pi / `openai-codex/gpt-5.6-sol` seats for grilling and review.
+
+`docs/automode-launch.md` and `docs/process-handoff-proof.md` now describe the launch and handoff seam in more detail, including the terminal handoff, environment confirmation, transient GitHub startup-probe retries, and fresh child-process ownership.
 
 ## Launch path
 
@@ -44,7 +45,7 @@ The agent guidance and product README both say the entrypoint is:
 
 That command is the minimal Automode Bridge from a normal Pi session into a fresh Automode process for the repository's durable Automode Run. `pi automode` should be treated as obsolete in the current guidance.
 
-The selector starts in Full-Auto, allows mode switching with `Tab`, stage focus changes with the arrow keys, stage toggling in Half-Auto with `Space`, and confirmation with `Enter`. Half-Auto is only valid when one to three stages are enabled.
+The selector starts in Full-Auto, allows mode switching with `Tab`, stage focus changes with the arrow keys, stage toggling in Half-Auto with `Space`, and confirmation with `Enter`. Half-Auto defaults to Auto-Implement plus Auto-Review and permits any non-empty selection, including all four stages.
 
 ## Launch handoff
 
@@ -52,11 +53,11 @@ The selector starts in Full-Auto, allows mode switching with `Tab`, stage focus 
 
 ## Stage configuration
 
-`src/stage-configuration.ts` is the canonical contract. The four stages are Auto-Triage, Auto-Grilling, Auto-Implement, and Auto-Review. `createAutomationStageConfiguration` rejects unknown or duplicate stages, requires all four for Full-Auto, permits one through three for Half-Auto, and stores stages in canonical order. The bridge serializes that object and hashes it with SHA-256; `parseConfirmedAutomationStageConfiguration` uses a timing-safe comparison before parsing again in the child.
+`src/stage-configuration.ts` is the canonical contract. The four stages are Auto-Triage, Auto-Grilling, Auto-Implement, and Auto-Review. `createAutomationStageConfiguration` rejects unknown or duplicate stages, requires all four for Full-Auto, permits any non-empty Half-Auto selection including all four, and stores stages in canonical order. The bridge serializes that object and hashes it with SHA-256; `parseConfirmedAutomationStageConfiguration` uses a timing-safe comparison before parsing again in the child.
 
 ## Startup ordering and change safety
 
-The child calls `startAutomodeMainSession`, which validates repository identity, GitHub origin/authentication/access, resolves and validates the authenticated GitHub actor, applies stage-dependent permission (`TRIAGE` for read-oriented stages and `WRITE` when implement or review is enabled), and checks required Pi/Claude Code execution profiles before acquiring the Coordinator or persisting the run record. Claude Code profiles are additionally checked by `attestClaudeCodeExecutionProfile`, which requires authentication and probes the exact configured model and reasoning level with no tools or session persistence; a reported probe error fails closed. The capability and Coordinator details are canonical on the [architecture overview](../architecture/overview.md) and [capability boundary](../architecture/capability-boundary.md).
+The child calls `startAutomodeMainSession`, which validates repository identity, GitHub origin/authentication/access, resolves the authenticated GitHub actor from `gh auth status --active` metadata, applies stage-dependent permission (`TRIAGE` for read-oriented stages and `WRITE` when implement or review is enabled), and checks required Pi/Claude Code execution profiles before acquiring the Coordinator or persisting the run record. GitHub startup failures are retried for up to 30 seconds before the startup path fails closed. Claude Code profiles are additionally checked by `attestClaudeCodeExecutionProfile`, which requires authentication and probes the exact configured model and reasoning level with no tools or session persistence; a reported probe error fails closed. The capability and Coordinator details are canonical on the [architecture overview](../architecture/overview.md) and [capability boundary](../architecture/capability-boundary.md).
 
 For launch changes, update bridge/selector serialization and child parsing together; focused tests cover cancellation, keyboard selection, digest tampering, environment tampering, and fresh-process ownership. Coordinator shutdown is two-phase: the first interrupt drains while preserving the repository lock, and the second forces active Ticket Sessions; disposal waits for Coordinator stop before releasing that lock. `npm run prove:handoff` is conditional and required when terminal ownership or child handoff behavior changes.
 

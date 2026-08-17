@@ -48,7 +48,7 @@ function addWrapped(lines: string[], prefix: string, text: string, width: number
 export function createAutomodeSelector(options: AutomodeSelectorOptions): AutomodeSelector {
   let mode: AutomodeMode = "full";
   let focus = 0;
-  const enabled = new Set<AutomationStage>(AUTOMATION_STAGES);
+  const enabled = new Set<AutomationStage>(["auto-implement", "auto-review"]);
   let validationMessage: string | undefined;
   let cachedWidth: number | undefined;
   let cachedLines: string[] | undefined;
