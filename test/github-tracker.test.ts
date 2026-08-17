@@ -15,6 +15,31 @@ class FixtureRunner implements GitHubCommandRunner {
 
   async run(command: string, args: readonly string[], cwd: string): Promise<string> {
     this.calls.push({ command, args, cwd });
+    if (args[0] === "api" && args[1] === "graphql") {
+      const number = args.find((argument) => argument.startsWith("number="))?.slice("number=".length);
+      const legacyEndpoint = `repos/owner/repository/issues/${number}/comments?per_page=100`;
+      const pages = this.responses[legacyEndpoint];
+      if (!Array.isArray(pages)) throw new Error(`unexpected command: ${command} ${args.join(" ")}`);
+      return JSON.stringify(pages.map((page) => ({
+        data: {
+          repository: {
+            pullRequest: {
+              comments: {
+                nodes: (page as Array<Record<string, unknown>>).map((comment) => ({
+                  id: comment.node_id,
+                  databaseId: comment.id,
+                  body: comment.body,
+                  author: comment.user,
+                  createdAt: comment.created_at,
+                  updatedAt: comment.updated_at,
+                })),
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          },
+        },
+      })));
+    }
     const endpoint = args.find((argument) => argument.startsWith("repos/"));
     if (!endpoint || !(endpoint in this.responses)) {
       throw new Error(`unexpected command: ${command} ${args.join(" ")}`);
@@ -151,6 +176,76 @@ test("a complete tracker snapshot normalizes every paginated issue and pull requ
   assert.equal(runner.calls.every((call) => call.command === "gh"), true);
   assert.equal(runner.calls.every((call) => call.args.includes("--paginate")), true);
   assert.equal(runner.calls.every((call) => call.args.includes("--slurp")), true);
+});
+
+test("pull-request comments use GraphQL when GitHub's REST issue-comments route is unavailable", async () => {
+  const pullIssue = issue(15, {
+    node_id: "PR_15",
+    html_url: "https://github.com/owner/repository/pull/15",
+    labels: [{ name: "review" }],
+    assignees: [],
+    pull_request: { url: "https://api.github.com/repos/owner/repository/pulls/15" },
+  });
+  const runner: GitHubCommandRunner = {
+    async run(command, args) {
+      const endpoint = args.find((argument) => argument.startsWith("repos/"));
+      if (endpoint === "repos/owner/repository/issues/15") return JSON.stringify(pullIssue);
+      if (endpoint === "repos/owner/repository/pulls/15") {
+        return JSON.stringify({
+          number: 15,
+          head: {
+            sha: "abc123",
+            ref: "automode/issue-14",
+            repo: { full_name: "owner/repository" },
+          },
+          draft: false,
+          merged_at: null,
+        });
+      }
+      if (endpoint === "repos/owner/repository/issues/15/comments?per_page=100") {
+        throw new Error("gh: Not Found (HTTP 404)");
+      }
+      if (command === "gh" && args[0] === "api" && args[1] === "graphql") {
+        return JSON.stringify([{
+          data: {
+            repository: {
+              pullRequest: {
+                comments: {
+                  nodes: [{
+                    id: "IC_PR_1501",
+                    databaseId: 1501,
+                    body: "review context",
+                    author: { login: "reviewer" },
+                    createdAt: "2026-08-14T10:30:00Z",
+                    updatedAt: "2026-08-14T10:30:00Z",
+                  }],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+              },
+            },
+          },
+        }]);
+      }
+      throw new Error(`unexpected command: ${command} ${args.join(" ")}`);
+    },
+  };
+  const tracker = new GitHubTracker({
+    cwd: "C:\\repository",
+    repository: "owner/repository",
+    actor: "automode-bot",
+    runner,
+  });
+
+  const snapshot = await tracker.reread({ kind: "pull-request", number: 15 });
+
+  assert.deepEqual(snapshot.comments, [{
+    id: "1501",
+    nodeId: "IC_PR_1501",
+    author: "reviewer",
+    body: "review context",
+    createdAt: "2026-08-14T10:30:00.000Z",
+    updatedAt: "2026-08-14T10:30:00.000Z",
+  }]);
 });
 
 test("an issue with GitHub's omitted dependency summary has no open blockers", async () => {

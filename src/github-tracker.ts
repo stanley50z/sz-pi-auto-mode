@@ -323,6 +323,54 @@ function flattenPages(value: unknown, context: string): readonly unknown[] {
   return flattened;
 }
 
+const PULL_REQUEST_COMMENTS_QUERY = `
+  query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+    repository(owner: $owner, name: $name) {
+      pullRequest(number: $number) {
+        comments(first: 100, after: $endCursor) {
+          nodes {
+            id
+            databaseId
+            body
+            createdAt
+            updatedAt
+            author { login }
+          }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
+    }
+  }
+`;
+
+function flattenPullRequestCommentPages(value: unknown, context: string): readonly unknown[] {
+  if (!Array.isArray(value)) throw new Error(`Malformed GitHub ${context}: expected paginated GraphQL results`);
+  const flattened: unknown[] = [];
+  for (const [index, valuePage] of value.entries()) {
+    const page = record(valuePage, `${context} page ${index + 1}`);
+    const data = record(page.data, `${context} page ${index + 1} data`);
+    const repository = record(data.repository, `${context} page ${index + 1} repository`);
+    const pullRequest = record(repository.pullRequest, `${context} page ${index + 1} pull request`);
+    const comments = record(pullRequest.comments, `${context} page ${index + 1} comments`);
+    if (!Array.isArray(comments.nodes)) {
+      throw new Error(`Malformed GitHub ${context}: page ${index + 1} nodes must be an array`);
+    }
+    for (const [commentIndex, commentValue] of comments.nodes.entries()) {
+      const comment = record(commentValue, `${context} page ${index + 1} comment ${commentIndex}`);
+      const author = record(comment.author, `${context} page ${index + 1} comment ${commentIndex} author`);
+      flattened.push({
+        id: comment.databaseId,
+        node_id: comment.id,
+        body: comment.body,
+        user: { login: author.login },
+        created_at: comment.createdAt,
+        updated_at: comment.updatedAt,
+      });
+    }
+  }
+  return flattened;
+}
+
 export class GitHubTracker implements Tracker {
   readonly #cwd: string;
   readonly #repository: string;
@@ -350,7 +398,30 @@ export class GitHubTracker implements Tracker {
     return flattenPages(parseJson(output, context), context);
   }
 
-  async #comments(number: number): Promise<NormalizedComments> {
+  async #comments(number: number, kind: TrackerItemKind): Promise<NormalizedComments> {
+    if (kind === "pull-request") {
+      const [owner, name] = this.#repository.split("/") as [string, string];
+      const context = `comments for pull request #${number}`;
+      const output = await this.#runner.run(
+        "gh",
+        [
+          "api",
+          "graphql",
+          "--paginate",
+          "--slurp",
+          "-F", `owner=${owner}`,
+          "-F", `name=${name}`,
+          "-F", `number=${number}`,
+          "-f", `query=${PULL_REQUEST_COMMENTS_QUERY}`,
+        ],
+        this.#cwd,
+      );
+      return normalizeComments(
+        flattenPullRequestCommentPages(parseJson(output, context), context),
+        number,
+        this.#actor,
+      );
+    }
     const endpoint = `repos/${this.#repository}/issues/${number}/comments?per_page=100`;
     return normalizeComments(
       await this.#paginated(endpoint, `comments for item #${number}`),
@@ -516,7 +587,8 @@ export class GitHubTracker implements Tracker {
       seen.add(number);
       const pull = pullsByNumber.get(number);
       if ("pull_request" in issue) pullsByNumber.delete(number);
-      return this.#normalizeItem(value, pull, await this.#comments(number));
+      const kind: TrackerItemKind = "pull_request" in issue ? "pull-request" : "issue";
+      return this.#normalizeItem(value, pull, await this.#comments(number, kind));
     }));
     if (pullsByNumber.size > 0) {
       throw new Error(
@@ -570,7 +642,7 @@ export class GitHubTracker implements Tracker {
         `pull request #${item.number}`,
       );
     }
-    const normalized = this.#normalizeItem(issue, pull, await this.#comments(item.number));
+    const normalized = this.#normalizeItem(issue, pull, await this.#comments(item.number, actualKind));
     if (actualKind === "issue") {
       const openPulls = await this.#paginated(
         `repos/${this.#repository}/pulls?state=open&per_page=100`,
