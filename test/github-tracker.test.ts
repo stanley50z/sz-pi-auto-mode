@@ -153,6 +153,27 @@ test("a complete tracker snapshot normalizes every paginated issue and pull requ
   assert.equal(runner.calls.every((call) => call.args.includes("--slurp")), true);
 });
 
+test("an issue with GitHub's omitted dependency summary has no open blockers", async () => {
+  const runner = new FixtureRunner({
+    "repos/owner/repository/issues/36": issue(36, {
+      assignees: [],
+      issue_dependencies_summary: undefined,
+    }),
+    "repos/owner/repository/issues/36/comments?per_page=100": [[]],
+    "repos/owner/repository/pulls?state=open&per_page=100": [[]],
+  });
+  const tracker = new GitHubTracker({
+    cwd: "C:\\repository",
+    repository: "owner/repository",
+    actor: "automode-bot",
+    runner,
+  });
+
+  const snapshot = await tracker.reread({ kind: "issue", number: 36 });
+
+  assert.equal(snapshot.blockedBy, 0);
+});
+
 test("an updated_at-only external change advances the complete snapshot revision", async () => {
   let updatedAt = "2026-08-14T11:00:00Z";
   const runner: GitHubCommandRunner = {

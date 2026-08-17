@@ -395,10 +395,12 @@ export class GitHubTracker implements Tracker {
     } else if (pullValue !== undefined) {
       throw new Error(`Ambiguous GitHub item #${number}: issue also appeared as a pull request`);
     }
-    const dependencySummary = record(
-      issue.issue_dependencies_summary,
-      `issue #${number} dependency summary`,
-    );
+    const dependencySummary = issue.issue_dependencies_summary === undefined
+      ? null
+      : record(
+        issue.issue_dependencies_summary,
+        `issue #${number} dependency summary`,
+      );
     const body = issue.body === null ? "" : stringField(issue.body, `issue #${number} body`, true);
     const base = {
       id: `${this.#repository}#${number}`,
@@ -413,10 +415,12 @@ export class GitHubTracker implements Tracker {
       updatedAt: timestamp(issue.updated_at, `issue #${number} updated_at`),
       labels: normalizeLabels(issue.labels, `issue #${number}`),
       assignees: normalizeAssignees(issue.assignees, `issue #${number}`),
-      blockedBy: nonNegativeInteger(
-        dependencySummary.blocked_by,
-        `issue #${number} blocked_by count`,
-      ),
+      blockedBy: dependencySummary === null
+        ? 0
+        : nonNegativeInteger(
+          dependencySummary.blocked_by,
+          `issue #${number} blocked_by count`,
+        ),
       ...(headSha === undefined ? {} : { headSha }),
       ...(headBranch === undefined ? {} : { headBranch }),
       ...(headRepository === undefined ? {} : { headRepository }),
