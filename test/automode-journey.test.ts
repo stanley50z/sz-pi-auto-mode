@@ -24,6 +24,7 @@ import {
 
 class JourneyClock implements CoordinatorClock {
   callback: (() => void | Promise<void>) | undefined;
+  now() { return new Date("2026-02-03T04:05:06.000Z"); }
   every(_milliseconds: number, callback: () => void | Promise<void>) {
     this.callback = callback;
     return { dispose: () => { this.callback = undefined; } };
