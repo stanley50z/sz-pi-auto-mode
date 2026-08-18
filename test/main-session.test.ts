@@ -74,7 +74,7 @@ test("the Automode Run guard cancels Main Session replacement and forking", asyn
   assert.deepEqual(await handlers.get("session_before_fork")!(), { cancel: true });
 });
 
-test("a fresh Main Session starts in the caller repository and durably records the fixed configuration", async () => {
+test("a fresh Main Session separates process-local operating state from the durable launch baseline", async () => {
   const fixture = mkdtempSync(join(tmpdir(), "automode-main-"));
   const repository = join(fixture, "repository");
   const home = join(fixture, "home");
@@ -91,6 +91,14 @@ test("a fresh Main Session starts in the caller repository and durably records t
     assert.deepEqual(main.configuration, {
       mode: "half",
       stages: ["auto-triage", "auto-review"],
+    });
+    assert.deepEqual(main.operatingState, {
+      byStage: {
+        "auto-triage": "ON",
+        "auto-grilling": "OFF",
+        "auto-implement": "OFF",
+        "auto-review": "ON",
+      },
     });
     assert.ok(main.sessionFile);
     assert.equal(existsSync(main.sessionFile!), false);
@@ -205,6 +213,14 @@ test("linked worktrees share the Coordinator identity and fixed Automode Run Rec
   });
   assert.equal(restarted.coordinatorId, coordinatorId);
   assert.equal(restarted.runRecordFile, runRecordFile);
+  assert.deepEqual(restarted.operatingState, {
+    byStage: {
+      "auto-triage": "ON",
+      "auto-grilling": "OFF",
+      "auto-implement": "OFF",
+      "auto-review": "OFF",
+    },
+  });
   restarted.dispose();
 
   await assert.rejects(

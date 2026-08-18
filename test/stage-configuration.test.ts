@@ -4,12 +4,74 @@ import {
   AUTOMATION_STAGES,
   confirmSerializedAutomationStageConfiguration,
   createAutomationStageConfiguration,
+  createAutomationStageOperatingState,
   parseAutomationStageConfiguration,
   parseConfirmedAutomationStageConfiguration,
+  restoreAutomationStageOperatingState,
   serializeAutomationStageConfiguration,
 } from "../src/stage-configuration.js";
 
-test("Full-Auto serializes all four stages into an immutable launch configuration", () => {
+test("the launch baseline restores a separate process-local Automation Stage Operating State", () => {
+  const baseline = createAutomationStageConfiguration("half", ["auto-triage", "auto-review"]);
+
+  assert.deepEqual(restoreAutomationStageOperatingState(baseline), {
+    byStage: {
+      "auto-triage": "ON",
+      "auto-grilling": "OFF",
+      "auto-implement": "OFF",
+      "auto-review": "ON",
+    },
+  });
+});
+
+test("Automation Stage Operating State supports ON, DRAINING, OFF, and monitor-only", () => {
+  assert.deepEqual(createAutomationStageOperatingState({
+    "auto-triage": "ON",
+    "auto-grilling": "DRAINING",
+    "auto-implement": "OFF",
+    "auto-review": "OFF",
+  }), {
+    byStage: {
+      "auto-triage": "ON",
+      "auto-grilling": "DRAINING",
+      "auto-implement": "OFF",
+      "auto-review": "OFF",
+    },
+  });
+  assert.deepEqual(createAutomationStageOperatingState({
+    "auto-triage": "OFF",
+    "auto-grilling": "OFF",
+    "auto-implement": "OFF",
+    "auto-review": "OFF",
+  }).byStage, {
+    "auto-triage": "OFF",
+    "auto-grilling": "OFF",
+    "auto-implement": "OFF",
+    "auto-review": "OFF",
+  });
+});
+
+test("Automation Stage Operating State rejects incomplete or unknown process-local values", () => {
+  assert.throws(
+    () => createAutomationStageOperatingState({
+      "auto-triage": "ON",
+      "auto-grilling": "OFF",
+      "auto-implement": "PAUSED",
+      "auto-review": "OFF",
+    } as never),
+    /Invalid Automation Stage Operating State/,
+  );
+  assert.throws(
+    () => createAutomationStageOperatingState({
+      "auto-triage": "ON",
+      "auto-grilling": "OFF",
+      "auto-implement": "OFF",
+    } as never),
+    /Invalid Automation Stage Operating State/,
+  );
+});
+
+test("Full-Auto serializes all four stages into an immutable launch baseline", () => {
   const configuration = createAutomationStageConfiguration("full", AUTOMATION_STAGES);
   const serialized = serializeAutomationStageConfiguration(configuration);
   const launched = parseAutomationStageConfiguration(serialized);

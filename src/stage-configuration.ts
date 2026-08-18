@@ -10,6 +10,13 @@ export const AUTOMATION_STAGES = [
 export type AutomationStage = (typeof AUTOMATION_STAGES)[number];
 export type AutomodeMode = "full" | "half";
 
+export const AUTOMATION_STAGE_OPERATING_STATES = ["ON", "DRAINING", "OFF"] as const;
+export type AutomationStageOperatingStateValue = (typeof AUTOMATION_STAGE_OPERATING_STATES)[number];
+
+export interface AutomationStageOperatingState {
+  readonly byStage: Readonly<Record<AutomationStage, AutomationStageOperatingStateValue>>;
+}
+
 export const AUTOMATION_STAGE_LABELS: Readonly<Record<AutomationStage, string>> = Object.freeze({
   "auto-triage": "Auto-Triage",
   "auto-grilling": "Auto-Grilling",
@@ -57,6 +64,28 @@ export function createAutomationStageConfiguration(
   }
   const orderedStages = AUTOMATION_STAGES.filter((stage) => uniqueStages.includes(stage));
   return Object.freeze({ mode, stages: Object.freeze(orderedStages) });
+}
+
+export function createAutomationStageOperatingState(
+  byStage: Readonly<Record<AutomationStage, AutomationStageOperatingStateValue>>,
+): AutomationStageOperatingState {
+  const keys = Object.keys(byStage);
+  if (
+    keys.length !== AUTOMATION_STAGES.length
+    || keys.some((stage) => !isAutomationStage(stage))
+    || AUTOMATION_STAGES.some((stage) => !AUTOMATION_STAGE_OPERATING_STATES.includes(byStage[stage]))
+  ) {
+    throw new Error("Invalid Automation Stage Operating State");
+  }
+  return Object.freeze({ byStage: Object.freeze({ ...byStage }) });
+}
+
+export function restoreAutomationStageOperatingState(
+  baseline: AutomationStageConfiguration,
+): AutomationStageOperatingState {
+  return createAutomationStageOperatingState(Object.fromEntries(
+    AUTOMATION_STAGES.map((stage) => [stage, baseline.stages.includes(stage) ? "ON" : "OFF"]),
+  ) as Record<AutomationStage, AutomationStageOperatingStateValue>);
 }
 
 export function serializeAutomationStageConfiguration(configuration: AutomationStageConfiguration): string {

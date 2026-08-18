@@ -1,16 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createAutomodeCapabilityProfile } from "../src/capability-profile.js";
-import { createAutomationStageConfiguration } from "../src/stage-configuration.js";
-
-const full = createAutomationStageConfiguration("full", [
-  "auto-triage",
-  "auto-grilling",
-  "auto-implement",
-  "auto-review",
-]);
-
-const half = createAutomationStageConfiguration("half", ["auto-triage", "auto-review"]);
 const defaultReviewerExecution = {
   harness: "pi",
   provider: "anthropic",
@@ -18,8 +8,8 @@ const defaultReviewerExecution = {
   reasoning: "high",
 } as const;
 
-test("Full-Auto selects extension-owned stage skills and the fixed controlled surface", () => {
-  const profile = createAutomodeCapabilityProfile(full, defaultReviewerExecution);
+test("the capability profile preloads every Automode Stage Skill and fixed controlled surface", () => {
+  const profile = createAutomodeCapabilityProfile(defaultReviewerExecution);
 
   assert.deepEqual(
     profile.skills.filter((skill) => skill.kind === "stage").map(({ name, owner }) => [name, owner]),
@@ -53,20 +43,9 @@ test("Full-Auto selects extension-owned stage skills and the fixed controlled su
   ]);
 });
 
-test("Half-Auto substitutes native skills only for disabled stages", () => {
-  const profile = createAutomodeCapabilityProfile(half, defaultReviewerExecution);
-  const owners = Object.fromEntries(
-    profile.skills.filter((skill) => skill.kind === "stage").map((skill) => [skill.name, skill.owner]),
-  );
+test("the capability profile keeps shared and support skills native", () => {
+  const profile = createAutomodeCapabilityProfile(defaultReviewerExecution);
 
-  assert.deepEqual(owners, {
-    triage: "automode",
-    grilling: "native",
-    prototype: "native",
-    implement: "native",
-    tdd: "native",
-    "code-review": "automode",
-  });
   assert.deepEqual(
     profile.skills.filter((skill) => skill.kind === "shared").map((skill) => skill.name),
     [

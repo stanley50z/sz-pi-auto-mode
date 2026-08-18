@@ -9,7 +9,7 @@ async function main(): Promise<void> {
   const repository = process.argv[2];
   if (!repository) throw new Error("Missing caller repository path");
   const serializedConfiguration = process.env.AUTOMODE_STAGE_CONFIGURATION;
-  if (!serializedConfiguration) throw new Error("Missing immutable Automation Stage Configuration");
+  if (!serializedConfiguration) throw new Error("Missing launch-baseline Automation Stage Configuration");
   const configurationConfirmation = process.env.AUTOMODE_STAGE_CONFIGURATION_CONFIRMATION;
   if (!configurationConfirmation) throw new Error("Missing Automation Stage Configuration confirmation");
   const serializedDefaultReviewer = process.env.AUTOMODE_DEFAULT_REVIEWER_EXECUTION;

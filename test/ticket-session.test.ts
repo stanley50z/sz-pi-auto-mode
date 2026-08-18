@@ -378,18 +378,21 @@ test("an exact persisted session file can resume and settle waiting", async () =
   });
 });
 
-test("the production child adapter rejects a skill not owned by an enabled stage", async () => {
-  await assert.rejects(
-    () => createControlledTicketSession({
-      cwd: process.cwd(),
-      skillName: "triage",
-      itemUrl: "https://github.com/owner/repository/issues/22",
-      prompt: "/skill:triage https://github.com/owner/repository/issues/22",
-      configuration: createAutomationStageConfiguration("half", ["auto-review"]),
-      defaultReviewerExecution,
-    }),
-    /not owned by an enabled Automation Stage/,
-  );
+test("the production child adapter can dispatch a pre-attested Stage outside the launch baseline", async () => {
+  const session = await createControlledTicketSession({
+    cwd: process.cwd(),
+    skillName: "triage",
+    itemUrl: "https://github.com/owner/repository/issues/22",
+    prompt: "/skill:triage https://github.com/owner/repository/issues/22",
+    configuration: createAutomationStageConfiguration("half", ["auto-review"]),
+    defaultReviewerExecution,
+  });
+  try {
+    assert.ok(session.sessionId);
+    assert.ok(session.sessionFile);
+  } finally {
+    session.dispose();
+  }
 });
 
 test("the public host seam completes a full child-process run with persistent history", async () => {

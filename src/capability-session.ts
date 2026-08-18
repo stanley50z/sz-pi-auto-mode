@@ -16,7 +16,6 @@ import {
 } from "./capability-profile.js";
 import { createControlledServices } from "./controlled-services.js";
 import { repositoryRoot, resolveAutomodePaths } from "./paths.js";
-import type { AutomationStageConfiguration } from "./stage-configuration.js";
 
 export interface ProjectResourceAllowlist {
   readonly trusted: boolean;
@@ -25,7 +24,6 @@ export interface ProjectResourceAllowlist {
 
 export interface CapabilitySessionOptions {
   cwd: string;
-  configuration: AutomationStageConfiguration;
   defaultReviewerExecution: PiExecutionProfile;
   model?: Model<any>;
   home?: string;
@@ -92,7 +90,7 @@ export async function createCapabilitySession(
   options: CapabilitySessionOptions,
 ): Promise<CapabilitySession> {
   const repository = repositoryRoot(options.cwd);
-  const profile = createAutomodeCapabilityProfile(options.configuration, options.defaultReviewerExecution);
+  const profile = createAutomodeCapabilityProfile(options.defaultReviewerExecution);
   const paths = resolveAutomodePaths(repository, options.home, options.normalAgentDir);
   mkdirSync(paths.automodeDir, { recursive: true });
   mkdirSync(paths.sessionDir, { recursive: true });

@@ -1,7 +1,7 @@
 ---
 type: "Runtime Workflow"
 title: "Launch and automation"
-description: "The Automode launch workflow from normal Pi through immutable stage selection, child-process handoff, fail-closed startup, capability attestation, and guarded Main Session startup."
+description: "The Automode launch workflow from normal Pi through fixed launch-baseline stage selection, child-process handoff, fail-closed startup, capability attestation, and guarded Main Session startup."
 tags: [automode, launch, workflow, handoff]
 openwiki:
   roles: [workflow, runtime, testing]
@@ -15,7 +15,7 @@ openwiki:
 
 # Launch and automation
 
-This repo's concrete workflow docs now center on the `/automode` launch bridge, the immutable stage configuration that survives the process handoff, and the fail-closed startup checks implemented in `src/startup.ts` before work discovery begins. The child persists the repository-scoped **Automode Run Record** only after startup validation and the **Automode Capability Attestation Session** succeed; `src/paths.ts` owns the repository-keyed Automode and Git common-directory paths. The selector starts in Full-Auto, uses `Tab` to switch between Full-Auto and Half-Auto, lets the arrow keys move focus, only allows `Space` toggles in Half-Auto, and defaults Half-Auto to Auto-Implement plus Auto-Review while permitting any non-empty Half-Auto selection, including all four stages. Full-Auto requires all four stages, while Half-Auto accepts any non-empty subset and can also launch with all four enabled; enabled-stage toggles determine runtime behavior. Panel-enabled startup attests the fixed panel execution profiles before work discovery, and the current MVP uses the default Pi seat active at launch plus the configured Pi / `github-copilot/claude-fable-5` and Pi / `openai-codex/gpt-5.6-sol` seats for grilling and review.
+This repo's concrete workflow docs now center on the `/automode` launch bridge, the fixed Automation Stage Configuration baseline that survives the process handoff, and the fail-closed startup checks implemented in `src/startup.ts` before work discovery begins. The child persists the repository-scoped **Automode Run Record** only after startup validation and the **Automode Capability Attestation Session** succeed; `src/paths.ts` owns the repository-keyed Automode and Git common-directory paths. The selector starts in Full-Auto, uses `Tab` to switch between Full-Auto and Half-Auto, lets the arrow keys move focus, only allows `Space` toggles in Half-Auto, and defaults Half-Auto to Auto-Implement plus Auto-Review while permitting any non-empty Half-Auto selection, including all four stages. Full-Auto requires all four stages, while Half-Auto accepts any non-empty subset and can also launch with all four enabled; selector toggles define the baseline, while separate process-local Automation Stage Operating State determines current dispatch. The process-local state can be `ON`, `DRAINING`, or `OFF`, all stages may be `OFF`, and a restart restores `ON`/`OFF` from the launch baseline rather than persisting operating state. Startup attests every configured Panel execution profile regardless of the launch baseline, and the current MVP uses the default Pi seat active at launch plus the configured Pi / `github-copilot/claude-fable-5` and Pi / `openai-codex/gpt-5.6-sol` seats for grilling and review.
 
 `docs/automode-launch.md` and `docs/process-handoff-proof.md` now describe the launch and handoff seam in more detail, including the terminal handoff, environment confirmation, transient GitHub startup-probe retries, and fresh child-process ownership.
 
@@ -76,7 +76,7 @@ The repository intentionally has no OpenWiki CI workflow. Regeneration stays loc
 For future implementation work, the automation story should answer:
 
 - how `/automode` is invoked from the normal Pi experience
-- how the immutable stage configuration is serialized and confirmed across the process boundary
+- how the fixed launch-baseline stage configuration is serialized and confirmed across the process boundary
 - how Automode stays isolated from normal Pi configuration
 - how the Main Session persists its fixed Automode Run Record after validation, while the Capability Profile remains an in-memory allowlist
 - how the repository-level Coordinator identity and lock are shared through the Git common directory

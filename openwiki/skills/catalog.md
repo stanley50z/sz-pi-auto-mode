@@ -14,20 +14,20 @@ openwiki:
 
 # Bundled Automode and native skills
 
-The repository packages two skill trees. `skills/native` contains the baseline guidance available to the controlled profile; `skills/automode` contains stage-owned replacements used only when that stage is enabled. `src/capability-profile.ts` is the canonical registry and resolves each resource to an absolute source root so command provenance can be attested. Ticket Sessions receive one canonical `/skill:<name> <item-url>` command; the Coordinator selects the stage skill, while the child process loads the immutable capability configuration.
+The repository packages two skill trees. `skills/native` contains the baseline guidance available to the controlled profile; `skills/automode` contains extension-owned Automode Stage Skills that are preloaded and pre-attested regardless of launch baseline. `src/capability-profile.ts` is the canonical registry and resolves each resource to an absolute source root so command provenance can be attested. Ticket Sessions receive one canonical `/skill:<name> <item-url>` command; the Coordinator selects the stage skill, while the child process loads the immutable capability configuration.
 
 ## Profile selection
 
-| Category | Native resources | Automode resources |
+| Category | Native counterparts | Automode resources |
 |---|---|---|
 | Shared | `wayfinder`, `to-spec`, `to-tickets`, `domain-modeling`, `research`, `codebase-design`, `commit`, `resolving-merge-conflicts`, `handoff`, `setup-matt-pocock-skills` | none |
 | Support | `browser-harness`, `ketch`, `diagnosing-bugs`, `openwiki`, `writing-for-agents`, `wizard` | none |
-| Auto-Triage | `triage` fallback | `triage` |
-| Auto-Grilling | `grilling` fallback | `grilling` |
-| Auto-Implement | `prototype`, `implement`, `tdd` fallback | `prototype`, `implement`, `tdd` |
-| Auto-Review | `code-review` fallback | `code-review` |
+| Auto-Triage | `triage` | `triage` |
+| Auto-Grilling | `grilling` | `grilling` |
+| Auto-Implement | `prototype`, `implement`, `tdd` | `prototype`, `implement`, `tdd` |
+| Auto-Review | `code-review` | `code-review` |
 
-Disabled stage skills remain native rather than disappearing, while enabled stages switch ownership to the Automode tree. This selection is part of the immutable capability profile and is checked by `test/capability-profile.test.ts`. The Coordinator maps `auto-implement` to `prototype` when an item carries `wayfinder:prototype`, otherwise to `implement`; the remaining runtime mappings are `auto-triage` -> `triage`, `auto-grilling` -> `grilling`, and `auto-review` -> `code-review`. `createCanonicalTicketSessionPrompt` validates the skill slug and item URL before producing the child prompt.
+Every extension-owned Automode Stage Skill is preloaded and pre-attested regardless of the launch baseline. An OFF Stage prevents Coordinator dispatch; it does not substitute a native skill inside Automode. This fixed capability profile is checked by test/capability-profile.test.ts. The Coordinator maps `auto-implement` to `prototype` when an item carries `wayfinder:prototype`, otherwise to `implement`; the remaining runtime mappings are `auto-triage` -> `triage`, `auto-grilling` -> `grilling`, and `auto-review` -> `code-review`. `createCanonicalTicketSessionPrompt` validates the skill slug and item URL before producing the child prompt.
 
 ## Change navigation
 
