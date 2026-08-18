@@ -1,69 +1,34 @@
 ---
-type: "Skills Catalog"
-title: "Automode skill catalog"
-description: "The bundled shared, support, and stage skills that Automode exposes through its explicit capability profile."
-tags: [automode, skills, catalog, capability]
+type: "Skill Catalog"
+title: "Bundled Automode and native skills"
+description: "Map of the repository's native shared/support skills and Automode stage-specific skills, including how capability profiles select them."
+tags: [skills, automode, repository]
 openwiki:
-  roles: [architecture, skills, testing]
-  change_kinds: [skills, capability, attestation]
-  source_paths: [src/capability-profile.ts, src/capability-session.ts, src/attestation.ts, src/ticket-session-main.ts, src/controlled-services.ts, src/ticket-session.ts]
-  symbols: [createAutomodeCapabilityProfile, parsePiExecutionProfile, createControlledServices, attestCanonicalCommands, createCanonicalTicketSessionPrompt]
-  test_paths: [test/capability-profile.test.ts, test/capability-session.test.ts, test/ticket-session.test.ts]
-  invariants: [Shared skills are native and reusable across Automode stages., Support skills are native helpers that remain available inside the fail-closed capability profile., Stage skills are owned by Automode and resolve to stage-specific canonical SKILL.md roots., Ticket Session prompts are canonical and must match the skill name and item URL exactly., Canonical command attestation rejects duplicate, missing, or off-root skill provenance.]
-  validation_commands: [npm run build, "node --test dist/test/capability-profile.test.js dist/test/capability-session.test.js dist/test/ticket-session.test.js"]
+  roles: [repository, architecture, workflow]
+  change_kinds: [configuration, public-api]
+  source_paths: [src/capability-profile.ts, skills/automode, skills/native]
+  symbols: [createAutomodeCapabilityProfile, STAGE_SKILLS]
+  test_paths: [test/capability-profile.test.ts, test/capability-session.test.ts]
+  validation_commands: [npm run build, "node --test dist/test/capability-profile.test.js dist/test/capability-session.test.js"]
 ---
 
-# Automode skill catalog
+# Bundled Automode and native skills
 
-This page maps the skill groups that the capability profile exposes to Automode.
+The repository packages two skill trees. `skills/native` contains the baseline guidance available to the controlled profile; `skills/automode` contains extension-owned Automode Stage Skills that are preloaded and pre-attested regardless of launch baseline. `src/capability-profile.ts` is the canonical registry and resolves each resource to an absolute source root so command provenance can be attested. Ticket Sessions receive one canonical `/skill:<name> <item-url>` command; the Coordinator selects the stage skill, while the child process loads the immutable capability configuration.
 
-## Shared native skills
+## Profile selection
 
-`src/capability-profile.ts` includes the shared native skills that Automode reuses across stages:
+| Category | Native counterparts | Automode resources |
+|---|---|---|
+| Shared | `wayfinder`, `to-spec`, `to-tickets`, `domain-modeling`, `research`, `codebase-design`, `commit`, `resolving-merge-conflicts`, `handoff`, `setup-matt-pocock-skills` | none |
+| Support | `browser-harness`, `ketch`, `diagnosing-bugs`, `openwiki`, `writing-for-agents`, `wizard` | none |
+| Auto-Triage | `triage` | `triage` |
+| Auto-Grilling | `grilling` | `grilling` |
+| Auto-Implement | `prototype`, `implement`, `tdd` | `prototype`, `implement`, `tdd` |
+| Auto-Review | `code-review` | `code-review` |
 
-- `wayfinder`
-- `to-spec`
-- `to-tickets`
-- `domain-modeling`
-- `research`
-- `codebase-design`
-- `commit`
-- `resolving-merge-conflicts`
-- `handoff`
-- `setup-matt-pocock-skills`
+Every extension-owned Automode Stage Skill is preloaded and pre-attested regardless of the launch baseline. An OFF Stage prevents Coordinator dispatch; it does not substitute a native skill inside Automode. This fixed capability profile is checked by test/capability-profile.test.ts. The Coordinator maps `auto-implement` to `prototype` when an item carries `wayfinder:prototype`, otherwise to `implement`; the remaining runtime mappings are `auto-triage` -> `triage`, `auto-grilling` -> `grilling`, and `auto-review` -> `code-review`. `createCanonicalTicketSessionPrompt` validates the skill slug and item URL before producing the child prompt.
 
-These are treated as native shared skills, not Automode-owned stage skills.
+## Change navigation
 
-## Native support skills
-
-The capability profile also includes native support skills:
-
-- `browser-harness`
-- `ketch`
-- `diagnosing-bugs`
-- `openwiki`
-- `writing-for-agents`
-- `wizard`
-
-They support controlled repository work but are still part of the native skill surface.
-
-## Automode stage skills
-
-Automode owns the stage-specific skills that are used to dispatch tracker work through Ticket Sessions:
-
-- `triage`
-- `grilling`
-- `prototype`
-- `implement`
-- `tdd`
-- `code-review`
-
-`src/ticket-session-main.ts` verifies that the requested skill is one of these canonical Automode stage skills before creating the controlled Ticket Session environment.
-
-## Why this catalog matters
-
-The catalog is the public shape of the controlled skill surface. It matters because startup attestation and command provenance both depend on the same canonical names and source roots.
-
-## Change guidance
-
-Update this page when the capability profile adds or removes bundled skills, when a stage skill changes ownership, or when canonical ticket-session prompting changes.
+When changing a skill, start with its `SKILL.md` and any referenced companion documents, then verify the corresponding registry entry and canonical command attestation. Stage behavior changes require the profile and capability-session tests; guidance-only changes normally need the bundled-standards tests when they affect required structure (for example, canonical Wayfinder map sections or triage label routing). The adjacent `normal-pi-discovery` tests cover the controlled resource-discovery contract when normal-Pi guidance or filtering changes. Do not hand-edit `dist/`; `npm run build` regenerates it from TypeScript. The [capability boundary](../architecture/capability-boundary.md) documents trust, resource allowlisting, and shipped-surface checks.

@@ -1,66 +1,45 @@
 ---
-type: "Architecture Detail"
+type: "Capability Boundary"
 title: "Automode capability boundary"
-description: "The fail-closed capability surface for Automode sessions, including skill allowlists, controlled services, startup attestation, and the startup-only capability session."
-tags: [automode, architecture, capability, attestation, skills]
+description: "Defines the allowlisted skills, tools, models, settings, guidance, and project-resource rules exposed to Automode sessions, plus canonical provenance attestation."
+tags: [automode, capabilities, security, skills]
 openwiki:
-  roles: [architecture, lifecycle, security, testing]
-  change_kinds: [capability, attestation, security, integration]
-  source_paths: [src/capability-profile.ts, src/capability-session.ts, src/controlled-services.ts, src/attestation.ts, src/startup.ts]
-  symbols: [createAutomodeCapabilityProfile, parsePiExecutionProfile, createControlledServices, controlledGuidanceFiles, attestCanonicalCommands, isPathInside, validateAutomodeStartup, attestClaudeCodeExecutionProfile]
-  test_paths: [test/capability-profile.test.ts, test/capability-session.test.ts, test/attestation.test.ts, test/startup.test.ts]
-  invariants: [Automode sessions use a hard-coded fail-closed profile instead of inheriting arbitrary Pi capabilities., The capability attestation session exists only during startup and is disposed before Main Session creation., Controlled services load only repository guidance, allowed skill paths, and the controlled fast-mode extension., Canonical skill provenance must resolve to each skill's SKILL.md and stay inside the repository., Startup fails closed if required Pi or Claude Code execution profiles are missing or invalid.]
-  validation_commands: [npm run build, "node --test dist/test/capability-profile.test.js dist/test/capability-session.test.js dist/test/attestation.test.js dist/test/startup.test.js"]
+  roles: [architecture, security, testing]
+  change_kinds: [security, public-api, configuration]
+  source_paths: [src/capability-profile.ts, src/capability-session.ts, src/controlled-services.ts, src/attestation.ts]
+  symbols: [createAutomodeCapabilityProfile, createCapabilitySession, createControlledServices]
+  test_paths: [test/capability-profile.test.ts, test/capability-session.test.ts, test/attestation.test.ts]
+  invariants: [Automode disables ambient extensions, skills, prompt templates, and themes., Project executable resources require explicit trust and remain inside the repository., Every exposed skill command must resolve to its canonical allowlisted source.]
+  validation_commands: [npm run build, "node --test dist/test/capability-profile.test.js dist/test/capability-session.test.js dist/test/attestation.test.js"]
 ---
 
 # Automode capability boundary
 
-The capability boundary defines what an Automode run may see before work starts and what it may not inherit from normal Pi.
+Automode does not inherit the normal Pi resource surface. `createAutomodeCapabilityProfile` builds an immutable profile from shared native skills, support skills, and pre-attested Automode Stage Skills. Every Automode Stage Skill is preloaded so Automation Stage Operating State can change without widening the capability boundary; the profile exposes `read`, `bash`, `edit`, `write`, `grep`, `find`, and `ls`, the `fast` extension command, high reasoning, and `defaultProjectTrust: "never"`.
 
-## What is included
+## Session construction
 
-`src/capability-profile.ts` builds the explicit Automode capability profile:
+`createCapabilitySession` constructs the **Automode Capability Attestation Session**: it resolves the repository root, creates repository-scoped Automode directories, validates optional project skill paths, and calls `createControlledServices`. The session identity is deliberately attestation-only: its system prompt instructs it to inspect the controlled surface and terminate without tracker work. The controlled service factory uses in-memory settings, the normal credential root only for model authentication, and `noExtensions`, `noSkills`, `noPromptTemplates`, and `noThemes`; it then adds only the profile's skill roots and inline extensions. Repository guidance is filtered to the repository and its direct Markdown references, with `CONTEXT.md` included when present.
 
-- shared native skills such as `wayfinder`, `to-spec`, `to-tickets`, `domain-modeling`, `research`, `codebase-design`, `commit`, `resolving-merge-conflicts`, `handoff`, and `setup-matt-pocock-skills`;
-- support skills such as `browser-harness`, `ketch`, `diagnosing-bugs`, `openwiki`, `writing-for-agents`, and `wizard`;
-- stage skills owned by Automode for triage, grilling, implementation, and review;
-- a fixed tool list, controlled settings, and the ordinary / panel execution profiles.
+Project executable resources are accepted only when `trusted` is true, each path resolves inside the repository, and its `SKILL.md` exists. A supplied model must match the ordinary ticket profile (`openai-codex/gpt-5.6-sol`); otherwise the runtime resolves that exact provider/model. The Automode Capability Attestation Session is used only for startup attestation and is disposed before the Main Session begins; it is not a Ticket Session.
 
-The profile is explicit and deterministic. It is not discovered from ambient Pi state.
+```mermaid
+flowchart TD
+  C[Fail-closed startup] --> P[Immutable capability profile]
+  P --> S[Allowlisted skill roots]
+  P --> T[Fixed tools, settings, and models]
+  S --> R[Controlled resource loader]
+  T --> R
+  R --> A[Canonical command attestation]
+  A --> Q[Capability session]
+```
 
-## Startup attestation
+*Attestation verifies the assembled surface before it can support Automode work.*
 
-`src/startup.ts` uses the capability profile to attest the required execution surface before the Main Session exists. The startup path validates:
+## Extension recipe and validation
 
-- the repository root and GitHub identity;
-- the default Reviewer execution profile;
-- any additional panel execution profiles, even if their panel stages start `OFF`;
-- and the Claude Code profile when the selected profile requires it.
+To add a stage capability, update `STAGE_SKILLS`, add the canonical skill under `skills/automode` and its native counterpart under `skills/native` when appropriate, then extend profile/session tests. To add an always-available skill, update the shared or support lists and test command provenance. To change tools, settings, or execution profiles, update `capability-profile.ts`, the controlled session tests, and startup profile attestation; do not validate only the defining module because shipped capability correctness includes resource-loader registration and canonical command provenance. Use the narrow focused command in the front matter; run `npm test` only for package-wide runtime or public-surface changes.
 
-That attestation is fail-closed. If a required profile is unavailable, startup stops before Automode can claim the repository Coordinator.
+## Relationships and evidence
 
-## Controlled services and provenance
-
-`src/controlled-services.ts` narrows the session services to the repository guidance and the allowlisted skill roots. It loads only markdown guidance files that stay inside the repository and pulls in `CONTEXT.md` when present.
-
-`src/attestation.ts` verifies two important properties:
-
-- canonical commands exist exactly once for the expected skill roots;
-- each command resolves to the matching `SKILL.md` under the canonical source root and not outside the repository.
-
-This is what keeps the capability boundary tied to the intended source tree instead of ambient global or project-wide resources.
-
-## Capability session lifecycle
-
-`src/capability-session.ts` constructs the Automode Capability Attestation Session only for startup. The session is a temporary attestation boundary, not a persisted run record and not a replacement for the Main Session.
-
-The correct responsibility split is:
-
-- capability session: prove the controlled surface at startup;
-- main session: host the Automode Coordinator after attestation succeeds.
-
-## Change guidance
-
-Update this page when the allowlisted skills change, when controlled guidance loading changes, when attestation rules change, or when startup begins checking a new execution profile.
-
-Keep the durable record semantics stable: the Automode Run Record stores launch configuration and coordinator identity, not the live capability session state.
+The [skill catalog](../skills/catalog.md) is the canonical map of bundled resources. The [architecture overview](overview.md) explains why this boundary is attested before the guarded Main Session and Coordinator lifecycle. `src/attestation.ts` owns command/source collision and provenance checks; `src/fast-mode.ts` is the one built-in extension intentionally added by controlled services.

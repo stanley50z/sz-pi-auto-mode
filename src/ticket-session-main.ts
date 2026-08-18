@@ -176,14 +176,11 @@ function activityFromAgentEvent(event: AgentSessionEvent): TicketSessionChildAct
 export const createControlledTicketSession: TicketSessionChildSessionFactory = async (request) => {
   const cwd = realpathSync(resolve(request.cwd));
   repositoryRoot(cwd);
-  const configuration = createAutomationStageConfiguration(
-    request.configuration.mode,
-    request.configuration.stages,
-  );
-  const profile = createAutomodeCapabilityProfile(configuration, request.defaultReviewerExecution);
+  createAutomationStageConfiguration(request.configuration.mode, request.configuration.stages);
+  const profile = createAutomodeCapabilityProfile(request.defaultReviewerExecution);
   const requestedSkill = profile.skills.find((skill) => skill.name === request.skillName);
   if (!requestedSkill || requestedSkill.kind !== "stage" || requestedSkill.owner !== "automode") {
-    throw new Error(`Skill is not a canonical Automode Stage Skill: ${request.skillName}`);
+    throw new Error(`Skill is not an Automode Stage Skill: ${request.skillName}`);
   }
   const paths = resolveAutomodePaths(cwd, request.home, request.normalAgentDir);
   mkdirSync(paths.automodeDir, { recursive: true });

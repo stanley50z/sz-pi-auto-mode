@@ -10,7 +10,6 @@ import {
   type PiExecutionProfile,
 } from "./capability-profile.js";
 import { repositoryRoot, resolveAutomodePaths } from "./paths.js";
-import type { AutomationStageConfiguration } from "./stage-configuration.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -22,7 +21,6 @@ export type ExecutionProfileAttestor = (profiles: readonly ExecutionProfile[]) =
 
 export interface ValidateAutomodeStartupOptions {
   repository: string;
-  configuration: AutomationStageConfiguration;
   defaultReviewerExecution: PiExecutionProfile;
   home?: string;
   normalAgentDir?: string;
@@ -50,10 +48,12 @@ export const processStartupCommandRunner: StartupCommandRunner = {
 };
 
 function requiredExecutionProfiles(
-  configuration: AutomationStageConfiguration,
-  defaultReviewerExecution: PiExecutionProfile,
+  defaultReviewerExecution: PiExecutionProfile | undefined,
 ): readonly ExecutionProfile[] {
-  return createAutomodeCapabilityProfile(configuration, defaultReviewerExecution).panelExecutions;
+  if (!defaultReviewerExecution) {
+    throw new Error("Automode requires the default Reviewer execution profile");
+  }
+  return createAutomodeCapabilityProfile(defaultReviewerExecution).panelExecutions;
 }
 
 export async function attestClaudeCodeExecutionProfile(
@@ -131,8 +131,6 @@ function githubSlugFromRemote(remote: string): string | undefined {
     return undefined;
   }
 }
-
-const REQUIRED_GITHUB_PERMISSION = "WRITE" as const;
 
 function hasGitHubPermission(actual: string, required: "TRIAGE" | "WRITE"): boolean {
   const rank: Readonly<Record<string, number>> = {
@@ -263,11 +261,11 @@ export async function validateAutomodeStartup(
   ) {
     throw new Error("GitHub repository access failed: local origin and gh repository identity do not match");
   }
-  const permission = REQUIRED_GITHUB_PERMISSION;
+  const permission = "WRITE";
   if (typeof viewed.viewerPermission !== "string" || !hasGitHubPermission(viewed.viewerPermission, permission)) {
     throw new Error(`GitHub repository access failed: Automode requires ${permission} permission`);
   }
-  const profiles = requiredExecutionProfiles(options.configuration, options.defaultReviewerExecution);
+  const profiles = requiredExecutionProfiles(options.defaultReviewerExecution);
   try {
     if (options.attestExecutions) await options.attestExecutions(profiles);
     else await defaultExecutionAttestor(profiles, options, runner);

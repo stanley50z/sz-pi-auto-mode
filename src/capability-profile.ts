@@ -1,10 +1,6 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  createAutomationStageConfiguration,
-  type AutomationStage,
-  type AutomationStageConfiguration,
-} from "./stage-configuration.js";
+import type { AutomationStage } from "./stage-configuration.js";
 
 export type CapabilitySkillOwner = "native" | "automode";
 export type CapabilitySkillKind = "shared" | "support" | "stage";
@@ -128,10 +124,8 @@ function packageSkillRoot(owner: CapabilitySkillOwner, name: string): string {
 }
 
 export function createAutomodeCapabilityProfile(
-  configuration: AutomationStageConfiguration,
   defaultReviewerExecution: PiExecutionProfile,
 ): AutomodeCapabilityProfile {
-  createAutomationStageConfiguration(configuration.mode, configuration.stages);
   const defaultReviewer = Object.freeze({ ...defaultReviewerExecution });
   const skills: CapabilitySkill[] = SHARED_SKILLS.map((name) => Object.freeze({
     name,
@@ -149,11 +143,11 @@ export function createAutomodeCapabilityProfile(
     }));
   }
 
-  for (const names of Object.values(STAGE_SKILLS)) {
+  for (const [stage, names] of Object.entries(STAGE_SKILLS) as Array<[AutomationStage, readonly string[]]>) {
     for (const name of names) {
       skills.push(Object.freeze({
         name,
-        owner: "automode" as const,
+        owner: "automode",
         kind: "stage" as const,
         sourceRoot: packageSkillRoot("automode", name),
       }));
