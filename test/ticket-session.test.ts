@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -15,8 +15,10 @@ import {
 import {
   createControlledTicketSession,
   runTicketSessionChild,
+  ticketSessionActivityFromAgentEvent,
   type TicketSessionChildSession,
 } from "../src/ticket-session-main.js";
+import { resolveAutomodePaths } from "../src/paths.js";
 import { createAutomationStageConfiguration } from "../src/stage-configuration.js";
 
 async function sendFixtureMessage(message: unknown): Promise<void> {
@@ -153,9 +155,20 @@ test("TicketSessionHost launches one child in the actual item cwd with determini
   });
 });
 
-test("Coordinator recovery starts replacement history when the recorded session file is gone", async () => {
+test("Coordinator recovery replaces mismatched in-root session history instead of importing its context", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "ticket-missing-history-"));
   mkdirSync(join(cwd, ".git"));
+  const home = join(cwd, "home");
+  const sessionDir = resolveAutomodePaths(cwd, home).sessionDir;
+  mkdirSync(sessionDir, { recursive: true });
+  const replacementSessionFile = join(sessionDir, "replacement-session.jsonl");
+  writeFileSync(replacementSessionFile, `${JSON.stringify({
+    type: "session", version: 3, id: "replacement-session", timestamp: "2026-08-17T12:00:00.000Z", cwd,
+  })}\n`);
+  const foreignSessionFile = join(sessionDir, "foreign-session.jsonl");
+  writeFileSync(foreignSessionFile, `${JSON.stringify({
+    type: "session", version: 3, id: "foreign-session", timestamp: "2026-08-17T11:00:00.000Z", cwd,
+  })}\n`);
   const child = new FakeTicketProcess();
   const processHost = new TicketSessionHost({
     childEntrypoint: join(cwd, "ticket-session-main.js"),
@@ -165,6 +178,7 @@ test("Coordinator recovery starts replacement history when the recorded session 
     repository: cwd,
     configuration,
     defaultReviewerExecution,
+    home,
     processHost,
   });
 
@@ -173,7 +187,8 @@ test("Coordinator recovery starts replacement history when the recorded session 
     stage: "auto-triage",
     skillName: "triage",
     attempt: 2,
-    resumeSessionFile: join(cwd, "missing-session.jsonl"),
+    resumeSessionFile: foreignSessionFile,
+    resumeSessionId: "replacement-session",
   });
   child.emit("message", {
     type: "ticket-session:event",
@@ -183,7 +198,7 @@ test("Coordinator recovery starts replacement history when the recorded session 
       state: "ready",
       timestamp: Date.now(),
       sessionId: "replacement-session",
-      sessionFile: join(cwd, "replacement-session.jsonl"),
+      sessionFile: replacementSessionFile,
     },
   });
   const handle = await starting;
@@ -197,12 +212,140 @@ test("Coordinator recovery starts replacement history when the recorded session 
     result: {
       status: "clean",
       sessionId: "replacement-session",
-      sessionFile: join(cwd, "replacement-session.jsonl"),
+      sessionFile: replacementSessionFile,
     },
   });
   child.exitCode = 0;
   child.emit("exit", 0, null);
   await handle.completion;
+});
+
+test("the Coordinator host exposes persisted Pi history and future structured activity read-only", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "ticket-history-view-"));
+  mkdirSync(join(cwd, ".git"));
+  const home = join(cwd, "home");
+  const sessionDir = resolveAutomodePaths(cwd, home).sessionDir;
+  mkdirSync(sessionDir, { recursive: true });
+  const sessionFile = join(sessionDir, "persisted-session.jsonl");
+  writeFileSync(sessionFile, [
+    JSON.stringify({ type: "session", version: 3, id: "session-history", timestamp: "2026-08-17T11:59:00.000Z", cwd }),
+    JSON.stringify({ type: "message", id: "entry001", parentId: null, timestamp: "2026-08-17T11:59:01.000Z", message: { role: "user", content: "/skill:implement https://github.com/owner/repository/issues/45", timestamp: 1 } }),
+    JSON.stringify({ type: "message", id: "entry002", parentId: "entry001", timestamp: "2026-08-17T11:59:02.000Z", message: { role: "assistant", content: [{ type: "text", text: "Reading the repository." }], timestamp: 2 } }),
+    JSON.stringify({ type: "message", id: "entry003", parentId: "entry002", timestamp: "2026-08-17T11:59:03.000Z", message: { role: "user", content: "/skill:implement https://github.com/owner/repository/issues/45", timestamp: 3 } }),
+    JSON.stringify({ type: "message", id: "entry004", parentId: "entry003", timestamp: "2026-08-17T11:59:04.000Z", message: { role: "assistant", content: [{ type: "text", text: "Resuming the retry." }], timestamp: 4 } }),
+  ].join("\n") + "\n");
+  const child = new FakeTicketProcess();
+  const processHost = new TicketSessionHost({
+    childEntrypoint: join(cwd, "ticket-session-main.js"),
+    launcher: () => child,
+  });
+  const adapter = new AutomodeTicketSessionHost({
+    repository: cwd,
+    configuration,
+    defaultReviewerExecution,
+    home,
+    processHost,
+  });
+
+  const starting = adapter.start({
+    item: { kind: "issue", number: 45, url: "https://github.com/owner/repository/issues/45" },
+    stage: "auto-implement",
+    skillName: "implement",
+    attempt: 2,
+    resumeSessionFile: sessionFile,
+    resumeSessionId: "session-history",
+  });
+  child.emit("message", {
+    type: "ticket-session:event",
+    version: 1,
+    event: {
+      type: "lifecycle",
+      state: "ready",
+      timestamp: Date.parse("2026-08-17T12:00:00.000Z"),
+      sessionId: "session-history",
+      sessionFile,
+    },
+  });
+  const handle = await starting;
+  assert.equal((child.sent[0] as TicketSessionStartMessage).request.resumeSessionFile, realpathSync(sessionFile));
+  assert.deepEqual(handle.history?.map(({ attempt, kind, message }) => ({ attempt, kind, message })), [
+    { attempt: 1, kind: "pi", message: "User: /skill:implement https://github.com/owner/repository/issues/45" },
+    { attempt: 1, kind: "pi", message: "Assistant: Reading the repository." },
+    { attempt: 2, kind: "pi", message: "User: /skill:implement https://github.com/owner/repository/issues/45" },
+    { attempt: 2, kind: "pi", message: "Assistant: Resuming the retry." },
+  ]);
+
+  const observed: unknown[] = [];
+  const unsubscribe = handle.subscribe?.((activity) => observed.push(activity));
+  child.emit("message", {
+    type: "ticket-session:event",
+    version: 1,
+    event: {
+      type: "activity",
+      activity: "tool_execution_start",
+      timestamp: Date.parse("2026-08-17T12:00:01.000Z"),
+      toolName: "read",
+    },
+  });
+  assert.deepEqual(observed, [{
+    occurredAt: "2026-08-17T12:00:01.000Z",
+    kind: "tool",
+    message: "tool_execution_start",
+    toolName: "read",
+  }]);
+  unsubscribe?.();
+
+  child.emit("message", {
+    type: "ticket-session:terminal",
+    version: 1,
+    result: { status: "clean", sessionId: "session-history", sessionFile },
+  });
+  child.exitCode = 0;
+  child.emit("exit", 0, null);
+  await handle.completion;
+});
+
+test("the Coordinator host rejects cross-directory session history and force-stops that child", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "ticket-history-boundary-"));
+  mkdirSync(join(cwd, ".git"));
+  const outsideSession = join(cwd, "outside-session.jsonl");
+  writeFileSync(outsideSession, `${JSON.stringify({
+    type: "session", version: 3, id: "outside-session", timestamp: "2026-08-17T12:00:00.000Z", cwd,
+  })}\n`);
+  const child = new FakeTicketProcess();
+  const adapter = new AutomodeTicketSessionHost({
+    repository: cwd,
+    configuration,
+    defaultReviewerExecution,
+    home: join(cwd, "home"),
+    processHost: new TicketSessionHost({
+      childEntrypoint: join(cwd, "ticket-session-main.js"),
+      launcher: () => child,
+    }),
+  });
+
+  const starting = adapter.start({
+    item: { kind: "issue", number: 46, url: "https://github.com/owner/repository/issues/46" },
+    stage: "auto-implement",
+    skillName: "implement",
+    attempt: 1,
+  });
+  child.emit("message", {
+    type: "ticket-session:event",
+    version: 1,
+    event: {
+      type: "lifecycle",
+      state: "ready",
+      timestamp: Date.now(),
+      sessionId: "outside-session",
+      sessionFile: outsideSession,
+    },
+  });
+
+  await assert.rejects(starting, /persisted history could not be validated/);
+  assert.deepEqual(child.killed, ["SIGKILL"]);
+  child.signalCode = "SIGKILL";
+  child.emit("exit", null, "SIGKILL");
 });
 
 test("the child reports persistent identity and structured activity around one canonical prompt", async () => {
@@ -257,6 +400,20 @@ test("the child reports persistent identity and structured activity around one c
     sessionFile,
   });
   assert.equal(disposed, true);
+});
+
+test("native Pi tool results retain bounded payload and error details for dashboard activity", () => {
+  assert.deepEqual(ticketSessionActivityFromAgentEvent({
+    type: "tool_execution_end",
+    toolCallId: "tool-1",
+    toolName: "bash",
+    result: { content: [{ type: "text", text: "npm test failed" }], details: { exitCode: 1 } },
+    isError: true,
+  } as never), {
+    activity: 'Failed bash: {"content":[{"type":"text","text":"npm test failed"}],"details":{"exitCode":1}}',
+    toolName: "bash",
+    isError: true,
+  });
 });
 
 test("terminate is idempotent and forces a child that does not stop gracefully", async () => {

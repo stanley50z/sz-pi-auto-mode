@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync, realpathSync } from "node:fs";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isPathInside } from "./attestation.js";
@@ -8,6 +9,7 @@ import type {
   TicketSessionHandle as CoordinatorTicketSessionHandle,
   TicketSessionHost as CoordinatorTicketSessionHost,
   TicketSessionRequest as CoordinatorTicketSessionRequest,
+  TicketSessionObservedActivity,
 } from "./coordinator.js";
 import { resolveAutomodePaths } from "./paths.js";
 import type { AutomationStageConfiguration } from "./stage-configuration.js";
@@ -416,6 +418,125 @@ export class TicketSessionHost {
   }
 }
 
+function readSessionHeaderId(sessionFile: string): string {
+  const descriptor = openSync(sessionFile, "r");
+  try {
+    const buffer = Buffer.alloc(65_536);
+    const length = readSync(descriptor, buffer, 0, buffer.length, 0);
+    const firstLine = buffer.subarray(0, length).toString("utf8").split(/\r?\n/, 1)[0];
+    if (!firstLine) throw new Error("Ticket Session history header is missing");
+    const header: unknown = JSON.parse(firstLine);
+    if (!header || typeof header !== "object" || (header as { type?: unknown }).type !== "session" || typeof (header as { id?: unknown }).id !== "string") {
+      throw new Error("Ticket Session history header is invalid");
+    }
+    return (header as { id: string }).id;
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+const MAX_TICKET_ACTIVITY_TEXT = 2_000;
+const MAX_PERSISTED_HISTORY_EVENTS = 500;
+
+function boundedTicketActivityText(value: string): string {
+  return value.length > MAX_TICKET_ACTIVITY_TEXT
+    ? `${value.slice(0, MAX_TICKET_ACTIVITY_TEXT)}… [truncated]`
+    : value;
+}
+
+function persistedContentText(content: unknown): string {
+  if (typeof content === "string") return boundedTicketActivityText(content);
+  if (!Array.isArray(content)) return "";
+  const combined = content.flatMap((block): string[] => {
+    if (!block || typeof block !== "object") return [];
+    const candidate = block as { type?: unknown; text?: unknown; name?: unknown };
+    if (candidate.type === "text" && typeof candidate.text === "string") return [candidate.text];
+    if (candidate.type === "toolCall" && typeof candidate.name === "string") return [`Requested tool: ${candidate.name}`];
+    return [];
+  }).join("\n");
+  return boundedTicketActivityText(combined);
+}
+
+function readPersistedTicketSessionHistory(sessionFile: string): {
+  readonly sessionId: string;
+  readonly history: readonly TicketSessionObservedActivity[];
+} {
+  const session = SessionManager.open(sessionFile);
+  let historyAttempt = 0;
+  const history = session.buildContextEntries().flatMap((entry): TicketSessionObservedActivity[] => {
+    if (entry.type === "compaction") {
+      return [{ attempt: Math.max(1, historyAttempt), occurredAt: entry.timestamp, kind: "pi", message: `Compaction summary: ${boundedTicketActivityText(entry.summary)}` }];
+    }
+    if (entry.type === "branch_summary") {
+      return [{ attempt: Math.max(1, historyAttempt), occurredAt: entry.timestamp, kind: "pi", message: `Branch summary: ${boundedTicketActivityText(entry.summary)}` }];
+    }
+    if (entry.type === "custom_message" && entry.display) {
+      const message = persistedContentText(entry.content);
+      return message ? [{ attempt: Math.max(1, historyAttempt), occurredAt: entry.timestamp, kind: "pi", message: `Session context: ${message}` }] : [];
+    }
+    if (entry.type !== "message") return [];
+    const message = entry.message;
+    if (message.role === "user") {
+      const text = persistedContentText(message.content);
+      if (/^\/skill:[^\s]+\s+https?:\/\//.test(text.trim())) historyAttempt += 1;
+      return text ? [{ attempt: Math.max(1, historyAttempt), occurredAt: entry.timestamp, kind: "pi", message: `User: ${text}` }] : [];
+    }
+    if (message.role === "assistant") {
+      const text = persistedContentText(message.content);
+      if (!text) return [];
+      return [{
+        attempt: Math.max(1, historyAttempt),
+        occurredAt: entry.timestamp,
+        kind: message.stopReason === "error" ? "error" : "pi",
+        message: `Assistant: ${text}`,
+      }];
+    }
+    if (message.role === "toolResult") {
+      const text = persistedContentText(message.content);
+      return [{
+        attempt: Math.max(1, historyAttempt),
+        occurredAt: entry.timestamp,
+        kind: message.isError ? "error" : "tool",
+        message: text || `${message.toolName} completed without text output.`,
+        toolName: message.toolName,
+      }];
+    }
+    if (message.role === "bashExecution") {
+      return [{
+        attempt: Math.max(1, historyAttempt),
+        occurredAt: entry.timestamp,
+        kind: message.exitCode && message.exitCode !== 0 ? "error" : "tool",
+        message: boundedTicketActivityText(message.output || message.command),
+        toolName: "bash",
+      }];
+    }
+    return [];
+  });
+  if (history.length <= MAX_PERSISTED_HISTORY_EVENTS) {
+    return { sessionId: session.getSessionId(), history };
+  }
+  const retained = history.slice(-(MAX_PERSISTED_HISTORY_EVENTS - 1));
+  return {
+    sessionId: session.getSessionId(),
+    history: [{
+      attempt: retained[0]?.attempt ?? 1,
+      occurredAt: retained[0]?.occurredAt ?? new Date(0).toISOString(),
+      kind: "coordinator",
+      message: "Earlier persisted Pi history was truncated to keep the Activity View responsive.",
+    }, ...retained],
+  };
+}
+
+function observedActivity(event: TicketSessionEvent): TicketSessionObservedActivity | undefined {
+  if (event.type !== "activity") return undefined;
+  return {
+    occurredAt: new Date(event.timestamp).toISOString(),
+    kind: event.isError ? "error" : event.toolName ? "tool" : "pi",
+    message: boundedTicketActivityText(event.activity),
+    ...(event.toolName === undefined ? {} : { toolName: event.toolName }),
+  };
+}
+
 export interface AutomodeTicketSessionHostOptions {
   readonly repository: string;
   readonly configuration: AutomationStageConfiguration;
@@ -433,6 +554,7 @@ export class AutomodeTicketSessionHost implements CoordinatorTicketSessionHost {
   readonly #home: string | undefined;
   readonly #normalAgentDir: string | undefined;
   readonly #processHost: TicketSessionHost;
+  readonly #startingRuns = new Map<string, TicketSessionRun>();
 
   constructor(options: AutomodeTicketSessionHostOptions) {
     this.#repository = realpathSync(resolve(options.repository));
@@ -446,9 +568,16 @@ export class AutomodeTicketSessionHost implements CoordinatorTicketSessionHost {
   async start(request: CoordinatorTicketSessionRequest): Promise<CoordinatorTicketSessionHandle> {
     const cwd = request.cwd ?? this.#repository;
     const controlledSessionDir = resolveAutomodePaths(cwd, this.#home, this.#normalAgentDir).sessionDir;
-    const resumableSessionFile = request.resumeSessionFile && existsSync(request.resumeSessionFile)
+    const candidateResumeFile = request.resumeSessionFile && existsSync(request.resumeSessionFile)
       ? realpathSync(request.resumeSessionFile)
       : undefined;
+    const resumableSessionFile = candidateResumeFile
+      && request.resumeSessionId
+      && isPathInside(candidateResumeFile, controlledSessionDir)
+      && readSessionHeaderId(candidateResumeFile) === request.resumeSessionId
+      ? candidateResumeFile
+      : undefined;
+    const expectedSessionId = resumableSessionFile === undefined ? undefined : request.resumeSessionId;
     const run = this.#processHost.launch({
       cwd,
       skillName: request.skillName,
@@ -456,22 +585,66 @@ export class AutomodeTicketSessionHost implements CoordinatorTicketSessionHost {
       configuration: this.#configuration,
       defaultReviewerExecution: this.#defaultReviewerExecution,
       sessionName: `Automode ${request.stage} #${request.item.number}`,
-      resumeSessionFile: resumableSessionFile && isPathInside(resumableSessionFile, controlledSessionDir)
-        ? resumableSessionFile
-        : undefined,
+      resumeSessionFile: resumableSessionFile,
       home: this.#home,
       normalAgentDir: this.#normalAgentDir,
     });
-    const ready = await run.ready;
+    const key = `${request.item.kind}:${request.item.number}`;
+    this.#startingRuns.set(key, run);
+    const listeners = new Set<(activity: TicketSessionObservedActivity) => void>();
+    const buffered: TicketSessionObservedActivity[] = [];
+    const stopObserving = run.subscribe((event) => {
+      const activity = observedActivity(event);
+      if (!activity) return;
+      if (listeners.size === 0) buffered.push(activity);
+      else for (const listener of listeners) listener(activity);
+    });
+    let ready;
+    try {
+      ready = await run.ready;
+    } catch (error) {
+      this.#startingRuns.delete(key);
+      throw error;
+    }
+    let persisted: ReturnType<typeof readPersistedTicketSessionHistory>;
+    let sessionFile: string;
+    try {
+      sessionFile = realpathSync(ready.sessionFile);
+      if (!isPathInside(sessionFile, controlledSessionDir)) {
+        throw new Error("Ticket Session reported history outside the controlled session directory");
+      }
+      persisted = readPersistedTicketSessionHistory(sessionFile);
+      if (persisted.sessionId !== ready.sessionId || (expectedSessionId !== undefined && ready.sessionId !== expectedSessionId)) {
+        throw new Error("Ticket Session history identity does not match the ready event");
+      }
+    } catch (error) {
+      this.#startingRuns.delete(key);
+      void run.terminate(true).catch(() => undefined);
+      throw new Error("Ticket Session persisted history could not be validated", { cause: error });
+    }
+    const completion = run.completion.then((result) => ({
+      status: result.status,
+      ...(result.error === undefined ? {} : { error: result.error }),
+    })).finally(stopObserving);
+    this.#startingRuns.delete(key);
     return {
       processId: run.processId === undefined ? "unknown" : String(run.processId),
       sessionId: ready.sessionId,
-      sessionFile: ready.sessionFile,
-      completion: run.completion.then((result) => ({
-        status: result.status,
-        ...(result.error === undefined ? {} : { error: result.error }),
-      })),
+      sessionFile,
+      history: persisted.history,
+      completion,
+      subscribe(listener) {
+        listeners.add(listener);
+        for (const activity of buffered.splice(0)) listener(activity);
+        return () => listeners.delete(listener);
+      },
       terminate: async (force) => { await run.terminate(force); },
     };
+  }
+
+  async terminateStarting(itemKey: string, force: boolean): Promise<void> {
+    const run = this.#startingRuns.get(itemKey);
+    if (!run) return;
+    await run.terminate(force);
   }
 }

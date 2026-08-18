@@ -162,7 +162,40 @@ export async function runTicketSessionChild(
   }
 }
 
-function activityFromAgentEvent(event: AgentSessionEvent): TicketSessionChildActivity {
+function boundedActivityDetail(value: unknown): string {
+  let serialized: string;
+  try {
+    serialized = typeof value === "string" ? value : JSON.stringify(value);
+  } catch {
+    serialized = String(value);
+  }
+  return serialized.length > 2_000 ? `${serialized.slice(0, 2_000)}…` : serialized;
+}
+
+/** Converts native Pi events to bounded, structured read-only dashboard activity. */
+export function ticketSessionActivityFromAgentEvent(event: AgentSessionEvent): TicketSessionChildActivity {
+  if (event.type === "tool_execution_start") {
+    return {
+      activity: `Started ${event.toolName}: ${boundedActivityDetail(event.args)}`,
+      toolName: event.toolName,
+    };
+  }
+  if (event.type === "tool_execution_update") {
+    return {
+      activity: `Updated ${event.toolName}: ${boundedActivityDetail(event.partialResult)}`,
+      toolName: event.toolName,
+    };
+  }
+  if (event.type === "tool_execution_end") {
+    return {
+      activity: `${event.isError ? "Failed" : "Completed"} ${event.toolName}: ${boundedActivityDetail(event.result)}`,
+      toolName: event.toolName,
+      isError: event.isError,
+    };
+  }
+  if (event.type === "auto_retry_start") {
+    return { activity: `Retry ${event.attempt}/${event.maxAttempts}: ${event.errorMessage}`, isError: true };
+  }
   const activity: TicketSessionChildActivity = { activity: event.type };
   if ("toolName" in event && typeof event.toolName === "string") activity.toolName = event.toolName;
   if ("isError" in event && typeof event.isError === "boolean") activity.isError = event.isError;
@@ -290,7 +323,7 @@ export const createControlledTicketSession: TicketSessionChildSessionFactory = a
       sessionId: result.session.sessionId,
       sessionFile,
       subscribe(listener) {
-        return result.session.subscribe((event) => listener(activityFromAgentEvent(event)));
+        return result.session.subscribe((event) => listener(ticketSessionActivityFromAgentEvent(event)));
       },
       async prompt(prompt) {
         await result.session.prompt(prompt);

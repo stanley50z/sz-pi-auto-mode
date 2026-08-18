@@ -3,6 +3,7 @@ import { createServer, request } from "node:http";
 import test from "node:test";
 import {
   createCoordinatorDashboard,
+  type DashboardProjection,
   type DashboardTailscaleExposure,
 } from "../src/dashboard.js";
 
@@ -48,6 +49,23 @@ const unavailableTailscale: DashboardTailscaleExposure = {
   async stop() {},
 };
 
+function projection(id = "run-1"): DashboardProjection {
+  const totals = { candidates: 0, active: 0, queued: 0, held: 0, retrying: 0, exhausted: 0 };
+  return {
+    version: 1,
+    repository: { name: "repository", url: "https://github.com/owner/repository" },
+    run: { id, mode: "full", lifecycle: "active" },
+    totals,
+    lanes: ["auto-triage", "auto-grilling", "auto-implement", "auto-review"].map((stage) => ({
+      stage: stage as "auto-triage" | "auto-grilling" | "auto-implement" | "auto-review",
+      operatingState: "ON" as const,
+      candidates: [],
+      totals,
+    })),
+    recent: [],
+  };
+}
+
 test("the Coordinator dashboard serves its initial projection on the fixed loopback URL", async () => {
   const dashboard = createCoordinatorDashboard({
     tailscale: unavailableTailscale,
@@ -55,7 +73,8 @@ test("the Coordinator dashboard serves its initial projection on the fixed loopb
   });
 
   try {
-    const status = await dashboard.start({ repository: "owner/repository", candidates: 3 });
+    const initialProjection = projection("initial");
+    const status = await dashboard.start(initialProjection);
     assert.equal(status.localUrl, "http://127.0.0.1:41738");
     assert.equal(status.remoteUrl, undefined);
     assert.equal(status.exposureError, "tailscale executable was not found");
@@ -64,7 +83,7 @@ test("the Coordinator dashboard serves its initial projection on the fixed loopb
     assert.equal(response.status, 200);
     const snapshot = await response.json() as Record<string, unknown>;
     assert.equal(snapshot.revision, 1);
-    assert.deepEqual(snapshot.projection, { repository: "owner/repository", candidates: 3 });
+    assert.deepEqual(snapshot.projection, initialProjection);
     assert.deepEqual(snapshot.network, {
       localUrl: "http://127.0.0.1:41738",
       exposureError: "tailscale executable was not found",
@@ -80,13 +99,17 @@ test("the dashboard serves static assets and rejects untrusted Host headers", as
     tailscale: unavailableTailscale,
     onCommand: async () => undefined,
   });
-  await dashboard.start({});
+  await dashboard.start(projection());
 
   try {
     const page = await fetch("http://127.0.0.1:41738/");
     assert.equal(page.status, 200);
-    assert.match(await page.text(), /Automode Dashboard/);
-    assert.equal((await fetch("http://127.0.0.1:41738/app.js")).status, 200);
+    const pageBody = await page.text();
+    assert.match(pageBody, /Loading Stage Candidates/);
+    assert.match(pageBody, /name="automode-snapshot" content="\/api\/snapshot"/);
+    const application = await fetch("http://127.0.0.1:41738/app.js");
+    assert.equal(application.status, 200);
+    assert.match(await application.text(), /Live Coordinator connection/);
     assert.equal((await fetch("http://127.0.0.1:41738/styles.css")).status, 200);
 
     assert.equal((await requestDashboard("/api/snapshot", "attacker.example")).status, 421);
@@ -110,7 +133,7 @@ test("successful Tailscale exposure allows only its private host and same-origin
   });
 
   try {
-    assert.deepEqual(await dashboard.start({ repository: "owner/repository" }), {
+    assert.deepEqual(await dashboard.start(projection()), {
       localUrl: "http://127.0.0.1:41738",
       remoteUrl: "https://automode.example.ts.net",
     });
@@ -148,7 +171,7 @@ test("the live event stream publishes replacement projections and structured act
     tailscale: unavailableTailscale,
     onCommand: async () => undefined,
   });
-  await dashboard.start({ repository: "owner/repository", candidates: 1 });
+  await dashboard.start(projection("one"));
 
   const controller = new AbortController();
   try {
@@ -169,22 +192,57 @@ test("the live event stream publishes replacement projections and structured act
       }
     };
 
-    await readUntil('event: projection\ndata: {"revision":1,"projection":{"repository":"owner/repository","candidates":1}');
+    await readUntil('event: projection\ndata: {"revision":1,"projection":{"version":1');
     await new Promise<void>((resolve) => setTimeout(resolve, 25));
-    dashboard.publish({ repository: "owner/repository", candidates: 2 });
-    await readUntil('event: projection\ndata: {"revision":2,"projection":{"repository":"owner/repository","candidates":2}');
-    dashboard.appendActivity({
+    dashboard.publish(projection("two"));
+    await readUntil('"id":"two"');
+    const activity = {
+      id: "activity-43",
       itemKey: "issue:43",
       occurredAt: "2026-08-17T12:00:00.000Z",
       kind: "tool",
       message: "npm test",
       data: { exitCode: 0 },
-    });
-    await readUntil('event: activity\ndata: {"itemKey":"issue:43","occurredAt":"2026-08-17T12:00:00.000Z","kind":"tool","message":"npm test","data":{"exitCode":0}}');
+    } as const;
+    dashboard.appendActivity(activity);
+    await readUntil('event: activity\ndata: {"id":"activity-43","itemKey":"issue:43","occurredAt":"2026-08-17T12:00:00.000Z","kind":"tool","message":"npm test","data":{"exitCode":0}}');
+    const snapshot = await (await fetch("http://127.0.0.1:41738/api/snapshot")).json() as {
+      activities: unknown[];
+    };
+    assert.deepEqual(snapshot.activities, [activity]);
     await reader.cancel();
   } finally {
     controller.abort();
     await dashboard.stop();
+    await dashboard.stop();
+  }
+});
+
+test("activity retention is bounded per item with an explicit truncation marker", async () => {
+  const dashboard = createCoordinatorDashboard({
+    tailscale: unavailableTailscale,
+    onCommand: async () => undefined,
+  });
+  await dashboard.start(projection());
+  try {
+    for (let index = 0; index < 505; index += 1) {
+      dashboard.appendActivity({
+        id: `activity-${index}`,
+        itemKey: "issue:45",
+        occurredAt: `2026-08-17T12:00:${String(index % 60).padStart(2, "0")}.000Z`,
+        kind: "pi",
+        message: `activity ${index}`,
+        data: { attempt: 1, sessionId: "session-45", source: "live" },
+      });
+    }
+    const snapshot = await (await fetch("http://127.0.0.1:41738/api/snapshot")).json() as {
+      activities: Array<{ id: string; message?: string }>;
+    };
+    assert.equal(snapshot.activities.length, 500);
+    assert.equal(snapshot.activities[0]?.id, "issue:45:activity-truncated");
+    assert.match(snapshot.activities[0]?.message ?? "", /truncated/);
+    assert.equal(snapshot.activities.at(-1)?.id, "activity-504");
+  } finally {
     await dashboard.stop();
   }
 });
@@ -195,7 +253,7 @@ test("typed supervisory commands require same-origin, CSRF, and a current projec
     tailscale: unavailableTailscale,
     onCommand: async (command) => { commands.push(command); },
   });
-  await dashboard.start({ value: "first" });
+  await dashboard.start(projection("first"));
 
   try {
     const snapshot = await (await fetch("http://127.0.0.1:41738/api/snapshot")).json() as {
@@ -242,7 +300,7 @@ test("typed supervisory commands require same-origin, CSRF, and a current projec
     });
     assert.equal(missingCsrf.status, 403);
 
-    dashboard.publish({ value: "new" });
+    dashboard.publish(projection("new"));
     const stale = await fetch("http://127.0.0.1:41738/api/commands/refresh", {
       method: "POST", headers, body: "{}",
     });
@@ -270,8 +328,8 @@ test("concurrent startup is idempotent and waits for the same Tailscale result",
     onCommand: async () => undefined,
   });
 
-  const first = dashboard.start({ run: "one" });
-  const second = dashboard.start({ run: "ignored" });
+  const first = dashboard.start(projection("one"));
+  const second = dashboard.start(projection("ignored"));
   const secondBeforeExposure = await Promise.race([
     second.then(() => "settled" as const),
     new Promise<"pending">((resolve) => setImmediate(() => resolve("pending"))),
@@ -303,7 +361,7 @@ test("concurrent shutdown shares failures and can retry Tailscale cleanup", asyn
     },
     onCommand: async () => undefined,
   });
-  await dashboard.start({});
+  await dashboard.start(projection());
 
   const firstStop = dashboard.stop();
   const secondStop = dashboard.stop();
@@ -340,7 +398,7 @@ test("shutdown waits for in-flight startup and removes the resulting exposure", 
     onCommand: async () => undefined,
   });
 
-  const starting = dashboard.start({});
+  const starting = dashboard.start(projection());
   const stopping = dashboard.stop();
   const stopBeforeExposure = await Promise.race([
     stopping.then(() => "settled" as const),
@@ -383,7 +441,7 @@ test("dashboard startup fails when the fixed port is occupied", async () => {
 
   try {
     await assert.rejects(
-      () => dashboard.start({}),
+      () => dashboard.start(projection()),
       (error: NodeJS.ErrnoException) => error.code === "EADDRINUSE",
     );
     assert.equal(exposureCalls, 0);
