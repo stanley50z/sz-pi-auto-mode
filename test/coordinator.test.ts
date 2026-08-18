@@ -4,6 +4,7 @@ import {
   AutomodeCoordinator,
   type BookkeepingRecord,
   type CoordinatorClock,
+  type CoordinatorSupervisionEvent,
   type CoordinatorTracker,
   type TicketSessionHandle,
   type TicketSessionHost,
@@ -135,13 +136,30 @@ test("projects queued, claimed, and running lifecycle from Coordinator state", a
       resolve({ status: "clean" });
     };
   });
+  let sessionStarts = 0;
+  let emitActivity!: (activity: {
+    readonly occurredAt: string;
+    readonly kind: "tool";
+    readonly message: string;
+    readonly toolName: string;
+  }) => void;
   const sessions: TicketSessionHost = {
     async start() {
+      sessionStarts += 1;
       await startupGate;
       return {
         processId: "process-60",
         sessionId: "session-60",
         sessionFile: "/sessions/60.jsonl",
+        history: [{
+          occurredAt: "2026-08-17T11:59:00.000Z",
+          kind: "pi",
+          message: "Recovered persisted Pi conversation history.",
+        }],
+        subscribe(listener) {
+          emitActivity = listener;
+          return () => undefined;
+        },
         completion,
         terminate: async () => undefined,
       };
@@ -155,6 +173,8 @@ test("projects queued, claimed, and running lifecycle from Coordinator state", a
     workspaces: fakeWorkspaces,
     clock: new ManualClock(),
   });
+  const supervision: CoordinatorSupervisionEvent[] = [];
+  coordinator.subscribe((event) => supervision.push(event));
 
   await coordinator.start();
   assert.equal(candidateFor(coordinator, 60)?.status, "queued");
@@ -173,7 +193,28 @@ test("projects queued, claimed, and running lifecycle from Coordinator state", a
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(candidateFor(coordinator, 60)?.status, "running");
   assert.equal(candidateFor(coordinator, 60)?.attempt, 1);
+  assert.deepEqual(candidateFor(coordinator, 60)?.session, {
+    processId: "process-60",
+    sessionId: "session-60",
+    sessionFile: "/sessions/60.jsonl",
+    workspace: "/worktrees/implement-60",
+  });
   assert.equal(coordinator.getProjection().totals.active, 1);
+  assert.equal(sessionStarts, 1);
+  assert.equal(
+    supervision.find((event) => event.type === "activity" && event.activity.data.source === "persisted")?.type,
+    "activity",
+  );
+  emitActivity({
+    occurredAt: "2026-08-17T12:00:00.000Z",
+    kind: "tool",
+    message: "Focused tests are running.",
+    toolName: "bash",
+  });
+  assert.equal(
+    supervision.find((event) => event.type === "activity" && event.activity.message === "Focused tests are running.")?.type,
+    "activity",
+  );
 
   finishSession();
   await coordinator.waitForIdle();
@@ -209,6 +250,11 @@ test("retains candidates settled in this process as Recent and clears them on re
     reason: "The Ticket Session settled this Stage and fresh tracker state proves completion.",
     attempt: 1,
     settledAt: "2026-02-03T04:05:06.000Z",
+    session: {
+      processId: "process-61",
+      sessionId: "session-61",
+      sessionFile: "/sessions/61.jsonl",
+    },
   }]);
   first.interrupt();
   await first.whenStopped();
@@ -1163,4 +1209,36 @@ test("the first interrupt drains without retry and the second forces active Tick
   await coordinator.whenStopped();
 
   assert.deepEqual(terminations, [true]);
+});
+
+test("the second interrupt force-stops a Ticket Session that has not reported ready", async () => {
+  const tracker = new FakeTracker([issue({ number: 52, labels: ["ready-for-agent"], materialVersion: "52-a" })]);
+  let rejectStarting!: (error: Error) => void;
+  let started = false;
+  const forced: Array<{ key: string; force: boolean }> = [];
+  const sessions: TicketSessionHost = {
+    async start(): Promise<TicketSessionHandle> {
+      started = true;
+      return new Promise<TicketSessionHandle>((_resolve, reject) => { rejectStarting = reject; });
+    },
+    async terminateStarting(key, force) {
+      forced.push({ key, force });
+      rejectStarting(new Error("forced before ready"));
+    },
+  };
+  const coordinator = new AutomodeCoordinator({
+    configuration: createAutomationStageConfiguration("half", ["auto-implement"]),
+    actor: "automation-user",
+    tracker,
+    sessions,
+    workspaces: fakeWorkspaces,
+    clock: new ManualClock(),
+  });
+
+  await coordinator.start();
+  while (!started) await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(coordinator.interrupt(), "draining");
+  assert.equal(coordinator.interrupt(), "forcing");
+  await coordinator.whenStopped();
+  assert.deepEqual(forced, [{ key: "issue:52", force: true }]);
 });

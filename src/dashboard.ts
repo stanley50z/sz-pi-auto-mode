@@ -2,18 +2,28 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { execFile } from "node:child_process";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { promisify } from "node:util";
-import { AUTOMATION_STAGES, type AutomationStage } from "./stage-configuration.js";
+import {
+  AUTOMATION_STAGES,
+  type AutomationStage,
+  type AutomationStageOperatingStateValue,
+} from "./stage-configuration.js";
+import {
+  createDashboardUiAssets,
+  type DashboardActivityEntry,
+  type DashboardProjection as BrowserDashboardProjection,
+} from "./dashboard-ui.js";
 
 export const AUTOMODE_DASHBOARD_PORT = 41_738;
 export const AUTOMODE_DASHBOARD_LOCAL_URL = `http://127.0.0.1:${AUTOMODE_DASHBOARD_PORT}`;
 
-export type DashboardStageOperatingState = "ON" | "DRAINING" | "OFF";
-export type DashboardProjection = Readonly<Record<string, unknown>>;
+export type DashboardStageOperatingState = AutomationStageOperatingStateValue;
+export type DashboardProjection = BrowserDashboardProjection;
 
 export interface DashboardActivity {
+  readonly id: string;
   readonly itemKey: string;
   readonly occurredAt: string;
-  readonly kind: string;
+  readonly kind: DashboardActivityEntry["kind"];
   readonly message?: string;
   readonly data?: unknown;
 }
@@ -51,6 +61,22 @@ export interface CoordinatorDashboardOptions {
 }
 
 const execFileAsync = promisify(execFile);
+const MAX_DASHBOARD_ACTIVITY_MESSAGE = 4_000;
+const MAX_DASHBOARD_ACTIVITY_BYTES = 16_384;
+const MAX_DASHBOARD_ACTIVITIES_PER_ITEM = 500;
+const MAX_DASHBOARD_ACTIVITIES_TOTAL = 10_000;
+
+function boundedDashboardActivity(activity: DashboardActivity): DashboardActivity {
+  const message = activity.message && activity.message.length > MAX_DASHBOARD_ACTIVITY_MESSAGE
+    ? `${activity.message.slice(0, MAX_DASHBOARD_ACTIVITY_MESSAGE)}… [truncated]`
+    : activity.message;
+  const candidate = { ...activity, ...(message === undefined ? {} : { message }) };
+  const serialized = JSON.stringify(candidate);
+  if (Buffer.byteLength(serialized) > MAX_DASHBOARD_ACTIVITY_BYTES) {
+    throw new Error("Dashboard activity exceeds the 16 KiB structured event limit");
+  }
+  return JSON.parse(serialized) as DashboardActivity;
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -97,42 +123,7 @@ export class CliDashboardTailscaleExposure implements DashboardTailscaleExposure
   }
 }
 
-const DASHBOARD_HTML = `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Automode Dashboard</title>
-  <link rel="stylesheet" href="/styles.css">
-</head>
-<body>
-  <main>
-    <h1>Automode Dashboard</h1>
-    <p id="connection">Connecting to the Coordinator…</p>
-    <pre id="projection" aria-live="polite"></pre>
-  </main>
-  <script src="/app.js" defer></script>
-</body>
-</html>`;
-
-const DASHBOARD_JAVASCRIPT = `const connection = document.querySelector("#connection");
-const projection = document.querySelector("#projection");
-async function loadSnapshot() {
-  const response = await fetch("/api/snapshot", { cache: "no-store" });
-  if (!response.ok) throw new Error("Snapshot request failed: " + response.status);
-  const snapshot = await response.json();
-  connection.textContent = snapshot.network.exposureError
-    ? "Local only: " + snapshot.network.exposureError
-    : "Connected";
-  projection.textContent = JSON.stringify(snapshot.projection, null, 2);
-}
-loadSnapshot().catch((error) => { connection.textContent = "Disconnected: " + error.message; });`;
-
-const DASHBOARD_CSS = `:root { color-scheme: dark; font-family: system-ui, sans-serif; }
-body { margin: 0; background: #101419; color: #edf2f7; }
-main { width: min(72rem, calc(100% - 2rem)); margin: 2rem auto; }
-pre { overflow: auto; padding: 1rem; border: 1px solid #35404c; border-radius: .5rem; background: #171d24; }
-:focus-visible { outline: 3px solid #63b3ed; outline-offset: 3px; }`;
+const DASHBOARD_UI = createDashboardUiAssets();
 
 const SECURITY_HEADERS = {
   "cache-control": "no-store",
@@ -196,7 +187,9 @@ class HttpCoordinatorDashboard implements CoordinatorDashboard {
   private startPromise: Promise<DashboardStatus> | undefined;
   private stopPromise: Promise<void> | undefined;
   private exposureNeedsStop = false;
-  private projection: DashboardProjection = {};
+  private projection!: DashboardProjection;
+  private readonly activitiesByItem = new Map<string, DashboardActivity[]>();
+  private activityRetentionTruncated = false;
   private revision = 0;
   private eventSequence = 0;
   private readonly eventStreams = new Set<ServerResponse>();
@@ -225,6 +218,8 @@ class HttpCoordinatorDashboard implements CoordinatorDashboard {
 
   private async startOnce(initialProjection: DashboardProjection): Promise<DashboardStatus> {
     this.projection = serializeProjection(initialProjection);
+    this.activitiesByItem.clear();
+    this.activityRetentionTruncated = false;
     this.revision += 1;
     this.eventSequence += 1;
     const server = createServer((request, response) => {
@@ -265,6 +260,10 @@ class HttpCoordinatorDashboard implements CoordinatorDashboard {
     return this.status;
   }
 
+  private retainedActivities(): DashboardActivity[] {
+    return [...this.activitiesByItem.values()].flat();
+  }
+
   private async handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const host = request.headers.host?.toLowerCase();
     const allowedOrigin = host ? this.allowedOrigins.get(host) : undefined;
@@ -285,6 +284,8 @@ class HttpCoordinatorDashboard implements CoordinatorDashboard {
         revision: this.revision,
         projection: this.projection,
         network: this.status,
+        activities: this.retainedActivities(),
+        activitiesTruncated: this.activityRetentionTruncated,
       });
       return;
     }
@@ -293,20 +294,15 @@ class HttpCoordinatorDashboard implements CoordinatorDashboard {
         revision: this.revision,
         projection: this.projection,
         network: this.status,
+        activities: this.retainedActivities(),
+        activitiesTruncated: this.activityRetentionTruncated,
         csrfToken: this.csrfToken,
       });
       return;
     }
-    if (request.method === "GET" && request.url === "/") {
-      sendText(response, 200, "text/html; charset=utf-8", DASHBOARD_HTML);
-      return;
-    }
-    if (request.method === "GET" && request.url === "/app.js") {
-      sendText(response, 200, "text/javascript; charset=utf-8", DASHBOARD_JAVASCRIPT);
-      return;
-    }
-    if (request.method === "GET" && request.url === "/styles.css") {
-      sendText(response, 200, "text/css; charset=utf-8", DASHBOARD_CSS);
+    if (request.method === "GET" && request.url && request.url in DASHBOARD_UI) {
+      const asset = DASHBOARD_UI[request.url as keyof typeof DASHBOARD_UI];
+      sendText(response, 200, asset.contentType, asset.body);
       return;
     }
     if (request.method !== "POST" || !request.url?.startsWith("/api/commands/")) {
@@ -391,13 +387,41 @@ class HttpCoordinatorDashboard implements CoordinatorDashboard {
       revision: this.revision,
       projection: this.projection,
       network: this.status,
+      activities: this.retainedActivities(),
+      activitiesTruncated: this.activityRetentionTruncated,
     });
   }
 
   appendActivity(activity: DashboardActivity): void {
-    const serialized = JSON.stringify(activity);
-    if (serialized === undefined) throw new Error("Dashboard activity must be JSON serializable");
-    this.broadcast("activity", JSON.parse(serialized) as DashboardActivity);
+    const parsed = boundedDashboardActivity(activity);
+    let retained = this.activitiesByItem.get(parsed.itemKey);
+    if (!retained) {
+      retained = [];
+      this.activitiesByItem.set(parsed.itemKey, retained);
+    }
+    if (retained.length >= MAX_DASHBOARD_ACTIVITIES_PER_ITEM) {
+      const markerId = `${parsed.itemKey}:activity-truncated`;
+      if (retained[0]?.id === markerId) retained.splice(1, 1);
+      else {
+        retained.splice(0, 2);
+        retained.unshift({
+          id: markerId,
+          itemKey: parsed.itemKey,
+          occurredAt: parsed.occurredAt,
+          kind: "coordinator",
+          message: "Earlier process-local activity was truncated to keep this dashboard responsive.",
+          data: parsed.data,
+        });
+      }
+    }
+    retained.push(parsed);
+    while (this.retainedActivities().length > MAX_DASHBOARD_ACTIVITIES_TOTAL) {
+      const oldestItem = this.activitiesByItem.keys().next().value as string | undefined;
+      if (oldestItem === undefined) break;
+      this.activitiesByItem.delete(oldestItem);
+      this.activityRetentionTruncated = true;
+    }
+    this.broadcast("activity", parsed);
   }
 
   stop(): Promise<void> {

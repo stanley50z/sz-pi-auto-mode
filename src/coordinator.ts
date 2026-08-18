@@ -3,6 +3,7 @@ import {
   AUTOMATION_STAGE_LABELS,
   type AutomationStage,
   type AutomationStageConfiguration,
+  type AutomationStageOperatingStateValue,
 } from "./stage-configuration.js";
 
 export type WorkflowItemKind = "issue" | "pull-request";
@@ -76,6 +77,7 @@ export interface TicketSessionRequest {
   readonly attempt: number;
   readonly cwd?: string;
   readonly resumeSessionFile?: string;
+  readonly resumeSessionId?: string;
   readonly workspace?: TicketWorkspaceIdentity;
 }
 
@@ -84,16 +86,29 @@ export interface TicketSessionTerminalResult {
   readonly error?: string;
 }
 
+export type TicketSessionActivityKind = "pi" | "tool" | "error" | "terminal" | "coordinator";
+
+export interface TicketSessionObservedActivity {
+  readonly attempt?: number;
+  readonly occurredAt: string;
+  readonly kind: TicketSessionActivityKind;
+  readonly message: string;
+  readonly toolName?: string;
+}
+
 export interface TicketSessionHandle {
   readonly processId: string;
   readonly sessionId: string;
   readonly sessionFile: string;
+  readonly history?: readonly TicketSessionObservedActivity[];
   readonly completion: Promise<TicketSessionTerminalResult>;
+  subscribe?(listener: (activity: TicketSessionObservedActivity) => void): () => void;
   terminate(force: boolean): Promise<void>;
 }
 
 export interface TicketSessionHost {
   start(request: TicketSessionRequest): Promise<TicketSessionHandle>;
+  terminateStarting?(itemKey: string, force: boolean): Promise<void>;
 }
 
 export interface TicketWorkspaceRequest {
@@ -136,7 +151,14 @@ export type StageCandidateStatus =
   | "human-owned"
   | "exhausted";
 
-export type AutomationStageOperatingState = "ON" | "DRAINING" | "OFF";
+export type AutomationStageOperatingState = AutomationStageOperatingStateValue;
+
+export interface TicketSessionProjection {
+  readonly processId?: string;
+  readonly sessionId: string;
+  readonly sessionFile: string;
+  readonly workspace?: string;
+}
 
 export interface StageCandidateProjection {
   readonly item: TicketItemReference;
@@ -146,6 +168,7 @@ export interface StageCandidateProjection {
   readonly status: StageCandidateStatus;
   readonly reason: string;
   readonly attempt: number;
+  readonly session?: TicketSessionProjection;
 }
 
 export interface StageCandidateTotals {
@@ -173,6 +196,7 @@ export interface RecentStageCandidateProjection {
   readonly reason: string;
   readonly attempt: number;
   readonly settledAt: string;
+  readonly session?: TicketSessionProjection;
 }
 
 /** Complete replacement snapshot consumed by Coordinator supervision surfaces. */
@@ -182,6 +206,28 @@ export interface CoordinatorProjection {
   readonly recent: readonly RecentStageCandidateProjection[];
 }
 
+export interface CoordinatorActivity {
+  readonly id: string;
+  readonly itemKey: string;
+  readonly occurredAt: string;
+  readonly kind: TicketSessionActivityKind;
+  readonly message: string;
+  readonly data: {
+    readonly attempt: number;
+    readonly stage: AutomationStage;
+    readonly source: "persisted" | "live" | "terminal";
+    readonly processId: string;
+    readonly sessionId: string;
+    readonly sessionFile: string;
+    readonly workspace?: string;
+    readonly toolName?: string;
+  };
+}
+
+export type CoordinatorSupervisionEvent =
+  | { readonly type: "projection"; readonly projection: CoordinatorProjection }
+  | { readonly type: "activity"; readonly activity: CoordinatorActivity };
+
 interface ActiveStageCandidate {
   promise: Promise<void>;
   stage: AutomationStage;
@@ -190,6 +236,8 @@ interface ActiveStageCandidate {
   reason: string;
   attempt: number;
   handle?: TicketSessionHandle;
+  workspace?: TicketWorkspaceIdentity;
+  unsubscribe?: () => void;
   forceRequested?: boolean;
 }
 
@@ -325,6 +373,10 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function boundedCoordinatorActivity(value: string): string {
+  return value.length > 4_000 ? `${value.slice(0, 4_000)}… [truncated]` : value;
+}
+
 export class AutomodeCoordinator {
   private readonly clock: CoordinatorClock;
   private readonly active = new Map<string, ActiveStageCandidate>();
@@ -335,7 +387,9 @@ export class AutomodeCoordinator {
   private readonly currentItems = new Map<string, WorkflowItem>();
   private readonly settledThisProcess = new Map<string, RecentStageCandidateProjection>();
   private readonly operatingStates: Record<AutomationStage, AutomationStageOperatingState>;
+  private readonly supervisionListeners = new Set<(event: CoordinatorSupervisionEvent) => void>();
   private projection: CoordinatorProjection;
+  private activitySequence = 0;
   private poller: { dispose(): void } | undefined;
   private lastSnapshotRevision: string | undefined;
   private started = false;
@@ -356,10 +410,52 @@ export class AutomodeCoordinator {
     return this.projection;
   }
 
+  /** Observes replacement projections and Ticket Session activity without attaching another process. */
+  subscribe(listener: (event: CoordinatorSupervisionEvent) => void): () => void {
+    this.supervisionListeners.add(listener);
+    return () => this.supervisionListeners.delete(listener);
+  }
+
+  private emitSupervision(event: CoordinatorSupervisionEvent): void {
+    for (const listener of this.supervisionListeners) listener(event);
+  }
+
+  private emitActivity(
+    item: Pick<WorkflowItem, "kind" | "number">,
+    choice: DispatchChoice,
+    attempt: number,
+    handle: TicketSessionHandle,
+    source: "persisted" | "live" | "terminal",
+    activity: TicketSessionObservedActivity,
+  ): void {
+    const active = this.active.get(itemKey(item));
+    this.activitySequence += 1;
+    this.emitSupervision({
+      type: "activity",
+      activity: {
+        id: `${itemKey(item)}:${attempt}:${this.activitySequence}`,
+        itemKey: itemKey(item),
+        occurredAt: activity.occurredAt,
+        kind: activity.kind,
+        message: boundedCoordinatorActivity(activity.message),
+        data: {
+          attempt,
+          stage: choice.stage,
+          source,
+          processId: handle.processId,
+          sessionId: handle.sessionId,
+          sessionFile: handle.sessionFile,
+          ...(active?.workspace === undefined ? {} : { workspace: active.workspace.worktree }),
+          ...(activity.toolName === undefined ? {} : { toolName: activity.toolName }),
+        },
+      },
+    });
+  }
+
   /** Applies one process-local Stage control and fully rescans when a Stage is enabled. */
   async setStageOperatingState(
     stage: AutomationStage,
-    target: "ON" | "OFF",
+    target: AutomationStageOperatingState,
   ): Promise<AutomationStageOperatingState> {
     if (!(AUTOMATION_STAGES as readonly string[]).includes(stage)) {
       throw new Error(`Unknown Automation Stage: ${stage}`);
@@ -390,11 +486,20 @@ export class AutomodeCoordinator {
       let status: StageCandidateStatus;
       let reason: string;
       let attempt = 0;
+      let session: TicketSessionProjection | undefined;
       const waiting = this.awaitingFeedback.get(key);
       if (active && active.stage === choice.stage && active.skillName === choice.skillName) {
         status = active.status;
         reason = active.reason;
         attempt = active.attempt;
+        if (active.handle) {
+          session = {
+            processId: active.handle.processId,
+            sessionId: active.handle.sessionId,
+            sessionFile: active.handle.sessionFile,
+            ...(active.workspace === undefined ? {} : { workspace: active.workspace.worktree }),
+          };
+        }
       } else if (
         waiting
         && waiting.stage === choice.stage
@@ -404,6 +509,14 @@ export class AutomodeCoordinator {
         status = "waiting";
         reason = "The durable Ticket Session is waiting for external feedback or a material tracker change.";
         attempt = waiting.attempt;
+        if (waiting.sessionId && waiting.sessionFile) {
+          session = {
+            processId: waiting.processId,
+            sessionId: waiting.sessionId,
+            sessionFile: waiting.sessionFile,
+            ...(waiting.workspace === undefined ? {} : { workspace: waiting.workspace.worktree }),
+          };
+        }
       } else if (
         exhausted
         && exhausted.stage === choice.stage
@@ -415,6 +528,14 @@ export class AutomodeCoordinator {
           ? `Five attempts were exhausted; evidence is preserved. ${exhausted.diagnostic}`
           : "Five attempts were exhausted; evidence is preserved for diagnosis.";
         attempt = exhausted.attempt;
+        if (exhausted.sessionId && exhausted.sessionFile) {
+          session = {
+            processId: exhausted.processId,
+            sessionId: exhausted.sessionId,
+            sessionFile: exhausted.sessionFile,
+            ...(exhausted.workspace === undefined ? {} : { workspace: exhausted.workspace.worktree }),
+          };
+        }
       } else if (item.blockedBy > 0 && item.kind === "issue") {
         status = "blocked";
         reason = `Blocked by ${item.blockedBy} open native ${item.blockedBy === 1 ? "dependency" : "dependencies"}.`;
@@ -450,6 +571,7 @@ export class AutomodeCoordinator {
         status,
         reason,
         attempt,
+        ...(session === undefined ? {} : { session }),
       });
     }
     const lanes = AUTOMATION_STAGES.map((stage): StageLaneProjection => {
@@ -489,6 +611,7 @@ export class AutomodeCoordinator {
       reason,
       attempt: candidate?.attempt ?? 0,
       settledAt: this.clock.now().toISOString(),
+      ...(candidate?.session === undefined ? {} : { session: candidate.session }),
     });
   }
 
@@ -530,11 +653,12 @@ export class AutomodeCoordinator {
 
   private refreshProjection(): void {
     this.projection = this.buildProjection();
+    this.emitSupervision({ type: "projection", projection: this.projection });
   }
 
   private updateActive(
     item: Pick<WorkflowItem, "kind" | "number">,
-    update: Partial<Pick<ActiveStageCandidate, "status" | "reason" | "attempt" | "handle">>,
+    update: Partial<Pick<ActiveStageCandidate, "status" | "reason" | "attempt" | "handle" | "workspace">>,
   ): void {
     const active = this.active.get(itemKey(item));
     if (!active) return;
@@ -611,7 +735,7 @@ export class AutomodeCoordinator {
         continue;
       }
       if (this.operatingStates[eligible.stage] === "ON") {
-        this.launch(item, eligible, record.attempt, record.sessionFile, record.workspace);
+        this.launch(item, eligible, record.attempt, record.sessionFile, record.workspace, record.sessionId);
       } else {
         this.pendingRecovery.set(key, record);
       }
@@ -642,6 +766,7 @@ export class AutomodeCoordinator {
               Math.max(0, waiting.attempt - 1),
               waiting.sessionFile,
               waiting.workspace,
+              waiting.sessionId,
             );
           }
           continue;
@@ -657,7 +782,7 @@ export class AutomodeCoordinator {
         if (eligible?.stage === recovery.stage && eligible.skillName === recovery.skillName) {
           if (this.operatingStates[eligible.stage] === "ON") {
             this.pendingRecovery.delete(key);
-            this.launch(item, eligible, recovery.attempt, recovery.sessionFile, recovery.workspace);
+            this.launch(item, eligible, recovery.attempt, recovery.sessionFile, recovery.workspace, recovery.sessionId);
           }
           continue;
         }
@@ -674,6 +799,7 @@ export class AutomodeCoordinator {
     previousAttempts: number,
     resumeSessionFile?: string,
     workspace?: TicketWorkspaceIdentity,
+    resumeSessionId?: string,
   ): void {
     const key = itemKey(item);
     let task!: Promise<void>;
@@ -687,7 +813,7 @@ export class AutomodeCoordinator {
     };
     this.active.set(key, active);
     task = Promise.resolve()
-      .then(() => this.runAttempts(item, choice, previousAttempts, resumeSessionFile, workspace))
+      .then(() => this.runAttempts(item, choice, previousAttempts, resumeSessionFile, workspace, resumeSessionId))
       .catch(async (error) => {
         await this.options.tracker.upsertBookkeeping({
           version: 1,
@@ -703,7 +829,11 @@ export class AutomodeCoordinator {
         });
       })
       .finally(() => {
-        if (this.active.get(key)?.promise === task) this.active.delete(key);
+        const finishing = this.active.get(key);
+        if (finishing?.promise === task) {
+          finishing.unsubscribe?.();
+          this.active.delete(key);
+        }
         if (
           this.operatingStates[choice.stage] === "DRAINING"
           && ![...this.active.values()].some((candidate) => candidate.stage === choice.stage)
@@ -723,6 +853,7 @@ export class AutomodeCoordinator {
     previousAttempts: number,
     resumeSessionFile?: string,
     workspace?: TicketWorkspaceIdentity,
+    resumeSessionId?: string,
   ): Promise<void> {
     let item = initialItem;
     let sessionFile = resumeSessionFile;
@@ -773,6 +904,7 @@ export class AutomodeCoordinator {
           attempt,
           cwd: preparedWorkspace?.worktree,
           resumeSessionFile: sessionFile,
+          ...(sessionFile === undefined || resumeSessionId === undefined ? {} : { resumeSessionId }),
           workspace: preparedWorkspace,
         });
       } catch (error) {
@@ -813,8 +945,21 @@ export class AutomodeCoordinator {
           : `A live Ticket Session owns retry attempt ${attempt}.`,
         attempt,
         handle,
+        workspace: preparedWorkspace,
       });
+      for (const activity of handle.history ?? []) {
+        const historyAttempt = activity.attempt === undefined
+          ? Math.max(1, attempt - 1)
+          : Math.min(activity.attempt, Math.max(1, attempt - 1));
+        this.emitActivity(item, choice, historyAttempt, handle, "persisted", activity);
+      }
+      const unsubscribe = handle.subscribe?.((activity) => {
+        this.emitActivity(item, choice, attempt, handle, "live", activity);
+      });
+      const activeWithSubscription = this.active.get(itemKey(item));
+      if (activeWithSubscription) activeWithSubscription.unsubscribe = unsubscribe;
       sessionFile = handle.sessionFile;
+      resumeSessionId = handle.sessionId;
       await this.options.tracker.upsertBookkeeping({
         version: 1,
         coordinatorId: this.options.coordinatorId,
@@ -831,6 +976,14 @@ export class AutomodeCoordinator {
       });
 
       const terminal = await handle.completion;
+      this.emitActivity(item, choice, attempt, handle, "terminal", {
+        occurredAt: this.clock.now().toISOString(),
+        kind: terminal.status === "error" ? "error" : "terminal",
+        message: terminal.error ?? `Ticket Session settled with ${terminal.status}.`,
+      });
+      const activeAfterCompletion = this.active.get(itemKey(item));
+      activeAfterCompletion?.unsubscribe?.();
+      if (activeAfterCompletion) activeAfterCompletion.unsubscribe = undefined;
       const fresh = await this.options.tracker.read(item);
       this.observeItem(
         fresh,
@@ -964,9 +1117,11 @@ export class AutomodeCoordinator {
       return "draining";
     }
     this.forcing = true;
-    const terminations = [...this.active.values()].map((active) => {
+    const terminations = [...this.active.entries()].map(([key, active]) => {
       active.forceRequested = true;
-      return active.handle?.terminate(true) ?? Promise.resolve();
+      return active.handle?.terminate(true)
+        ?? this.options.sessions.terminateStarting?.(key, true)
+        ?? Promise.resolve();
     });
     void Promise.allSettled(terminations).then(() => this.finishDrainIfIdle());
     return "forcing";
