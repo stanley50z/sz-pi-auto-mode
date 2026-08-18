@@ -53,7 +53,7 @@ test("Full-Auto selects extension-owned stage skills and the fixed controlled su
   ]);
 });
 
-test("Half-Auto substitutes native skills only for disabled stages", () => {
+test("Half-Auto pre-attests every extension-owned Stage Skill for process-local re-enabling", () => {
   const profile = createAutomodeCapabilityProfile(half, defaultReviewerExecution);
   const owners = Object.fromEntries(
     profile.skills.filter((skill) => skill.kind === "stage").map((skill) => [skill.name, skill.owner]),
@@ -61,10 +61,10 @@ test("Half-Auto substitutes native skills only for disabled stages", () => {
 
   assert.deepEqual(owners, {
     triage: "automode",
-    grilling: "native",
-    prototype: "native",
-    implement: "native",
-    tdd: "native",
+    grilling: "automode",
+    prototype: "automode",
+    implement: "automode",
+    tdd: "automode",
     "code-review": "automode",
   });
   assert.deepEqual(

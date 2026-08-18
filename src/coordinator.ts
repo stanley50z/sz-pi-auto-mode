@@ -1,4 +1,9 @@
-import type { AutomationStage, AutomationStageConfiguration } from "./stage-configuration.js";
+import {
+  restoreAutomationStageOperatingStates,
+  type AutomationStage,
+  type AutomationStageConfiguration,
+  type AutomationStageOperatingStates,
+} from "./stage-configuration.js";
 
 export type WorkflowItemKind = "issue" | "pull-request";
 export type TicketSkillName = "triage" | "grilling" | "prototype" | "implement" | "code-review";
@@ -175,7 +180,7 @@ function isEligibleForChoice(
 
 function chooseDispatch(
   item: WorkflowItem,
-  configuration: AutomationStageConfiguration,
+  operatingStates: AutomationStageOperatingStates,
   actor: string,
   allowClaimed = false,
 ): DispatchChoice | undefined {
@@ -186,7 +191,7 @@ function chooseDispatch(
     { stage: "auto-review", skillName: "code-review" },
   ];
   return choices.find((choice) =>
-    configuration.stages.includes(choice.stage) && isEligibleForChoice(item, choice, actor, allowClaimed)
+    operatingStates[choice.stage] === "ON" && isEligibleForChoice(item, choice, actor, allowClaimed)
   );
 }
 
@@ -212,6 +217,7 @@ export class AutomodeCoordinator {
   private readonly exhausted = new Map<string, string>();
   private readonly awaitingFeedback = new Map<string, BookkeepingRecord>();
   private readonly stopped = deferred<void>();
+  private readonly stageOperatingStates: AutomationStageOperatingStates;
   private poller: { dispose(): void } | undefined;
   private lastSnapshotRevision: string | undefined;
   private started = false;
@@ -220,6 +226,11 @@ export class AutomodeCoordinator {
 
   constructor(private readonly options: AutomodeCoordinatorOptions) {
     this.clock = options.clock ?? processCoordinatorClock;
+    this.stageOperatingStates = restoreAutomationStageOperatingStates(options.configuration);
+  }
+
+  getStageOperatingStates(): AutomationStageOperatingStates {
+    return this.stageOperatingStates;
   }
 
   async start(): Promise<void> {
@@ -262,7 +273,7 @@ export class AutomodeCoordinator {
         continue;
       }
       const item = await this.options.tracker.read(record.item);
-      const choice = chooseDispatch(item, this.options.configuration, this.options.actor, true);
+      const choice = chooseDispatch(item, this.stageOperatingStates, this.options.actor, true);
       if (!choice || choice.stage !== record.stage || choice.skillName !== record.skillName) {
         let diagnostic = record.diagnostic;
         const trackerProvesCompletion = record.skillName === "code-review"
@@ -305,7 +316,7 @@ export class AutomodeCoordinator {
       const waiting = this.awaitingFeedback.get(key);
       if (waiting) {
         if (waiting.materialVersion === item.materialVersion) continue;
-        const choice = chooseDispatch(item, this.options.configuration, this.options.actor, true);
+        const choice = chooseDispatch(item, this.stageOperatingStates, this.options.actor, true);
         if (choice && choice.stage === waiting.stage && choice.skillName === waiting.skillName) {
           this.awaitingFeedback.delete(key);
           this.launch(
@@ -321,7 +332,7 @@ export class AutomodeCoordinator {
       const exhaustedVersion = this.exhausted.get(key);
       if (exhaustedVersion === item.materialVersion) continue;
       if (exhaustedVersion !== undefined) this.exhausted.delete(key);
-      const choice = chooseDispatch(item, this.options.configuration, this.options.actor);
+      const choice = chooseDispatch(item, this.stageOperatingStates, this.options.actor);
       if (choice) this.launch(item, choice, 0, undefined, item.workspace);
     }
   }

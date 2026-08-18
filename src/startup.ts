@@ -6,7 +6,6 @@ import { setTimeout as delay } from "node:timers/promises";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
   createAutomodeCapabilityProfile,
-  ORDINARY_TICKET_EXECUTION,
   type ExecutionProfile,
   type PiExecutionProfile,
 } from "./capability-profile.js";
@@ -24,7 +23,7 @@ export type ExecutionProfileAttestor = (profiles: readonly ExecutionProfile[]) =
 export interface ValidateAutomodeStartupOptions {
   repository: string;
   configuration: AutomationStageConfiguration;
-  defaultReviewerExecution?: PiExecutionProfile;
+  defaultReviewerExecution: PiExecutionProfile;
   home?: string;
   normalAgentDir?: string;
   runner?: StartupCommandRunner;
@@ -52,14 +51,8 @@ export const processStartupCommandRunner: StartupCommandRunner = {
 
 function requiredExecutionProfiles(
   configuration: AutomationStageConfiguration,
-  defaultReviewerExecution: PiExecutionProfile | undefined,
+  defaultReviewerExecution: PiExecutionProfile,
 ): readonly ExecutionProfile[] {
-  const needsPanel = configuration.stages.includes("auto-grilling")
-    || configuration.stages.includes("auto-review");
-  if (!needsPanel) return [ORDINARY_TICKET_EXECUTION];
-  if (!defaultReviewerExecution) {
-    throw new Error("Panel-enabled Automode requires the default Reviewer execution profile");
-  }
   return createAutomodeCapabilityProfile(configuration, defaultReviewerExecution).panelExecutions;
 }
 
@@ -139,11 +132,7 @@ function githubSlugFromRemote(remote: string): string | undefined {
   }
 }
 
-function requiredGitHubPermission(configuration: AutomationStageConfiguration): "TRIAGE" | "WRITE" {
-  return configuration.stages.includes("auto-implement") || configuration.stages.includes("auto-review")
-    ? "WRITE"
-    : "TRIAGE";
-}
+const REQUIRED_GITHUB_PERMISSION = "WRITE" as const;
 
 function hasGitHubPermission(actual: string, required: "TRIAGE" | "WRITE"): boolean {
   const rank: Readonly<Record<string, number>> = {
@@ -274,7 +263,7 @@ export async function validateAutomodeStartup(
   ) {
     throw new Error("GitHub repository access failed: local origin and gh repository identity do not match");
   }
-  const permission = requiredGitHubPermission(options.configuration);
+  const permission = REQUIRED_GITHUB_PERMISSION;
   if (typeof viewed.viewerPermission !== "string" || !hasGitHubPermission(viewed.viewerPermission, permission)) {
     throw new Error(`GitHub repository access failed: Automode requires ${permission} permission`);
   }

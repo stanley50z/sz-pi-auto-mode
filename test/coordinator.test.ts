@@ -103,6 +103,25 @@ function issue(overrides: Partial<WorkflowItem> = {}): WorkflowItem {
   };
 }
 
+test("a Coordinator process restores Stage Operating State from its launch baseline", () => {
+  const coordinator = new AutomodeCoordinator({
+    configuration: createAutomationStageConfiguration("half", ["auto-implement"]),
+    actor: "automation-user",
+    tracker: new FakeTracker([]),
+    sessions: new FakeTicketSessions(() => undefined),
+    workspaces: fakeWorkspaces,
+    clock: new ManualClock(),
+  });
+
+  assert.deepEqual(coordinator.getStageOperatingStates(), {
+    "auto-triage": "OFF",
+    "auto-grilling": "OFF",
+    "auto-implement": "ON",
+    "auto-review": "OFF",
+  });
+  assert.equal(Object.isFrozen(coordinator.getStageOperatingStates()), true);
+});
+
 test("startup dispatches one claimed Auto-Triage Ticket Session and requires fresh tracker proof", async () => {
   const tracker = new FakeTracker([issue()]);
   const sessions = new FakeTicketSessions((request) => {

@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  AUTOMATION_STAGE_OPERATING_STATES,
   AUTOMATION_STAGES,
   confirmSerializedAutomationStageConfiguration,
   createAutomationStageConfiguration,
+  createAutomationStageOperatingStates,
   parseAutomationStageConfiguration,
   parseConfirmedAutomationStageConfiguration,
+  restoreAutomationStageOperatingStates,
   serializeAutomationStageConfiguration,
 } from "../src/stage-configuration.js";
 
@@ -21,6 +24,49 @@ test("Full-Auto serializes all four stages into an immutable launch configuratio
   assert.equal(Object.isFrozen(launched), true);
   assert.equal(Object.isFrozen(launched.stages), true);
   assert.throws(() => launched.stages.pop(), TypeError);
+});
+
+test("the launch baseline restores separate process-local Stage Operating States", () => {
+  const baseline = createAutomationStageConfiguration("half", ["auto-triage", "auto-review"]);
+
+  const operatingStates = restoreAutomationStageOperatingStates(baseline);
+
+  assert.deepEqual(operatingStates, {
+    "auto-triage": "ON",
+    "auto-grilling": "OFF",
+    "auto-implement": "OFF",
+    "auto-review": "ON",
+  });
+  assert.equal(Object.isFrozen(operatingStates), true);
+});
+
+test("Stage Operating State supports draining and all-off monitor-only mode", () => {
+  const monitorOnly = createAutomationStageOperatingStates({
+    "auto-triage": "OFF",
+    "auto-grilling": "DRAINING",
+    "auto-implement": "OFF",
+    "auto-review": "OFF",
+  });
+
+  assert.deepEqual(AUTOMATION_STAGE_OPERATING_STATES, ["ON", "DRAINING", "OFF"]);
+  assert.deepEqual(monitorOnly, {
+    "auto-triage": "OFF",
+    "auto-grilling": "DRAINING",
+    "auto-implement": "OFF",
+    "auto-review": "OFF",
+  });
+  assert.deepEqual(createAutomationStageOperatingStates({
+    "auto-triage": "OFF",
+    "auto-grilling": "OFF",
+    "auto-implement": "OFF",
+    "auto-review": "OFF",
+  }), {
+    "auto-triage": "OFF",
+    "auto-grilling": "OFF",
+    "auto-implement": "OFF",
+    "auto-review": "OFF",
+  });
+  assert.equal(Object.isFrozen(monitorOnly), true);
 });
 
 test("Half-Auto permits any non-empty Automation Stage selection, including all four", () => {

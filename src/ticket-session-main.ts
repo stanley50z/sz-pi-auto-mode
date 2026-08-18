@@ -183,7 +183,7 @@ export const createControlledTicketSession: TicketSessionChildSessionFactory = a
   const profile = createAutomodeCapabilityProfile(configuration, request.defaultReviewerExecution);
   const requestedSkill = profile.skills.find((skill) => skill.name === request.skillName);
   if (!requestedSkill || requestedSkill.kind !== "stage" || requestedSkill.owner !== "automode") {
-    throw new Error(`Skill is not owned by an enabled Automation Stage: ${request.skillName}`);
+    throw new Error(`Skill is not a canonical Automode Stage Skill: ${request.skillName}`);
   }
   const paths = resolveAutomodePaths(cwd, request.home, request.normalAgentDir);
   mkdirSync(paths.automodeDir, { recursive: true });
