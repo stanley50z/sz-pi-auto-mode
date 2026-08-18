@@ -17,6 +17,9 @@ import { createAutomationStageConfiguration } from "../src/stage-configuration.j
 class ManualClock implements CoordinatorClock {
   callback: (() => void | Promise<void>) | undefined;
   interval: number | undefined;
+  current = new Date("2026-02-03T04:05:06.000Z");
+
+  now() { return this.current; }
 
   every(milliseconds: number, callback: () => void | Promise<void>) {
     this.interval = milliseconds;
@@ -102,6 +105,425 @@ function issue(overrides: Partial<WorkflowItem> = {}): WorkflowItem {
     ...overrides,
   };
 }
+
+function candidateFor(coordinator: AutomodeCoordinator, itemNumber: number) {
+  return coordinator.getProjection().lanes
+    .flatMap((lane) => lane.candidates)
+    .find((candidate) => candidate.item.number === itemNumber);
+}
+
+test("projects queued, claimed, and running lifecycle from Coordinator state", async () => {
+  const tracker = new FakeTracker([
+    issue({ number: 60, labels: ["ready-for-agent"], materialVersion: "60-a" }),
+  ]);
+  let finishClaim!: () => void;
+  const claimGate = new Promise<void>((resolve) => { finishClaim = resolve; });
+  tracker.claim = async (item, actor) => {
+    tracker.calls.push(`claim:${item.number}`);
+    await claimGate;
+    const found = tracker.items.find((candidate) => candidate.number === item.number)!;
+    found.assignees = [actor];
+  };
+  let finishStartup!: () => void;
+  const startupGate = new Promise<void>((resolve) => { finishStartup = resolve; });
+  let finishSession!: () => void;
+  const completion = new Promise<{ status: "clean" }>((resolve) => {
+    finishSession = () => {
+      const item = tracker.items[0]!;
+      item.outputPullRequest = "https://github.com/owner/repository/pull/60";
+      item.materialVersion = "60-done";
+      resolve({ status: "clean" });
+    };
+  });
+  const sessions: TicketSessionHost = {
+    async start() {
+      await startupGate;
+      return {
+        processId: "process-60",
+        sessionId: "session-60",
+        sessionFile: "/sessions/60.jsonl",
+        completion,
+        terminate: async () => undefined,
+      };
+    },
+  };
+  const coordinator = new AutomodeCoordinator({
+    configuration: createAutomationStageConfiguration("half", ["auto-implement"]),
+    actor: "automation-user",
+    tracker,
+    sessions,
+    workspaces: fakeWorkspaces,
+    clock: new ManualClock(),
+  });
+
+  await coordinator.start();
+  assert.equal(candidateFor(coordinator, 60)?.status, "queued");
+  assert.match(candidateFor(coordinator, 60)?.reason ?? "", /claim/i);
+  assert.deepEqual(coordinator.getProjection().totals, {
+    candidates: 1, active: 0, queued: 1, held: 0, retrying: 0, exhausted: 0,
+  });
+
+  finishClaim();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(candidateFor(coordinator, 60)?.status, "claimed");
+  assert.match(candidateFor(coordinator, 60)?.reason ?? "", /start|workspace/i);
+  assert.equal(coordinator.getProjection().totals.active, 1);
+
+  finishStartup();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(candidateFor(coordinator, 60)?.status, "running");
+  assert.equal(candidateFor(coordinator, 60)?.attempt, 1);
+  assert.equal(coordinator.getProjection().totals.active, 1);
+
+  finishSession();
+  await coordinator.waitForIdle();
+  coordinator.interrupt();
+  await coordinator.whenStopped();
+});
+
+test("retains candidates settled in this process as Recent and clears them on restart", async () => {
+  const settled = issue({ number: 61, labels: ["needs-triage"], materialVersion: "61-a" });
+  const tracker = new FakeTracker([settled]);
+  const sessions = new FakeTicketSessions(() => {
+    settled.state = "closed";
+    settled.materialVersion = "61-done";
+  });
+  const configuration = createAutomationStageConfiguration("half", ["auto-triage"]);
+  const first = new AutomodeCoordinator({
+    configuration,
+    actor: "automation-user",
+    tracker,
+    sessions,
+    workspaces: fakeWorkspaces,
+    clock: new ManualClock(),
+  });
+
+  await first.start();
+  await first.waitForIdle();
+  assert.deepEqual(first.getProjection().lanes.flatMap((lane) => lane.candidates), []);
+  assert.deepEqual(first.getProjection().recent, [{
+    item: { kind: "issue", number: 61, url: settled.url },
+    stage: "auto-triage",
+    skillName: "triage",
+    status: "settled",
+    reason: "The Ticket Session settled this Stage and fresh tracker state proves completion.",
+    attempt: 1,
+    settledAt: "2026-02-03T04:05:06.000Z",
+  }]);
+  first.interrupt();
+  await first.whenStopped();
+
+  const restarted = new AutomodeCoordinator({
+    configuration,
+    actor: "automation-user",
+    tracker,
+    sessions,
+    workspaces: fakeWorkspaces,
+    clock: new ManualClock(),
+  });
+  await restarted.start();
+  assert.deepEqual(restarted.getProjection().recent, []);
+  restarted.interrupt();
+  await restarted.whenStopped();
+});
+
+test("projects every recognized open Stage Candidate once using workflow precedence and shared totals", async () => {
+  const tracker = new FakeTracker([
+    issue({
+      number: 1,
+      labels: ["needs-triage", "ready-for-human", "wayfinder:grilling"],
+      materialVersion: "1-a",
+    }),
+    issue({ number: 2, labels: ["wayfinder:grilling"], blockedBy: 2, materialVersion: "2-a" }),
+    issue({
+      number: 3,
+      labels: ["ready-for-agent"],
+      outputPullRequest: "https://github.com/owner/repository/pull/30",
+      materialVersion: "3-a",
+    }),
+    issue({ number: 4, state: "closed", labels: ["ready-for-agent"], materialVersion: "4-a" }),
+    issue({
+      number: 6,
+      labels: ["needs-triage"],
+      assignees: ["automation-user"],
+      materialVersion: "6-a",
+    }),
+    {
+      kind: "pull-request",
+      number: 5,
+      url: "https://github.com/owner/repository/pull/5",
+      state: "open",
+      labels: [],
+      assignees: [],
+      blockedBy: 0,
+      updatedAt: "2026-01-01T00:00:00Z",
+      materialVersion: "5-a",
+      draft: true,
+    },
+  ]);
+  const coordinator = new AutomodeCoordinator({
+    configuration: createAutomationStageConfiguration("full", [
+      "auto-triage",
+      "auto-grilling",
+      "auto-implement",
+      "auto-review",
+    ]),
+    actor: "automation-user",
+    tracker,
+    sessions: new FakeTicketSessions(() => { throw new Error("held candidates must not dispatch"); }),
+    workspaces: fakeWorkspaces,
+    clock: new ManualClock(),
+  });
+
+  await coordinator.start();
+  const projection = coordinator.getProjection();
+
+  assert.deepEqual(
+    projection.lanes.map((lane) => ({
+      stage: lane.stage,
+      candidates: lane.candidates.map((candidate) => [candidate.item.number, candidate.status]),
+      totals: lane.totals,
+    })),
+    [
+      {
+        stage: "auto-triage",
+        candidates: [[1, "human-owned"], [6, "human-owned"]],
+        totals: { candidates: 2, active: 0, queued: 0, held: 2, retrying: 0, exhausted: 0 },
+      },
+      {
+        stage: "auto-grilling",
+        candidates: [[2, "blocked"]],
+        totals: { candidates: 1, active: 0, queued: 0, held: 1, retrying: 0, exhausted: 0 },
+      },
+      {
+        stage: "auto-implement",
+        candidates: [[3, "human-owned"]],
+        totals: { candidates: 1, active: 0, queued: 0, held: 1, retrying: 0, exhausted: 0 },
+      },
+      {
+        stage: "auto-review",
+        candidates: [],
+        totals: { candidates: 0, active: 0, queued: 0, held: 0, retrying: 0, exhausted: 0 },
+      },
+    ],
+  );
+  assert.deepEqual(projection.totals, {
+    candidates: 4,
+    active: 0,
+    queued: 0,
+    held: 4,
+    retrying: 0,
+    exhausted: 0,
+  });
+  for (const candidate of projection.lanes.flatMap((lane) => lane.candidates)) {
+    assert.ok(candidate.reason.length > 0);
+  }
+  coordinator.interrupt();
+  await coordinator.whenStopped();
+});
+
+test("Stage Operating State drains active work, suppresses dispatch, and scans immediately when re-enabled", async () => {
+  const first = issue({ number: 11, labels: ["ready-for-agent"], materialVersion: "11-a" });
+  const tracker = new FakeTracker([first]);
+  const requests: TicketSessionRequest[] = [];
+  let settleFirst!: () => void;
+  const sessions: TicketSessionHost = {
+    async start(request) {
+      requests.push(request);
+      const item = tracker.items.find((candidate) => candidate.number === request.item.number)!;
+      if (request.item.number === 11) {
+        return {
+          processId: "process-11",
+          sessionId: "session-11",
+          sessionFile: "/sessions/11.jsonl",
+          completion: new Promise<{ status: "clean" }>((resolve) => {
+            settleFirst = () => {
+              item.outputPullRequest = "https://github.com/owner/repository/pull/11";
+              item.materialVersion = "11-done";
+              resolve({ status: "clean" });
+            };
+          }),
+          terminate: async () => undefined,
+        };
+      }
+      item.outputPullRequest = "https://github.com/owner/repository/pull/12";
+      item.materialVersion = "12-done";
+      return {
+        processId: "process-12",
+        sessionId: "session-12",
+        sessionFile: "/sessions/12.jsonl",
+        completion: Promise.resolve({ status: "clean" }),
+        terminate: async () => undefined,
+      };
+    },
+  };
+  const clock = new ManualClock();
+  const coordinator = new AutomodeCoordinator({
+    configuration: createAutomationStageConfiguration("half", ["auto-implement"]),
+    actor: "automation-user",
+    tracker,
+    sessions,
+    workspaces: fakeWorkspaces,
+    clock,
+  });
+
+  await coordinator.start();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(requests.map((request) => request.item.number), [11]);
+
+  assert.equal(await coordinator.setStageOperatingState("auto-implement", "OFF"), "DRAINING");
+  assert.equal(
+    coordinator.getProjection().lanes.find((lane) => lane.stage === "auto-implement")?.operatingState,
+    "DRAINING",
+  );
+  tracker.items.push(issue({ number: 12, labels: ["ready-for-agent"], materialVersion: "12-a" }));
+  await clock.callback?.();
+  assert.deepEqual(requests.map((request) => request.item.number), [11]);
+
+  settleFirst();
+  await coordinator.waitForIdle();
+  const allOff = coordinator.getProjection().lanes;
+  assert.ok(allOff.every((lane) => lane.operatingState === "OFF"));
+  assert.ok(clock.callback, "monitoring continues while all Stages are OFF");
+
+  assert.equal(await coordinator.setStageOperatingState("auto-implement", "ON"), "ON");
+  await coordinator.waitForIdle();
+  assert.deepEqual(requests.map((request) => request.item.number), [11, 12]);
+
+  coordinator.interrupt();
+  await coordinator.whenStopped();
+});
+
+test("a Stage drain preserves retry budget and session continuity for re-enable", async () => {
+  const item = issue({ number: 63, labels: ["ready-for-agent"], materialVersion: "63-a" });
+  const tracker = new FakeTracker([item]);
+  const requests: TicketSessionRequest[] = [];
+  let finishFirst!: () => void;
+  const firstCompletion = new Promise<{ status: "error"; error: string }>((resolve) => {
+    finishFirst = () => resolve({ status: "error", error: "attempt failed while draining" });
+  });
+  const sessions: TicketSessionHost = {
+    async start(request) {
+      requests.push(request);
+      if (requests.length === 2) {
+        item.outputPullRequest = "https://github.com/owner/repository/pull/63";
+        item.materialVersion = "63-delivered";
+      }
+      return {
+        processId: `process-${requests.length}`,
+        sessionId: "session-63",
+        sessionFile: "/sessions/63.jsonl",
+        completion: requests.length === 1 ? firstCompletion : Promise.resolve({ status: "clean" }),
+        terminate: async () => undefined,
+      };
+    },
+  };
+  const coordinator = new AutomodeCoordinator({
+    configuration: createAutomationStageConfiguration("half", ["auto-implement"]),
+    actor: "automation-user",
+    tracker,
+    sessions,
+    workspaces: fakeWorkspaces,
+    clock: new ManualClock(),
+  });
+
+  await coordinator.start();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(await coordinator.setStageOperatingState("auto-implement", "OFF"), "DRAINING");
+  finishFirst();
+  await coordinator.waitForIdle();
+  assert.equal(tracker.records.get("issue:63")?.lifecycle, "retrying");
+  assert.equal(tracker.records.get("issue:63")?.attempt, 1);
+
+  await coordinator.setStageOperatingState("auto-implement", "ON");
+  await coordinator.waitForIdle();
+  assert.deepEqual(requests.map(({ attempt, resumeSessionFile }) => ({ attempt, resumeSessionFile })), [
+    { attempt: 1, resumeSessionFile: undefined },
+    { attempt: 2, resumeSessionFile: "/sessions/63.jsonl" },
+  ]);
+  coordinator.interrupt();
+  await coordinator.whenStopped();
+});
+
+test("Coordinator restart restores Stage Operating State from the launch baseline", async () => {
+  const configuration = createAutomationStageConfiguration("half", ["auto-triage"]);
+  const tracker = new FakeTracker([]);
+  const options = {
+    configuration,
+    actor: "automation-user",
+    tracker,
+    sessions: new FakeTicketSessions(() => undefined),
+    workspaces: fakeWorkspaces,
+  };
+  const first = new AutomodeCoordinator({ ...options, clock: new ManualClock() });
+  await first.start();
+  assert.equal(await first.setStageOperatingState("auto-triage", "OFF"), "OFF");
+  assert.equal(await first.setStageOperatingState("auto-review", "ON"), "ON");
+  first.interrupt();
+  await first.whenStopped();
+
+  const restarted = new AutomodeCoordinator({ ...options, clock: new ManualClock() });
+  assert.deepEqual(
+    restarted.getProjection().lanes.map((lane) => [lane.stage, lane.operatingState]),
+    [
+      ["auto-triage", "ON"],
+      ["auto-grilling", "OFF"],
+      ["auto-implement", "OFF"],
+      ["auto-review", "OFF"],
+    ],
+  );
+  await restarted.start();
+  restarted.interrupt();
+  await restarted.whenStopped();
+});
+
+test("recovery preserves active bookkeeping for a Stage restored OFF and resumes it when re-enabled", async () => {
+  const recovered = issue({
+    number: 62,
+    labels: ["ready-for-agent"],
+    assignees: ["automation-user"],
+    materialVersion: "62-running",
+  });
+  const tracker = new FakeTracker([recovered]);
+  tracker.records.set("issue:62", {
+    version: 1,
+    item: { kind: "issue", number: 62, url: recovered.url },
+    stage: "auto-implement",
+    skillName: "implement",
+    attempt: 2,
+    lifecycle: "running",
+    materialVersion: recovered.materialVersion,
+    sessionId: "session-62",
+    sessionFile: "/sessions/62.jsonl",
+  });
+  const sessions = new FakeTicketSessions((request) => {
+    recovered.outputPullRequest = "https://github.com/owner/repository/pull/62";
+    recovered.materialVersion = "62-delivered";
+    assert.equal(request.attempt, 3);
+    assert.equal(request.resumeSessionFile, "/sessions/62.jsonl");
+  });
+  const coordinator = new AutomodeCoordinator({
+    configuration: createAutomationStageConfiguration("half", ["auto-triage"]),
+    actor: "automation-user",
+    tracker,
+    sessions,
+    workspaces: fakeWorkspaces,
+    clock: new ManualClock(),
+  });
+
+  await coordinator.start();
+  assert.equal(sessions.requests.length, 0);
+  assert.equal(tracker.records.get("issue:62")?.lifecycle, "running");
+  assert.equal(candidateFor(coordinator, 62)?.status, "human-owned");
+  assert.match(candidateFor(coordinator, 62)?.reason ?? "", /OFF|human-controlled/);
+
+  await coordinator.setStageOperatingState("auto-implement", "ON");
+  await coordinator.waitForIdle();
+  assert.equal(sessions.requests.length, 1);
+  assert.equal(tracker.records.get("issue:62")?.lifecycle, "succeeded");
+  coordinator.interrupt();
+  await coordinator.whenStopped();
+});
 
 test("startup dispatches one claimed Auto-Triage Ticket Session and requires fresh tracker proof", async () => {
   const tracker = new FakeTracker([issue()]);
@@ -294,6 +716,10 @@ test("five retained-session attempts exhaust only the failing item and an extern
   ]);
   assert.equal(tracker.records.get("issue:31")?.lifecycle, "exhausted");
   assert.equal(tracker.records.get("issue:32")?.lifecycle, "succeeded");
+  assert.equal(candidateFor(coordinator, 31)?.status, "exhausted");
+  assert.equal(candidateFor(coordinator, 31)?.attempt, 5);
+  assert.match(candidateFor(coordinator, 31)?.reason ?? "", /five attempts|evidence/i);
+  assert.equal(coordinator.getProjection().totals.exhausted, 1);
 
   const exhausted = tracker.items.find((item) => item.number === 31)!;
   exhausted.materialVersion = "31-external-update";
@@ -307,21 +733,34 @@ test("five retained-session attempts exhaust only the failing item and an extern
   await coordinator.whenStopped();
 });
 
-test("Ticket Session launch failures consume the same five-attempt budget and retry", async () => {
+test("Ticket Session launch failures are projected as retrying within the shared attempt budget", async () => {
   const tracker = new FakeTracker([issue({ number: 39, labels: ["ready-for-agent"], materialVersion: "39-a" })]);
+  let releaseRetryRecord!: () => void;
+  const retryRecordGate = new Promise<void>((resolve) => { releaseRetryRecord = resolve; });
+  const originalUpsert = tracker.upsertBookkeeping.bind(tracker);
+  tracker.upsertBookkeeping = async (record) => {
+    if (record.lifecycle === "retrying" && record.attempt === 1) await retryRecordGate;
+    await originalUpsert(record);
+  };
   let starts = 0;
-  const sessions: TicketSessionHost = {
-    async start(request) {
-      starts += 1;
-      if (starts < 3) throw new Error(`spawn failed ${starts}`);
+  let finishThirdAttempt!: () => void;
+  const thirdAttempt = new Promise<{ status: "clean" }>((resolve) => {
+    finishThirdAttempt = () => {
       const item = tracker.items[0]!;
       item.outputPullRequest = "https://github.com/owner/repository/pull/39";
       item.materialVersion = "39-delivered";
+      resolve({ status: "clean" });
+    };
+  });
+  const sessions: TicketSessionHost = {
+    async start() {
+      starts += 1;
+      if (starts < 3) throw new Error(`spawn failed ${starts}`);
       return {
         processId: "process-39",
         sessionId: "session-39",
         sessionFile: "/sessions/39.jsonl",
-        completion: Promise.resolve({ status: "clean" }),
+        completion: thirdAttempt,
         terminate: async () => undefined,
       };
     },
@@ -336,9 +775,23 @@ test("Ticket Session launch failures consume the same five-attempt budget and re
   });
 
   await coordinator.start();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(candidateFor(coordinator, 39)?.status, "retrying");
+  assert.equal(candidateFor(coordinator, 39)?.attempt, 1);
+  assert.match(candidateFor(coordinator, 39)?.reason ?? "", /spawn failed 1|retry/i);
+  assert.equal(coordinator.getProjection().totals.retrying, 1);
+
+  releaseRetryRecord();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(starts, 3);
+  assert.equal(candidateFor(coordinator, 39)?.status, "running");
+  assert.equal(candidateFor(coordinator, 39)?.attempt, 3);
+  assert.equal(coordinator.getProjection().totals.active, 1);
+  assert.equal(coordinator.getProjection().totals.retrying, 0);
+
+  finishThirdAttempt();
   await coordinator.waitForIdle();
 
-  assert.equal(starts, 3);
   assert.equal(tracker.records.get("issue:39")?.attempt, 3);
   assert.equal(tracker.records.get("issue:39")?.lifecycle, "succeeded");
   coordinator.interrupt();
@@ -602,6 +1055,12 @@ test("prototype waiting is idle until external material feedback resumes the sam
   await coordinator.start();
   await coordinator.waitForIdle();
   assert.equal(tracker.records.get("issue:45")?.lifecycle, "awaiting-feedback");
+  assert.equal(candidateFor(coordinator, 45)?.status, "waiting");
+  assert.match(candidateFor(coordinator, 45)?.reason ?? "", /external feedback/i);
+  assert.equal(
+    coordinator.getProjection().lanes.find((lane) => lane.stage === "auto-implement")?.totals.held,
+    1,
+  );
   await clock.callback?.();
   assert.equal(requests.length, 1);
 
@@ -613,6 +1072,58 @@ test("prototype waiting is idle until external material feedback resumes the sam
   assert.equal(requests[1]!.attempt, 1);
   assert.equal(requests[1]!.resumeSessionFile, "/sessions/prototype-45.jsonl");
   assert.equal(tracker.records.get("issue:45")?.lifecycle, "succeeded");
+  coordinator.interrupt();
+  await coordinator.whenStopped();
+});
+
+test("material feedback that changes Stage precedence leaves the old waiting session and dispatches the new Stage", async () => {
+  const item = issue({ number: 46, labels: ["wayfinder:prototype"], materialVersion: "46-prototype" });
+  const tracker = new FakeTracker([item]);
+  const requests: TicketSessionRequest[] = [];
+  const sessions: TicketSessionHost = {
+    async start(request) {
+      requests.push(request);
+      if (request.skillName === "triage") {
+        item.state = "closed";
+        item.materialVersion = "46-settled";
+      }
+      return {
+        processId: `process-${requests.length}`,
+        sessionId: `session-${requests.length}`,
+        sessionFile: `/sessions/${requests.length}.jsonl`,
+        completion: Promise.resolve(
+          request.skillName === "prototype" ? { status: "waiting" as const } : { status: "clean" as const },
+        ),
+        terminate: async () => undefined,
+      };
+    },
+  };
+  const clock = new ManualClock();
+  const coordinator = new AutomodeCoordinator({
+    configuration: createAutomationStageConfiguration("full", [
+      "auto-triage", "auto-grilling", "auto-implement", "auto-review",
+    ]),
+    actor: "automation-user",
+    tracker,
+    sessions,
+    workspaces: fakeWorkspaces,
+    clock,
+  });
+
+  await coordinator.start();
+  await coordinator.waitForIdle();
+  item.labels = ["needs-triage"];
+  item.assignees = [];
+  item.materialVersion = "46-needs-triage";
+  await clock.callback?.();
+  await coordinator.waitForIdle();
+
+  assert.deepEqual(requests.map(({ skillName, attempt, resumeSessionFile }) => ({
+    skillName, attempt, resumeSessionFile,
+  })), [
+    { skillName: "prototype", attempt: 1, resumeSessionFile: undefined },
+    { skillName: "triage", attempt: 1, resumeSessionFile: undefined },
+  ]);
   coordinator.interrupt();
   await coordinator.whenStopped();
 });
