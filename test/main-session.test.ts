@@ -10,6 +10,12 @@ import {
   startAutomodeMainSession,
   type StartAutomodeMainOptions,
 } from "../src/automode-main.js";
+import {
+  AutomodeCoordinator,
+  type CoordinatorTracker,
+  type TicketSessionHost,
+} from "../src/coordinator.js";
+import type { CoordinatorDashboardOptions, DashboardProjection } from "../src/dashboard.js";
 import { resolveAutomodePaths } from "../src/paths.js";
 import {
   confirmSerializedAutomationStageConfiguration,
@@ -122,6 +128,186 @@ test("a fresh Main Session separates process-local operating state from the dura
     main.dispose();
   }
   assert.equal(existsSync(main.coordinatorLockFile), false);
+});
+
+test("Ctrl-C during dashboard startup queues a drain before Coordinator discovery", async () => {
+  const fixture = mkdtempSync(join(tmpdir(), "automode-dashboard-interrupt-"));
+  const repository = join(fixture, "repository");
+  const home = join(fixture, "home");
+  mkdirSync(join(repository, ".git"), { recursive: true });
+  const configuration = createAutomationStageConfiguration("half", ["auto-triage"]);
+  const trackerCalls: string[] = [];
+  const tracker: CoordinatorTracker = {
+    async listBookkeeping() { trackerCalls.push("list-bookkeeping"); return []; },
+    async snapshot() { trackerCalls.push("snapshot"); return { revision: "empty", items: [] }; },
+    async read() { throw new Error("No tracker item exists"); },
+    async claim() { throw new Error("No tracker item exists"); },
+    async upsertBookkeeping() { throw new Error("No bookkeeping write is expected"); },
+  };
+  const coordinator = new AutomodeCoordinator({
+    configuration,
+    actor: "automation-user",
+    tracker,
+    sessions: { async start() { throw new Error("No Ticket Session is expected"); } },
+  });
+  let releaseDashboard!: () => void;
+  const dashboardReady = new Promise<void>((resolve) => { releaseDashboard = resolve; });
+  const main = await startForTest({
+    repository,
+    home,
+    ...confirmedConfiguration("half", ["auto-triage"]),
+    coordinator,
+    createDashboard() {
+      return {
+        async start() {
+          await dashboardReady;
+          return { localUrl: "http://127.0.0.1:41738" };
+        },
+        publish() {},
+        appendActivity() {},
+        async stop() {},
+      };
+    },
+  });
+
+  const starting = main.startCoordinator();
+  assert.equal(main.interruptCoordinator(), "draining");
+  const disposing = main.dispose();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(existsSync(main.coordinatorLockFile), true);
+  releaseDashboard();
+  await starting;
+  await coordinator.whenStopped();
+  await disposing;
+  assert.deepEqual(trackerCalls, ["list-bookkeeping"]);
+  assert.equal(existsSync(main.coordinatorLockFile), false);
+});
+
+test("the dashboard starts before Coordinator discovery and stops after the drain", async () => {
+  const fixture = mkdtempSync(join(tmpdir(), "automode-dashboard-main-"));
+  const repository = join(fixture, "repository");
+  const home = join(fixture, "home");
+  mkdirSync(join(repository, ".git"), { recursive: true });
+  const configuration = createAutomationStageConfiguration("half", ["auto-triage"]);
+  const events: string[] = [];
+  const published: DashboardProjection[] = [];
+  let dashboardOptions: CoordinatorDashboardOptions | undefined;
+  const tracker: CoordinatorTracker = {
+    async listBookkeeping() {
+      events.push("list-bookkeeping");
+      return [];
+    },
+    async snapshot() {
+      events.push("snapshot");
+      return { revision: "empty", items: [] };
+    },
+    async read() { throw new Error("No tracker item exists"); },
+    async claim() { throw new Error("No tracker item exists"); },
+    async upsertBookkeeping() { throw new Error("No bookkeeping write is expected"); },
+  };
+  const sessions: TicketSessionHost = {
+    async start() { throw new Error("No Ticket Session is expected"); },
+  };
+  const coordinator = new AutomodeCoordinator({
+    configuration,
+    actor: "automation-user",
+    tracker,
+    sessions,
+  });
+  const main = await startForTest({
+    repository,
+    home,
+    ...confirmedConfiguration("half", ["auto-triage"]),
+    coordinator,
+    createDashboard(options) {
+      dashboardOptions = options;
+      return {
+        async start(initialProjection) {
+          events.push("dashboard-start");
+          published.push(initialProjection);
+          return {
+            localUrl: "http://127.0.0.1:41738",
+            exposureError: "tailscale unavailable",
+          };
+        },
+        publish(projection) { published.push(projection); },
+        appendActivity() {},
+        async stop() { events.push("dashboard-stop"); },
+      };
+    },
+  });
+
+  await main.startCoordinator();
+  assert.deepEqual(events.slice(0, 3), ["dashboard-start", "list-bookkeeping", "snapshot"]);
+  assert.ok(dashboardOptions);
+  assert.equal(published[0]?.run.lifecycle, "loading");
+  assert.equal(published.at(-1)?.run.lifecycle, "degraded");
+  assert.equal(published.at(-1)?.tailscaleError, "tailscale unavailable");
+
+  await dashboardOptions.onCommand({ type: "refresh" });
+  assert.equal(events.filter((event) => event === "snapshot").length, 2);
+  await dashboardOptions.onCommand({
+    type: "set-stage-state",
+    stage: "auto-triage",
+    state: "OFF",
+  });
+  assert.equal(
+    published.at(-1)?.lanes.find((lane) => lane.stage === "auto-triage")?.operatingState,
+    "OFF",
+  );
+  await dashboardOptions.onCommand({ type: "drain" });
+  await dashboardOptions.onCommand({ type: "drain" });
+  assert.equal(published.at(-1)?.run.lifecycle, "draining");
+  await coordinator.whenStopped();
+  assert.equal(main.interruptCoordinator(), "forcing");
+  await main.dispose();
+  assert.equal(events.at(-1), "dashboard-stop");
+});
+
+test("dashboard cleanup failure releases the Coordinator lock and remains retryable", async () => {
+  const fixture = mkdtempSync(join(tmpdir(), "automode-dashboard-cleanup-"));
+  const repository = join(fixture, "repository");
+  const home = join(fixture, "home");
+  mkdirSync(join(repository, ".git"), { recursive: true });
+  const configuration = createAutomationStageConfiguration("half", ["auto-triage"]);
+  const coordinator = new AutomodeCoordinator({
+    configuration,
+    actor: "automation-user",
+    tracker: {
+      async listBookkeeping() { return []; },
+      async snapshot() { return { revision: "empty", items: [] }; },
+      async read() { throw new Error("No tracker item exists"); },
+      async claim() { throw new Error("No tracker item exists"); },
+      async upsertBookkeeping() { throw new Error("No bookkeeping write is expected"); },
+    },
+    sessions: { async start() { throw new Error("No Ticket Session is expected"); } },
+  });
+  let stopCalls = 0;
+  const main = await startForTest({
+    repository,
+    home,
+    ...confirmedConfiguration("half", ["auto-triage"]),
+    coordinator,
+    createDashboard() {
+      return {
+        async start() { return { localUrl: "http://127.0.0.1:41738" }; },
+        publish() {},
+        appendActivity() {},
+        async stop() {
+          stopCalls += 1;
+          if (stopCalls === 1) throw new Error("Tailscale cleanup failed");
+        },
+      };
+    },
+  });
+
+  await main.startCoordinator();
+  main.interruptCoordinator();
+  await coordinator.whenStopped();
+  await assert.rejects(() => main.dispose(), /Tailscale cleanup failed/);
+  assert.equal(existsSync(main.coordinatorLockFile), false);
+  await main.dispose();
+  assert.equal(stopCalls, 2);
 });
 
 test("failed startup validation does not persist an Automode Run Record", async () => {

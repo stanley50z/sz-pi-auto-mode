@@ -15,7 +15,7 @@ openwiki:
 
 # Automode Coordinator and Ticket Sessions
 
-The Main Session hosts `AutomodeCoordinator`; it is no longer only a startup boundary. `startAutomodeMainSession` wires the Coordinator to `GitHubTracker`, `AutomodeTicketSessionHost`, and `WorkspaceManager`, then exposes explicit start, interrupt, and disposal hooks. The Coordinator owns discovery and dispatch, while a Ticket Session performs the selected skill work in a child process.
+The Main Session hosts `AutomodeCoordinator`; it is no longer only a startup boundary. `startAutomodeMainSession` wires the Coordinator to `GitHubTracker`, `AutomodeTicketSessionHost`, and `WorkspaceManager`, then exposes explicit start, interrupt, and disposal hooks. The Coordinator owns discovery and dispatch, while a Ticket Session performs the selected skill work in a child process. The Main Session publishes the Coordinator's projection and activity to the [Coordinator dashboard and Stage Lanes](dashboard.md), which delegates supervisory commands back to this Coordinator rather than performing work itself.
 
 ## Reconciliation and dispatch
 
@@ -40,6 +40,10 @@ sequenceDiagram
 ```
 
 *The Coordinator separates tracker proof, workspace preparation, child-session execution, and lifecycle bookkeeping.*
+
+## Stage Candidates and live projection
+
+`AutomodeCoordinator.getProjection()` exposes the current lane candidates, totals, polling state, and process-local recent activity. The poll projection records `lastSuccessfulPoll` after each tracker snapshot and `nextScheduledPoll` for the 30-second schedule; `refresh()` performs an immediate full snapshot and eligibility scan. Candidate projection is broader than dispatch: it retains blocked, assigned, human-owned, claimed, waiting, retrying, and exhausted items so the dashboard can explain why work is not running. Each item is assigned to one lane using the same precedence as dispatch—Auto-Triage, Auto-Grilling, Auto-Implement, then Auto-Review—and `setStageOperatingState` controls process-local `ON`, `DRAINING`, and `OFF` behavior without changing the launch baseline or Automode Run Record. The [Coordinator dashboard](dashboard.md) renders this projection and delegates refresh, drain, and stage-state commands back here.
 
 ## Ticket Session boundary
 

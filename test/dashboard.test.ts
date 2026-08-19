@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
+import { spawn as spawnPty } from "@lydell/node-pty";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer, request } from "node:http";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   createCoordinatorDashboard,
   type DashboardProjection,
@@ -48,6 +53,12 @@ const unavailableTailscale: DashboardTailscaleExposure = {
   },
   async stop() {},
 };
+
+function dashboardCandidate(projection: DashboardProjection, itemKey: string) {
+  return projection.lanes
+    .flatMap((lane) => lane.candidates)
+    .find((candidate) => candidate.itemKey === itemKey);
+}
 
 function projection(id = "run-1"): DashboardProjection {
   const totals = { candidates: 0, active: 0, queued: 0, held: 0, retrying: 0, exhausted: 0 };
@@ -450,4 +461,165 @@ test("dashboard startup fails when the fixed port is occupied", async () => {
     await dashboard.stop();
     await new Promise<void>((resolve, reject) => occupant.close((error) => error ? reject(error) : resolve()));
   }
+});
+
+function stripTerminalControl(value: string): string {
+  return value
+    .replace(/\x1b\][^\x07]*?(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\r/g, "");
+}
+
+test("black-box /automode supervision reaches live activity and graceful drain", { timeout: 30_000 }, async () => {
+  const fixture = mkdtempSync(join(tmpdir(), "automode-dashboard-acceptance-"));
+  const repository = join(fixture, "repository");
+  mkdirSync(join(repository, ".git"), { recursive: true });
+  const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+  const proofExtension = join(fixture, "dashboard-acceptance-extension.mjs");
+  writeFileSync(proofExtension, `
+import automodeBridge, { selectAutomationStageConfiguration } from ${JSON.stringify(pathToFileURL(resolve(projectRoot, "dist/src/bridge.js")).href)};
+import { createAutomodeLaunchPlan } from ${JSON.stringify(pathToFileURL(resolve(projectRoot, "dist/src/launch.js")).href)};
+import { handoffTerminal } from ${JSON.stringify(pathToFileURL(resolve(projectRoot, "dist/src/handoff.js")).href)};
+const proofEntrypoint = ${JSON.stringify(resolve(projectRoot, "dist/test/dashboard-acceptance-main.js"))};
+export default function (pi) {
+  automodeBridge(pi, {
+    selectConfiguration: selectAutomationStageConfiguration,
+    launch: async (request) => {
+      const plan = createAutomodeLaunchPlan(request);
+      return handoffTerminal({
+        ...plan,
+        args: [...plan.args.slice(0, 2), proofEntrypoint, ...plan.args.slice(3)],
+      });
+    },
+  });
+}
+`);
+  const command = process.platform === "win32" ? `${process.env.APPDATA}/npm/pi.cmd` : "pi";
+  const terminal = spawnPty(command, [
+    "--no-session",
+    "--no-extensions",
+    "--offline",
+    "--model", "openai-codex/gpt-5.6-sol",
+    "-e", proofExtension,
+  ], {
+    cwd: repository,
+    env: { ...process.env, PI_OFFLINE: "1" },
+    name: "xterm-color",
+    cols: 100,
+    rows: 32,
+  });
+
+  let output = "";
+  let invoked = false;
+  let launched = false;
+  let supervisionStarted = false;
+  let supervisionComplete = false;
+  let exitCode: number | undefined;
+  await new Promise<void>((resolveRun, rejectRun) => {
+    const timer = setTimeout(() => {
+      terminal.kill();
+      rejectRun(new Error(`Dashboard acceptance timed out:\n${stripTerminalControl(output)}`));
+    }, 25_000);
+    const finish = () => {
+      if (!supervisionComplete || exitCode === undefined) return;
+      clearTimeout(timer);
+      if (exitCode !== 0) {
+        rejectRun(new Error(`Dashboard acceptance exited ${exitCode}:\n${stripTerminalControl(output)}`));
+      } else {
+        resolveRun();
+      }
+    };
+    const supervise = async () => {
+      const deadline = Date.now() + 8_000;
+      type AcceptanceSnapshot = {
+        revision: number;
+        csrfToken: string;
+        projection: DashboardProjection;
+        activities: Array<{ message?: string }>;
+      };
+      let snapshot: AcceptanceSnapshot | undefined;
+      let lastSnapshotError: unknown;
+      while (Date.now() < deadline) {
+        try {
+          snapshot = await (await fetch("http://127.0.0.1:41738/api/snapshot")).json() as AcceptanceSnapshot;
+          const candidate = dashboardCandidate(snapshot.projection, "issue:50");
+          if (
+            candidate?.status === "running"
+            && snapshot.activities.some((activity) => activity.message?.includes("live activity proof"))
+          ) break;
+        } catch (error) {
+          lastSnapshotError = error;
+        }
+        await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 75));
+      }
+      if (!snapshot) {
+        throw new Error("Dashboard never returned an acceptance snapshot", { cause: lastSnapshotError });
+      }
+      const candidate = dashboardCandidate(snapshot.projection, "issue:50");
+      assert.equal(candidate?.status, "running");
+      assert.ok(snapshot.activities.some((activity) => activity.message?.includes("live activity proof")));
+      assert.equal(snapshot.projection.run.lifecycle, "degraded");
+      assert.ok(snapshot.projection.tailscaleError);
+      assert.match(snapshot.projection.tailscaleError, /acceptance harness/);
+      const application = await (await fetch("http://127.0.0.1:41738/app.js")).text();
+      assert.match(application, /Stage Lanes/);
+      assert.doesNotMatch(application, /data-command=["']force/);
+      const drain = await fetch("http://127.0.0.1:41738/api/commands/drain", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://127.0.0.1:41738",
+          "x-automode-csrf": snapshot.csrfToken,
+          "if-match": `"${snapshot.revision}"`,
+        },
+        body: "{}",
+      });
+      assert.equal(drain.status, 204);
+    };
+    terminal.onData((chunk) => {
+      output += chunk;
+      if (!invoked && output.includes(">")) {
+        invoked = true;
+        terminal.write("/automode\r");
+      }
+      if (!launched && output.includes("Launch Automode")) {
+        launched = true;
+        terminal.write("\r");
+      }
+      if (!supervisionStarted && output.includes("http://127.0.0.1:41738")) {
+        supervisionStarted = true;
+        void supervise().then(() => {
+          supervisionComplete = true;
+          finish();
+        }, (error) => {
+          terminal.kill();
+          clearTimeout(timer);
+          rejectRun(error);
+        });
+      }
+    });
+    terminal.onExit(({ exitCode: code }) => {
+      exitCode = code;
+      terminal.kill();
+      if (!supervisionStarted) {
+        clearTimeout(timer);
+        rejectRun(new Error(`Dashboard link never appeared:\n${stripTerminalControl(output)}`));
+        return;
+      }
+      finish();
+    });
+  });
+
+  const visibleOutput = stripTerminalControl(output);
+  assert.match(visibleOutput, /AUTOMODE MAIN SESSION/);
+  assert.match(visibleOutput, /owner\/repository/);
+  assert.match(visibleOutput, /http:\/\/127\.0\.0\.1:41738/);
+  assert.match(visibleOutput, /TAILSCALE ERROR/);
+  assert.match(visibleOutput, /Stages Auto-Triage (?:ON|DRAINING|OFF)/);
+  assert.match(visibleOutput, /Auto-Grilling (?:ON|DRAINING|OFF)/);
+  assert.match(visibleOutput, /Auto-Implement (?:ON|DRAINING|OFF)/);
+  assert.match(visibleOutput, /Auto-Review (?:ON|DRAINING|OFF)/);
+  assert.match(visibleOutput, /Candidates \d+ open\s+·\s+\d+ active\s+·\s+\d+ queued\s+·\s+\d+ held\s+·\s+\d+ retrying\s+·\s+\d+ exhausted/);
+  assert.match(visibleOutput, /Poll last .*·\s+next/);
+  assert.match(visibleOutput, /Ctrl-C: graceful drain/);
 });

@@ -137,6 +137,14 @@ test("a deterministic /automode journey advances triage, grilling, implementatio
         home,
         model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
         coordinator,
+        createDashboard() {
+          return {
+            async start() { return { localUrl: "http://127.0.0.1:41738" }; },
+            publish() {},
+            appendActivity() {},
+            async stop() {},
+          };
+        },
         startupValidation: {
           runner: {
             async run(commandName, args, cwd) {
@@ -162,7 +170,7 @@ test("a deterministic /automode journey advances triage, grilling, implementatio
       await coordinator.waitForIdle();
       main.interruptCoordinator();
       await coordinator.whenStopped();
-      main.dispose();
+      await main.dispose();
       throw new Error("deterministic journey complete");
     },
   });

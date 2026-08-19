@@ -20,6 +20,14 @@ _Avoid_: Global skill discovery, inherited Pi setup, general configuration schem
 One independently controllable part of the repository workflow: Auto-Triage, Auto-Grilling, Auto-Implement, or Auto-Review. Its launch baseline comes from the Automation Stage Configuration, while its current process behavior comes from its Automation Stage Operating State.
 _Avoid_: Sub-mode, workflow phase
 
+**Stage Candidate**:
+An open tracker item recognized by exactly one precedence-selected Automation Stage, whether or not Automode can currently dispatch it.
+_Avoid_: Eligible item, Ticket Session
+
+**Stage Lane**:
+The Automode Dashboard grouping for one Automation Stage, its Operating State, and all of its Stage Candidates.
+_Avoid_: Queue, workflow column
+
 **Automation Stage Configuration**:
 The fixed launch baseline containing the Full-Auto or Half-Auto label and the baseline-enabled Automation Stages confirmed when an Automode Run launches. It is serialized across the Automode Bridge process boundary and stored in the Automode Run Record. It does not represent process-local Stage changes.
 _Avoid_: Automation Stage Operating State, stage profile, Automode Capability Profile
@@ -67,6 +75,10 @@ _Avoid_: Ticket worker, subagent
 **Main Session**:
 The repository-scoped coordinator session that hosts the Automode Coordinator for an Automode Run. It supervises work but does not stand in for a stage-specific Ticket Session.
 _Avoid_: Grilling Session, Review Session, ticket worker
+
+**Automode Dashboard**:
+The comprehensive browser supervision surface for one live Automode Coordinator. It presents Stage Lanes and read-only Ticket Session activity while the Main Session TUI remains the compact status and shutdown surface.
+_Avoid_: Coordinator GUI, Ticket Session terminal, Main Session TUI
 
 **Ticket Session**:
 One durable logical Pi session that owns one eligible tracker ticket or pull request through its applicable Automode Stage Skill. It normally runs in an independent full background Pi process, persists conversation history through native Pi session storage, and may resume in a replacement process without sharing context with other items. It is not a subagent. A stage-specific Ticket Session keeps its stage-specific name, such as Grilling Session or Review Session.
