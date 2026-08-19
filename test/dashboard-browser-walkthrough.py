@@ -78,6 +78,15 @@ class ProofProcess:
         self.reader.join(timeout=2.0)
         return exit_code
 
+    def send_command(self, command):
+        if self.process.poll() is not None:
+            raise AssertionError(
+                f"{self.entrypoint.name} exited before command {command!r}; output={self.output()!r}"
+            )
+        assert self.process.stdin is not None
+        self.process.stdin.write(command + "\n")
+        self.process.stdin.flush()
+
     def stop(self):
         if self.process.poll() is not None:
             self.reader.join(timeout=2.0)
@@ -291,14 +300,13 @@ try:
     if "Lifecycle\nACTIVE" not in body_text():
         raise AssertionError("Missing representative active lifecycle")
 
-    synthetic_states = (
+    populated_synthetic_states = (
         ("active", ".card", "RUNNING"),
         ("queued", ".card", "QUEUED"),
         ("blocked", ".card", "BLOCKED"),
         ("exhausted", ".card", "EXHAUSTED"),
-        ("empty", ".empty-lane", "No Stage Candidates"),
     )
-    for state_name, selector, text_fragment in synthetic_states:
+    for state_name, selector, text_fragment in populated_synthetic_states:
         capture_state_at_all_viewports(state_name, selector, text_fragment)
 
     set_exact_viewport(390, 844)
@@ -331,6 +339,31 @@ try:
         lambda: js("document.querySelector('.supervision-note').innerText") != poll_before_refresh,
         "refreshed poll timestamp",
     )
+
+    visual_proof.send_command("EMPTY")
+    wait_until(lambda: "Lifecycle\nEMPTY" in body_text(), "full empty run lifecycle")
+    empty_summary = json.loads(js("""JSON.stringify((() => ({
+      laneCount: document.querySelectorAll('.lane').length,
+      candidateCardCount: document.querySelectorAll('.lane .card').length,
+      emptyLaneCount: document.querySelectorAll('.lane .empty-lane').length,
+      runTotals: [...document.querySelectorAll('.run-panel .metric')]
+        .find((metric) => metric.innerText.includes('Stage Candidates'))?.innerText || '',
+      laneTotals: [...document.querySelectorAll('.lane-totals')]
+        .map((totals) => totals.innerText)
+    }))())"""))
+    expected_run_totals = "Stage Candidates\n0 open \u00b7 0 active \u00b7 0 queued \u00b7 0 held \u00b7 0 retrying \u00b7 0 exhausted"
+    expected_lane_totals = "0 candidates\n0 active\n0 queued\n0 held"
+    empty_checks = {
+        "four lanes": empty_summary["laneCount"] == 4,
+        "zero candidate cards": empty_summary["candidateCardCount"] == 0,
+        "four empty lanes": empty_summary["emptyLaneCount"] == 4,
+        "zero run totals": empty_summary["runTotals"] == expected_run_totals,
+        "four lane totals": len(empty_summary["laneTotals"]) == 4,
+        "zero lane totals": all(totals == expected_lane_totals for totals in empty_summary["laneTotals"]),
+    }
+    if not all(empty_checks.values()):
+        raise AssertionError(f"Full empty run was incomplete: checks={empty_checks!r} summary={empty_summary!r}")
+    capture_state_at_all_viewports("empty", ".lifecycle", "EMPTY")
 
     close_tab()
     task_tab_open = False
@@ -400,7 +433,7 @@ try:
         "states": ["active", "queued", "blocked", "draining", "exhausted", "disconnected", "empty"],
         "screenshots": 21,
         "keyboard": ["Stage control", "card inspection", "Escape", "Close", "refresh", "graceful drain"],
-        "syntheticLimit": "active/queued/blocked/exhausted/empty visual fixtures only",
+        "syntheticLimit": "active/queued/blocked/exhausted/full-empty visual fixtures only",
     }
     print(json.dumps(proof_result))
 finally:

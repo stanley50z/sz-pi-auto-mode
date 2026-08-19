@@ -15,7 +15,8 @@ import {
 } from "../src/stage-configuration.js";
 
 const now = "2026-08-18T16:00:00.000Z";
-const later = "2026-08-18T16:00:30.000Z";
+const nextPollAt = "2026-08-18T16:00:30.000Z";
+type BrowserProofControlCommand = "EMPTY" | "STOP";
 
 const proofCandidates: Readonly<Record<AutomationStage, readonly DashboardStageCandidate[]>> = {
   "auto-triage": [
@@ -85,6 +86,13 @@ const proofCandidates: Readonly<Record<AutomationStage, readonly DashboardStageC
   }],
 };
 
+const emptyProofCandidates: Readonly<Record<AutomationStage, readonly DashboardStageCandidate[]>> = {
+  "auto-triage": [],
+  "auto-grilling": [],
+  "auto-implement": [],
+  "auto-review": [],
+};
+
 function candidateTotals(candidates: readonly DashboardStageCandidate[]) {
   return candidates.reduce((totals, candidate) => ({
     candidates: totals.candidates + 1,
@@ -96,16 +104,23 @@ function candidateTotals(candidates: readonly DashboardStageCandidate[]) {
   }), { candidates: 0, active: 0, queued: 0, held: 0, retrying: 0, exhausted: 0 });
 }
 
+function parseControlCommand(input: Buffer | string): BrowserProofControlCommand {
+  const command = input.toString().trim().toUpperCase();
+  if (command === "EMPTY" || command === "STOP") return command;
+  throw new Error(`Unsupported dashboard browser proof command: ${command}`);
+}
+
 function proofProjection(
   states: Readonly<Record<AutomationStage, AutomationStageOperatingStateValue>>,
   lifecycle: DashboardProjection["run"]["lifecycle"],
   lastSuccessfulPoll = now,
+  candidates: Readonly<Record<AutomationStage, readonly DashboardStageCandidate[]>> = proofCandidates,
 ): DashboardProjection {
   const lanes: DashboardLaneProjection[] = AUTOMATION_STAGES.map((stage) => ({
     stage,
     operatingState: states[stage],
-    candidates: proofCandidates[stage],
-    totals: candidateTotals(proofCandidates[stage]),
+    candidates: candidates[stage],
+    totals: candidateTotals(candidates[stage]),
   }));
   return {
     version: 1,
@@ -118,7 +133,7 @@ function proofProjection(
       mode: "full",
       lifecycle,
       lastSuccessfulPoll,
-      nextPoll: later,
+      nextPoll: nextPollAt,
     },
     totals: candidateTotals(lanes.flatMap((lane) => lane.candidates)),
     lanes,
@@ -198,7 +213,13 @@ async function main(): Promise<void> {
     if (!stopping) stopping = dashboard.stop().finally(resolveDrained);
   }
   const onInput = (chunk: Buffer | string) => {
-    if (chunk.toString().trim().toUpperCase() === "STOP") stop();
+    const command = parseControlCommand(chunk);
+    if (command === "EMPTY") {
+      projection = proofProjection(states, "empty", projection.run.lastSuccessfulPoll, emptyProofCandidates);
+      publish();
+      return;
+    }
+    if (command === "STOP") stop();
   };
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
