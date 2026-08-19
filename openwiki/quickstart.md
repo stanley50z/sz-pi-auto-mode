@@ -25,6 +25,7 @@ This repository is an early-stage Pi extension centered on **Automode**, a disti
 - the Coordinator reconciles all bookkeeping states before claims, uses complete snapshots whose revisions include `updated_at`, recovers missing, cross-home, or incompatible sessions and missing worktrees, requires merged proof before Auto-Review cleanup, preserves diagnostics after the fifth failed attempt, and fails fast on unwritable fork heads
 - shutdown is two-phase: the first interrupt drains while retaining the Coordinator lock, and the second force-terminates active Ticket Sessions; disposal releases the lock only after the Coordinator stops
 - Personal-WeChat integration is planned separately from the Automode MVP
+- the Coordinator dashboard binds to loopback port `41738` before discovery, optionally exposes a private Tailscale URL, projects Stage Candidates and bounded activity, and delegates only safe supervision commands; the Main Session status card shows the same projection and owns terminal-only two-step shutdown
 - Auto-Grilling and Auto-Review use configurable hidden-peer Panel runtimes; the current MVP uses the launch-time default Pi seat plus Pi / `github-copilot/claude-fable-5` and Pi / `openai-codex/gpt-5.6-sol`
 
 Start here, then follow the section pages below for the repository's runtime seams and change-routing guidance.
@@ -42,6 +43,7 @@ Start here, then follow the section pages below for the repository's runtime sea
 | Change `/fast` or provider request behavior | [Fast mode](integrations/fast-mode.md) | `src/fast-mode.ts`, `src/controlled-services.ts` | `createAutomodeFastModeExtension` | `test/capability-session.test.ts`, `test/real-pi-smoke.test.ts` | `npm run build && node --test dist/test/capability-session.test.js dist/test/real-pi-smoke.test.js` |
 | Change local OpenWiki refresh or repository operating guidance | [Operations](operations.md) | `README.md`, `AGENTS.md`, `CLAUDE.md`, `package.json` | `OPENWIKI_PROVIDER=openai-chatgpt openwiki code --update --print` | none; documentation-only | no source validation; run the local OpenWiki command when regenerating |
 | Change Panel seats, hidden-peer execution, or review/grilling advisory tools | [Review Panel and controlled advisory seats](architecture/panels.md) | `src/panel-runtime.ts`, `src/panel-process.ts`, `src/ticket-panel-extension.ts` | `runGrillingPanel`, `runReviewPanel`, `CliPanelProcessLauncher`, `createTicketPanelExtension` | `test/panel-runtime.test.ts`, `test/panel-process.test.ts`, `test/ticket-panel-extension.test.ts` | `npm run build && node --test dist/test/panel-runtime.test.js dist/test/panel-process.test.js dist/test/ticket-panel-extension.test.js` |
+| Change Coordinator dashboard, Stage Lanes, browser controls, activity projection, or Main Session status card | [Coordinator dashboard](architecture/dashboard.md) | `src/dashboard.ts`, `src/dashboard-ui.ts`, `src/automode-main.ts`, `src/main-status-card.ts`, `src/coordinator.ts` | `CoordinatorDashboard`, `DashboardProjection`, `DashboardCommand`, `createDashboardProjection`, `createAutomodeStatusCard` | `test/dashboard.test.ts`, `test/dashboard-ui.test.ts`, `test/main-session.test.ts`, `test/main-status-card.test.ts`, `test/coordinator.test.ts` | `npm run build && node --test dist/test/dashboard.test.js dist/test/dashboard-ui.test.js dist/test/main-status-card.test.js` |
 
 ## What this wiki covers
 
@@ -54,6 +56,7 @@ Start here, then follow the section pages below for the repository's runtime sea
 ## Major sections
 
 - [Architecture overview](architecture/overview.md)
+- [Coordinator dashboard and Stage Lanes](architecture/dashboard.md)
 - [Coordinator and Ticket Sessions](architecture/coordinator.md)
 - [Launch and automation](workflows/launch-and-automation.md)
 - [Capability boundary](architecture/capability-boundary.md)

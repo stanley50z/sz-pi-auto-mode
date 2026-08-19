@@ -1,0 +1,72 @@
+---
+type: "Coordinator Dashboard"
+title: "Automode Coordinator dashboard and Stage Lanes"
+description: "The local Coordinator-owned web dashboard that projects Stage Candidates and Ticket Session activity, exposes safe supervision commands, and keeps process-local Stage Operating State separate from the Automode Run Record."
+tags: [automode, dashboard, coordinator, stage-lanes, supervision]
+openwiki:
+  roles: [architecture, workflow, operations, testing]
+  change_kinds: [public-api, lifecycle, security]
+  source_paths: [src/dashboard.ts, src/dashboard-ui.ts, src/automode-main.ts, src/main-status-card.ts, src/coordinator.ts, src/ticket-session-main.ts]
+  symbols: [CoordinatorDashboard, DashboardProjection, DashboardCommand, HttpCoordinatorDashboard, createDashboardProjection, createAutomodeStatusCard]
+  test_paths: [test/dashboard.test.ts, test/dashboard-ui.test.ts, test/coordinator.test.ts, test/main-session.test.ts, test/main-status-card.test.ts, test/ticket-session.test.ts]
+  invariants: [The dashboard binds to loopback port 41738., Tailscale exposure is optional and failures leave localhost access available., Browser mutations require an allowed host same-origin checks CSRF and revision matching., Dashboard activity and recent history are process-local and bounded., Dashboard commands delegate to the Coordinator and never perform ticket work.]
+  validation_commands: [npm run build, "node --test dist/test/dashboard.test.js dist/test/dashboard-ui.test.js dist/test/main-status-card.test.js"]
+---
+
+# Automode Coordinator dashboard and Stage Lanes
+
+The `/automode` Main Session starts a Coordinator-owned dashboard before tracker discovery. The browser is the comprehensive supervision surface; the Pi TUI remains a compact status and shutdown surface. The dashboard shows every open **Stage Candidate** in one of four precedence-selected lanes—Auto-Triage, Auto-Grilling, Auto-Implement, and Auto-Review—rather than only showing active Ticket Sessions. The product design is recorded in [`docs/automode-dashboard-design.md`](../../docs/automode-dashboard-design.md) and the architectural decision in [`docs/adr/0001-use-a-local-web-dashboard-for-coordinator-supervision.md`](../../docs/adr/0001-use-a-local-web-dashboard-for-coordinator-supervision.md).
+
+The Main Session status card is implemented by `createAutomodeStatusCard` in `src/main-status-card.ts`. It renders repository and Automode Run Record identity, all four process-local Stage Operating States, candidate totals, last/next poll times, the exact localhost/Tailscale dashboard links, and any Tailscale exposure error. It consumes the same `DashboardProjection` published to the browser, so the TUI is a compact projection rather than a second state store. Its terminal-only `Ctrl-C` handler preserves the first graceful-drain and second force-stop semantics; the browser cannot force-stop individual Ticket Sessions.
+
+## Runtime boundary
+
+`CoordinatorDashboard` is the small Main Session-facing seam: `start` with an initial `DashboardProjection`, `publish` replacements, `appendActivity` for structured Ticket Session events, and idempotent `stop`. `src/automode-main.ts` creates it, starts it before `coordinator.start()`, subscribes to Coordinator projection/activity events, routes browser commands to `refresh`, `interrupt`, or `setStageOperatingState`, and stops it during disposal. It does not read GitHub, Pi session files, worktrees, or the Automode Run Record directly; the Coordinator remains the owner of runtime state.
+
+```mermaid
+sequenceDiagram
+  participant M as Main Session
+  participant D as Dashboard server
+  participant C as Coordinator
+  participant T as Ticket Session
+  M->>D: start initial projection
+  M->>C: start discovery
+  C-->>M: projection and activity events
+  M->>D: publish projection or append activity
+  D-->>M: refresh drain or stage command
+  M->>C: delegate typed command
+  T-->>C: bounded structured activity
+```
+
+*The Main Session bridges Coordinator state to the browser while commands remain Coordinator-owned.*
+
+## Network and browser contract
+
+`src/dashboard.ts` binds the HTTP server to `127.0.0.1:41738` (`AUTOMODE_DASHBOARD_LOCAL_URL`). It serves the generated static assets from `src/dashboard-ui.ts`, `/api/snapshot`, and a live event stream. The server tries `tailscale serve --bg --yes` for a private `.ts.net` URL; an unavailable or invalid exposure records `exposureError` and preserves localhost-only operation. Existing Tailscale Serve configuration is rejected rather than overwritten, and disposal resets only exposure created by this dashboard. The Main Session status card always shows the exact local URL and shows the remote URL only after it has been validated as HTTPS on `.ts.net`.
+
+Requests are constrained by an allowlist of loopback and validated private tailnet hosts. Mutation endpoints require POST, an allowed `Origin`, the per-server CSRF token, and the current projection revision through `If-Match`; command bodies are strict and bounded. Security headers disable framing, caching, ambient origins, and non-self resources. Port collision therefore fails dashboard startup before Coordinator discovery or claims.
+
+## Projection, lanes, and controls
+
+`DashboardProjection` is a serialized snapshot containing repository/run identity, lane projections, totals, polling information, and process-local recent/activity state. `createDashboardProjection` maps Coordinator projection data into browser-safe candidates. Each candidate has a visible lifecycle/reason: queued, claimed, running, waiting, retrying, blocked, human-owned, or exhausted. A candidate is shown in at most one lane using the Coordinator's precedence: Auto-Triage, Auto-Grilling, Auto-Implement, then Auto-Review. The projection exposes the last successful poll and next scheduled poll; a browser refresh requests an immediate full snapshot and eligibility scan.
+
+`DashboardCommand` intentionally contains only `refresh`, `drain`, and `set-stage-state`. These control process-local Automation Stage Operating State (`ON`, `DRAINING`, `OFF`); disabling an active Stage drains it before `OFF`, and re-enabling requests a fresh eligibility scan. Operating State is not persisted in the **Automode Run Record**: restart restores the launch Automation Stage Configuration. The browser cannot force-stop individual sessions, reset retry budgets, mutate GitHub, prompt Ticket Sessions, or merge pull requests.
+
+## Activity and lifecycle boundaries
+
+`ticket-session-main.ts` converts native Pi events into bounded structured activity. The dashboard retains activity per item with explicit message, byte, per-item, and total limits; it marks truncation instead of allowing unbounded browser state. Recent candidates and activity are process-local and disappear when the Coordinator process exits. Ticket Session conversation history remains in native Pi session storage and is not imported into the Main Session.
+
+The dashboard starts before discovery, follows Coordinator lifecycle, and stops during final disposal. A port collision therefore fails startup before tracker reconciliation, snapshots, claims, or other workflow mutations. The Main Session's async disposal waits for Coordinator stop, then stops the dashboard and releases the repository lock; this ordering prevents a live Coordinator from outliving its supervision surface. First interrupt drains the Coordinator; second interrupt force-stops active Ticket Sessions. Dashboard `drain` exposes only the first graceful action and does not bypass this lifecycle. During drain, enabled lanes transition to `DRAINING` when they have active work or directly to `OFF` when idle; re-enabling is a Coordinator operation that triggers a fresh scan.
+
+## Change navigation and validation
+
+- HTTP routes, security checks, Tailscale, event streams, or command parsing: `src/dashboard.ts`; focused coverage is `test/dashboard.test.ts`.
+- Projection shape, candidate labels, browser rendering, or accessibility behavior: `src/dashboard-ui.ts`; use `test/dashboard-ui.test.ts`.
+- Startup wiring, status-card publication, command delegation, or async shutdown ordering: `src/automode-main.ts` and `src/main-status-card.ts`; pair with `test/main-session.test.ts` and `test/main-status-card.test.ts`.
+- Main Session TUI rendering or terminal interrupt behavior: `src/main-status-card.ts`; use `test/main-status-card.test.ts`.
+- Candidate precedence, lane state, totals, or Stage Operating State transitions: `src/coordinator.ts`; use the relevant suites in `test/coordinator.test.ts`.
+- Structured child-process activity: `src/ticket-session-main.ts` and `src/ticket-session.ts`; use `test/ticket-session.test.ts`.
+
+Minimal dashboard validation is `npm run build && node --test dist/test/dashboard.test.js dist/test/dashboard-ui.test.js dist/test/main-status-card.test.js`. The black-box `/automode` acceptance in `test/dashboard.test.ts` additionally requires the configured Windows PTY/real-Pi environment; run it when changing launch wiring or the shipped browser boundary. Run the broader Coordinator or package suite only when changing cross-boundary lifecycle, projection contracts, or shipped extension registration. Do not add a scheduled OpenWiki CI workflow; repository documentation refresh remains local-only via [`operations.md`](../operations.md).
+
+The dashboard supervises the [Coordinator and Ticket Sessions](coordinator.md); startup ordering and the durable run boundary remain canonical in the [architecture overview](overview.md).

@@ -615,6 +615,36 @@ test("startup dispatches one claimed Auto-Triage Ticket Session and requires fre
   await coordinator.whenStopped();
 });
 
+test("the Coordinator projection reports successful and next scheduled poll timing", async () => {
+  const clock = new ManualClock();
+  const coordinator = new AutomodeCoordinator({
+    configuration: createAutomationStageConfiguration("half", ["auto-triage"]),
+    actor: "automation-user",
+    tracker: new FakeTracker([]),
+    sessions: new FakeTicketSessions(async () => undefined),
+    clock,
+  });
+
+  await coordinator.start();
+  assert.deepEqual(coordinator.getProjection().poll, {
+    lastSuccessfulPoll: "2026-02-03T04:05:06.000Z",
+    nextScheduledPoll: "2026-02-03T04:05:36.000Z",
+  });
+
+  clock.current = new Date("2026-02-03T04:05:36.000Z");
+  await clock.callback?.();
+  assert.deepEqual(coordinator.getProjection().poll, {
+    lastSuccessfulPoll: "2026-02-03T04:05:36.000Z",
+    nextScheduledPoll: "2026-02-03T04:06:06.000Z",
+  });
+
+  coordinator.interrupt();
+  assert.deepEqual(coordinator.getProjection().poll, {
+    lastSuccessfulPoll: "2026-02-03T04:05:36.000Z",
+  });
+  await coordinator.whenStopped();
+});
+
 test("polling rescans all enabled stages only when the 30-second material snapshot changes", async () => {
   const tracker = new FakeTracker([]);
   const sessions = new FakeTicketSessions((request) => {
@@ -1204,10 +1234,18 @@ test("the first interrupt drains without retry and the second forces active Tick
 
   await coordinator.start();
   assert.equal(coordinator.interrupt(), "draining");
+  assert.equal(
+    coordinator.getProjection().lanes.find((lane) => lane.stage === "auto-implement")?.operatingState,
+    "DRAINING",
+  );
   assert.deepEqual(terminations, []);
   assert.equal(coordinator.interrupt(), "forcing");
   await coordinator.whenStopped();
 
+  assert.equal(
+    coordinator.getProjection().lanes.find((lane) => lane.stage === "auto-implement")?.operatingState,
+    "OFF",
+  );
   assert.deepEqual(terminations, [true]);
 });
 

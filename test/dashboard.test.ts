@@ -6,6 +6,10 @@ import {
   type DashboardProjection,
   type DashboardTailscaleExposure,
 } from "../src/dashboard.js";
+import {
+  launchDashboardBlackBox,
+  stripTerminalControl,
+} from "./dashboard-black-box-harness.js";
 
 interface DashboardHttpResponse {
   readonly status: number;
@@ -48,6 +52,12 @@ const unavailableTailscale: DashboardTailscaleExposure = {
   },
   async stop() {},
 };
+
+function dashboardCandidate(projection: DashboardProjection, itemKey: string) {
+  return projection.lanes
+    .flatMap((lane) => lane.candidates)
+    .find((candidate) => candidate.itemKey === itemKey);
+}
 
 function projection(id = "run-1"): DashboardProjection {
   const totals = { candidates: 0, active: 0, queued: 0, held: 0, retrying: 0, exhausted: 0 };
@@ -450,4 +460,78 @@ test("dashboard startup fails when the fixed port is occupied", async () => {
     await dashboard.stop();
     await new Promise<void>((resolve, reject) => occupant.close((error) => error ? reject(error) : resolve()));
   }
+});
+
+test("black-box /automode supervision reaches live activity and graceful drain", { timeout: 30_000 }, async () => {
+  const launched = launchDashboardBlackBox();
+  let dashboardUrl: URL | undefined;
+  let visibleOutput = "";
+  try {
+    dashboardUrl = (await launched.ready).dashboardUrl;
+    const supervise = async (renderedDashboardUrl: URL) => {
+      const deadline = Date.now() + 8_000;
+      type AcceptanceSnapshot = {
+        revision: number;
+        csrfToken: string;
+        projection: DashboardProjection;
+        activities: Array<{ message?: string }>;
+      };
+      let snapshot: AcceptanceSnapshot | undefined;
+      let lastSnapshotError: unknown;
+      while (Date.now() < deadline) {
+        try {
+          snapshot = await (await fetch(new URL("/api/snapshot", renderedDashboardUrl))).json() as AcceptanceSnapshot;
+          const candidate = dashboardCandidate(snapshot.projection, "issue:50");
+          if (
+            candidate?.status === "running"
+            && snapshot.activities.some((activity) => activity.message?.includes("live activity proof"))
+          ) break;
+        } catch (error) {
+          lastSnapshotError = error;
+        }
+        await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 75));
+      }
+      if (!snapshot) {
+        throw new Error("Dashboard never returned an acceptance snapshot", { cause: lastSnapshotError });
+      }
+      const candidate = dashboardCandidate(snapshot.projection, "issue:50");
+      assert.equal(candidate?.status, "running");
+      assert.ok(snapshot.activities.some((activity) => activity.message?.includes("live activity proof")));
+      assert.equal(snapshot.projection.run.lifecycle, "degraded");
+      assert.ok(snapshot.projection.tailscaleError);
+      assert.match(snapshot.projection.tailscaleError, /acceptance harness/);
+      const page = await fetch(renderedDashboardUrl);
+      assert.equal(page.status, 200);
+      assert.match(await page.text(), /<main id="app"/);
+      const drain = await fetch(new URL("/api/commands/drain", renderedDashboardUrl), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: renderedDashboardUrl.origin,
+          "x-automode-csrf": snapshot.csrfToken,
+          "if-match": `"${snapshot.revision}"`,
+        },
+        body: "{}",
+      });
+      assert.equal(drain.status, 204);
+    };
+    await supervise(dashboardUrl);
+    visibleOutput = (await launched.exited).visibleOutput;
+  } finally {
+    await launched.stop();
+    if (!visibleOutput) visibleOutput = stripTerminalControl(launched.output());
+  }
+
+  assert.ok(dashboardUrl, "the TUI must render an OSC-8 localhost dashboard hyperlink");
+  assert.match(visibleOutput, /AUTOMODE MAIN SESSION/);
+  assert.match(visibleOutput, /owner\/repository/);
+  assert.match(visibleOutput, new RegExp(dashboardUrl.origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(visibleOutput, /TAILSCALE ERROR/);
+  assert.match(visibleOutput, /Stages Auto-Triage (?:ON|DRAINING|OFF)/);
+  assert.match(visibleOutput, /Auto-Grilling (?:ON|DRAINING|OFF)/);
+  assert.match(visibleOutput, /Auto-Implement (?:ON|DRAINING|OFF)/);
+  assert.match(visibleOutput, /Auto-Review (?:ON|DRAINING|OFF)/);
+  assert.match(visibleOutput, /Candidates \d+ open\s+·\s+\d+ active\s+·\s+\d+ queued\s+·\s+\d+ held\s+·\s+\d+ retrying\s+·\s+\d+ exhausted/);
+  assert.match(visibleOutput, /Poll last .*·\s+next/);
+  assert.match(visibleOutput, /Ctrl-C: graceful drain/);
 });

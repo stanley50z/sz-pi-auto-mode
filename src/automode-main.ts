@@ -7,7 +7,17 @@ import { createCapabilitySession, type ProjectResourceAllowlist } from "./capabi
 import { parsePiExecutionProfile, type PiExecutionProfile } from "./capability-profile.js";
 import { AutomodeCoordinator, type CoordinatorClock } from "./coordinator.js";
 import { acquireRepositoryCoordinator } from "./coordinator-lock.js";
+import {
+  AUTOMODE_DASHBOARD_LOCAL_URL,
+  createCoordinatorDashboard,
+  type CoordinatorDashboard,
+  type CoordinatorDashboardOptions,
+  type DashboardProjection,
+  type DashboardStatus,
+} from "./dashboard.js";
+import { createDashboardProjection } from "./dashboard-ui.js";
 import { GitHubTracker } from "./github-tracker.js";
+import { createAutomodeStatusCard } from "./main-status-card.js";
 import { resolveAutomodePaths } from "./paths.js";
 import { createMainSessionRuntime } from "./session.js";
 import { AutomodeTicketSessionHost } from "./ticket-session.js";
@@ -40,6 +50,7 @@ export interface StartAutomodeMainOptions {
   };
   coordinator?: AutomodeCoordinator;
   coordinatorClock?: CoordinatorClock;
+  createDashboard?: (options: CoordinatorDashboardOptions) => CoordinatorDashboard;
 }
 
 export interface StartedAutomodeMainSession {
@@ -55,7 +66,104 @@ export interface StartedAutomodeMainSession {
   startCoordinator(): Promise<void>;
   interruptCoordinator(): "draining" | "forcing";
   runInteractive(): Promise<void>;
-  dispose(): void;
+  dispose(): Promise<void>;
+}
+
+type CoordinatorShutdownPhase = "none" | "draining" | "forcing";
+type MainSessionPhase =
+  | "prepared"
+  | "dashboard-starting"
+  | "coordinator-starting"
+  | "coordinator-running"
+  | "coordinator-stopped"
+  | "dashboard-stopped"
+  | "disposed";
+
+class MainSessionLifecycle {
+  private phase: MainSessionPhase = "prepared";
+  private shutdown: CoordinatorShutdownPhase = "none";
+
+  beginDashboardStart(): void {
+    if (this.phase !== "prepared") {
+      throw new Error(`Cannot start the Automode Dashboard while the Main Session is ${this.phase}`);
+    }
+    this.phase = "dashboard-starting";
+  }
+
+  beginCoordinatorStart(): void {
+    if (this.phase !== "dashboard-starting") {
+      throw new Error(`Cannot start the Automode Coordinator while the Main Session is ${this.phase}`);
+    }
+    this.phase = "coordinator-starting";
+  }
+
+  markCoordinatorStarted(): void {
+    if (this.phase !== "coordinator-starting") {
+      throw new Error(`Cannot finish Automode Coordinator startup while the Main Session is ${this.phase}`);
+    }
+    this.phase = "coordinator-running";
+  }
+
+  hasStartedCoordinator(): boolean {
+    return this.phase === "coordinator-running" || this.phase === "coordinator-stopped";
+  }
+
+  isWaitingForCoordinatorStart(): boolean {
+    return this.phase === "dashboard-starting";
+  }
+
+  requestCoordinatorShutdown(): Exclude<CoordinatorShutdownPhase, "none"> {
+    if (
+      this.phase !== "dashboard-starting"
+      && this.phase !== "coordinator-starting"
+      && this.phase !== "coordinator-running"
+      && this.phase !== "coordinator-stopped"
+    ) {
+      throw new Error(`Cannot stop the Automode Coordinator while the Main Session is ${this.phase}`);
+    }
+    this.shutdown = this.shutdown === "none" ? "draining" : "forcing";
+    return this.shutdown;
+  }
+
+  shutdownPhase(): CoordinatorShutdownPhase {
+    return this.shutdown;
+  }
+
+  needsCoordinatorStop(): boolean {
+    return this.phase === "coordinator-starting" || this.phase === "coordinator-running";
+  }
+
+  markCoordinatorStopped(): void {
+    if (!this.needsCoordinatorStop()) {
+      throw new Error(`Cannot finish Automode Coordinator shutdown while the Main Session is ${this.phase}`);
+    }
+    this.phase = "coordinator-stopped";
+  }
+
+  needsDashboardStop(): boolean {
+    return this.phase === "dashboard-starting"
+      || this.phase === "coordinator-starting"
+      || this.phase === "coordinator-running"
+      || this.phase === "coordinator-stopped";
+  }
+
+  markDashboardStopped(): void {
+    if (!this.needsDashboardStop()) {
+      throw new Error(`Cannot finish Automode Dashboard shutdown while the Main Session is ${this.phase}`);
+    }
+    this.phase = "dashboard-stopped";
+  }
+
+  isDisposed(): boolean {
+    return this.phase === "disposed";
+  }
+
+  markDisposed(): void {
+    if (this.phase !== "prepared" && this.phase !== "dashboard-stopped") {
+      throw new Error(`Cannot release the Main Session while it is ${this.phase}`);
+    }
+    this.phase = "disposed";
+  }
 }
 
 export const automodeRunConfigurationGuard = {
@@ -124,42 +232,6 @@ export async function startAutomodeMainSession(
     options.normalAgentDir,
   );
   const lease = acquireRepositoryCoordinator(paths.coordinatorDir);
-  let runtime;
-  let runRecordFile!: string;
-  try {
-    const attestationSession = await createCapabilitySession({
-      cwd: validated.repository,
-      defaultReviewerExecution: options.defaultReviewerExecution,
-      model: options.model,
-      home: options.home,
-      normalAgentDir: options.normalAgentDir,
-      projectResources: options.projectResources,
-      sessionName: `Automode Capability Attestation — ${lease.coordinatorId}`,
-    });
-    attestationSession.session.dispose();
-
-    runtime = await createMainSessionRuntime({
-      cwd: validated.repository,
-      skillPaths: [],
-      systemPrompt: "You are the Automode Main Session. Host the repository Coordinator and never perform Ticket Session work.",
-      model: options.model,
-      home: options.home,
-      normalAgentDir: options.normalAgentDir,
-      extensions: [automodeRunConfigurationGuard],
-    });
-    runRecordFile = persistAutomodeRunRecord(
-      paths.runRecordFile,
-      lease.coordinatorId,
-      configuration,
-      options.defaultReviewerExecution,
-      options.projectResources,
-    );
-  } catch (error) {
-    runtime?.session.dispose();
-    lease.release();
-    throw error;
-  }
-
   const coordinator = options.coordinator ?? new AutomodeCoordinator({
     configuration,
     actor: validated.actor,
@@ -182,6 +254,62 @@ export async function startAutomodeMainSession(
     }),
     clock: options.coordinatorClock,
   });
+  const repositoryDashboardIdentity = {
+    name: validated.repositorySlug,
+    url: `https://github.com/${validated.repositorySlug}`,
+  } as const;
+  let interruptCoordinator!: () => "draining" | "forcing";
+  let dashboardStatus: DashboardStatus = { localUrl: AUTOMODE_DASHBOARD_LOCAL_URL };
+  const initialDashboardProjection = createDashboardProjection({
+    repository: repositoryDashboardIdentity,
+    run: {
+      id: lease.coordinatorId,
+      mode: configuration.mode,
+      lifecycle: "loading",
+    },
+  }, coordinator.getProjection());
+  const statusCard = createAutomodeStatusCard({
+    initial: {
+      projection: initialDashboardProjection,
+      dashboard: dashboardStatus,
+    },
+    onInterrupt: () => interruptCoordinator(),
+  });
+  let runtime;
+  let runRecordFile!: string;
+  try {
+    const attestationSession = await createCapabilitySession({
+      cwd: validated.repository,
+      defaultReviewerExecution: options.defaultReviewerExecution,
+      model: options.model,
+      home: options.home,
+      normalAgentDir: options.normalAgentDir,
+      projectResources: options.projectResources,
+      sessionName: `Automode Capability Attestation — ${lease.coordinatorId}`,
+    });
+    attestationSession.session.dispose();
+
+    runtime = await createMainSessionRuntime({
+      cwd: validated.repository,
+      skillPaths: [],
+      systemPrompt: "You are the Automode Main Session. Host the repository Coordinator and never perform Ticket Session work.",
+      model: options.model,
+      home: options.home,
+      normalAgentDir: options.normalAgentDir,
+      extensions: [automodeRunConfigurationGuard, statusCard.extension],
+    });
+    runRecordFile = persistAutomodeRunRecord(
+      paths.runRecordFile,
+      lease.coordinatorId,
+      configuration,
+      options.defaultReviewerExecution,
+      options.projectResources,
+    );
+  } catch (error) {
+    runtime?.session.dispose();
+    lease.release();
+    throw error;
+  }
 
   const sessionName = `Automode Main — ${AUTOMODE_MODE_LABELS[configuration.mode]}`;
   runtime.session.setSessionName(sessionName);
@@ -189,42 +317,159 @@ export async function startAutomodeMainSession(
   runtime.session.sessionManager.appendCustomEntry("automode.coordinator", {
     coordinatorId: lease.coordinatorId,
   });
-  let disposed = false;
-  let disposeRequested = false;
-  let coordinatorStarted = false;
-  let coordinatorStopped = false;
-  let coordinatorInterrupts = 0;
+
+  let runLifecycle: DashboardProjection["run"]["lifecycle"] = "loading";
+  const dashboardProjection = (): DashboardProjection => {
+    const coordinatorProjection = coordinator.getProjection();
+    const projection = createDashboardProjection({
+      repository: repositoryDashboardIdentity,
+      run: {
+        id: lease.coordinatorId,
+        mode: configuration.mode,
+        lifecycle: runLifecycle,
+      },
+    }, coordinatorProjection);
+    return dashboardStatus.exposureError === undefined
+      ? projection
+      : { ...projection, tailscaleError: dashboardStatus.exposureError };
+  };
+
+  const lifecycle = new MainSessionLifecycle();
+  let coordinatorStartPromise: Promise<void> | undefined;
+  let unsubscribeDashboard: (() => void) | undefined;
+  const dashboardFactory = options.createDashboard
+    ? options.createDashboard
+    : createCoordinatorDashboard;
+  const dashboard = dashboardFactory({
+    onCommand: async (command) => {
+      if (command.type === "drain") {
+        if (lifecycle.shutdownPhase() === "none") interruptCoordinator();
+        return;
+      }
+      if (!lifecycle.hasStartedCoordinator()) throw new Error("Automode Coordinator has not started");
+      if (command.type === "refresh") {
+        await coordinator.refresh();
+        return;
+      }
+      await coordinator.setStageOperatingState(command.stage, command.state);
+    },
+  });
+  const publishDashboard = () => {
+    const projection = dashboardProjection();
+    dashboard.publish(projection);
+    statusCard.publish({ projection, dashboard: dashboardStatus });
+  };
+  const activeLifecycle = (): DashboardProjection["run"]["lifecycle"] => {
+    if (dashboardStatus.exposureError) return "degraded";
+    return coordinator.getProjection().totals.candidates === 0 ? "empty" : "active";
+  };
+
   const startCoordinator = async () => {
-    if (coordinatorStarted) return;
-    coordinatorStarted = true;
-    await coordinator.start();
+    if (coordinatorStartPromise) return coordinatorStartPromise;
+    coordinatorStartPromise = (async () => {
+      lifecycle.beginDashboardStart();
+      dashboardStatus = await dashboard.start(dashboardProjection());
+      unsubscribeDashboard = coordinator.subscribe((event) => {
+        if (event.type === "projection") {
+          if (runLifecycle !== "loading" && runLifecycle !== "draining") {
+            runLifecycle = activeLifecycle();
+          }
+          publishDashboard();
+        } else dashboard.appendActivity({
+          id: event.activity.id,
+          itemKey: event.activity.itemKey,
+          occurredAt: event.activity.occurredAt,
+          kind: event.activity.kind,
+          message: event.activity.message,
+          data: event.activity.data,
+        });
+      });
+      publishDashboard();
+      const pendingShutdown = lifecycle.shutdownPhase();
+      const coordinatorStarting = coordinator.start();
+      lifecycle.beginCoordinatorStart();
+      if (pendingShutdown !== "none") coordinator.interrupt();
+      if (pendingShutdown === "forcing") coordinator.interrupt();
+      if (pendingShutdown !== "none") {
+        runLifecycle = "draining";
+        publishDashboard();
+      }
+      statusCard.shutdownWhen(coordinator.whenStopped());
+      await coordinatorStarting;
+      lifecycle.markCoordinatorStarted();
+      if (pendingShutdown === "none") runLifecycle = activeLifecycle();
+      publishDashboard();
+    })();
+    return coordinatorStartPromise;
   };
-  const interruptCoordinator = () => {
-    if (!coordinatorStarted) throw new Error("Automode Coordinator has not started");
-    coordinatorInterrupts += 1;
-    return coordinator.interrupt();
+  interruptCoordinator = () => {
+    if (!coordinatorStartPromise) throw new Error("Automode Coordinator has not started");
+    const shutdown = lifecycle.requestCoordinatorShutdown();
+    if (lifecycle.isWaitingForCoordinatorStart()) {
+      if (shutdown === "draining") runLifecycle = "draining";
+      return shutdown;
+    }
+    const result = coordinator.interrupt();
+    if (result === "draining") {
+      runLifecycle = "draining";
+      publishDashboard();
+    }
+    return result;
   };
-  const finalizeDispose = () => {
-    if (disposed) return;
+
+  let disposePromise: Promise<void> | undefined;
+  const finalizeDispose = async () => {
+    if (lifecycle.needsDashboardStop()) {
+      await dashboard.stop();
+      lifecycle.markDashboardStopped();
+    }
+    if (!lifecycle.isDisposed()) {
+      unsubscribeDashboard?.();
+      try {
+        runtime.session.dispose();
+      } finally {
+        lease.release();
+        lifecycle.markDisposed();
+      }
+    }
+  };
+  const disposeOnce = async () => {
+    let startupError: unknown;
+    if (coordinatorStartPromise && lifecycle.isWaitingForCoordinatorStart()) {
+      while (lifecycle.shutdownPhase() !== "forcing") interruptCoordinator();
+    }
+    if (coordinatorStartPromise) {
+      try {
+        await coordinatorStartPromise;
+      } catch (error) {
+        startupError = error;
+      }
+    }
+    if (lifecycle.needsCoordinatorStop()) {
+      while (lifecycle.shutdownPhase() !== "forcing") interruptCoordinator();
+      await coordinator.whenStopped();
+      lifecycle.markCoordinatorStopped();
+    }
+    let cleanupError: unknown;
     try {
-      runtime.session.dispose();
-    } finally {
-      lease.release();
-      disposed = true;
+      await finalizeDispose();
+    } catch (error) {
+      cleanupError = error;
     }
+    if (startupError && cleanupError) {
+      throw new AggregateError([startupError, cleanupError], "Automode startup and disposal both failed");
+    }
+    if (startupError) throw startupError;
+    if (cleanupError) throw cleanupError;
   };
-  const dispose = () => {
-    if (disposed || disposeRequested) return;
-    disposeRequested = true;
-    if (!coordinatorStarted || coordinatorStopped) {
-      finalizeDispose();
-      return;
-    }
-    while (coordinatorInterrupts < 2) interruptCoordinator();
-    void coordinator.whenStopped().then(() => {
-      coordinatorStopped = true;
-      finalizeDispose();
+  const dispose = (): Promise<void> => {
+    if (disposePromise) return disposePromise;
+    const pending = disposeOnce().catch((error) => {
+      if (disposePromise === pending) disposePromise = undefined;
+      throw error;
     });
+    disposePromise = pending;
+    return pending;
   };
   return {
     cwd: runtime.cwd,
@@ -248,12 +493,12 @@ export async function startAutomodeMainSession(
       try {
         await startCoordinator();
         await interactiveMode.run();
-        if (coordinatorInterrupts === 0) interruptCoordinator();
+        if (lifecycle.shutdownPhase() === "none") interruptCoordinator();
         await coordinator.whenStopped();
-        coordinatorStopped = true;
+        lifecycle.markCoordinatorStopped();
       } finally {
         process.off("SIGINT", onInterrupt);
-        dispose();
+        await dispose();
       }
     },
     dispose,

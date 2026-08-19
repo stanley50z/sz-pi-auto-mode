@@ -1,6 +1,6 @@
 # Automode Dashboard interaction design
 
-Status: human-approved design for issue #38. The prototype is on branch `prototype/issue-38-coordinator-ui` under `prototypes/`.
+Status: human-approved design for issue #38, implemented through issue #50. The original prototype remains on branch `prototype/issue-38-coordinator-ui` under `prototypes/`.
 
 ## Product decision
 

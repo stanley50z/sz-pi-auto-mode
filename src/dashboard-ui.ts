@@ -101,7 +101,7 @@ export interface DashboardProjection {
 
 export interface DashboardProjectionContext {
   readonly repository: DashboardProjection["repository"];
-  readonly run: DashboardProjection["run"];
+  readonly run: Omit<DashboardProjection["run"], "lastSuccessfulPoll" | "nextPoll">;
 }
 
 export interface DashboardUiAsset {
@@ -542,6 +542,10 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
     return [...state.projection.lanes.flatMap((lane) => lane.candidates), ...state.projection.recent];
   }
 
+  function supervisionDisabled(projection) {
+    return state.pendingCommand || state.connection !== "live" || projection.stale || projection.run.lifecycle === "loading" || projection.run.lifecycle === "draining";
+  }
+
   function candidateByKey(key) {
     return allCandidates().find((candidate) => candidate.key === key);
   }
@@ -575,7 +579,7 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
     };
     const operatingState = String(laneProjection.operatingState).toLowerCase();
     const commandLabel = operatingState === "on" ? "Turn off" : operatingState === "draining" ? "Re-enable" : "Turn on";
-    const disabled = state.pendingCommand || state.connection !== "live" || projection.stale;
+    const disabled = supervisionDisabled(projection);
     return '<section class="lane" data-state="' + operatingState + '" aria-labelledby="lane-' + stage + '">' +
       '<header class="lane-header"><div class="lane-title-row">' +
       '<h3 class="lane-title" id="lane-' + stage + '">' + STAGE_LABELS[stage] + "</h3>" +
@@ -620,7 +624,7 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
     const connecting = state.connection === "connecting";
     const selected = state.selectedKey ? candidateByKey(state.selectedKey) : undefined;
     if (state.selectedKey && !selected) state.selectedKey = null;
-    const disabled = state.pendingCommand || state.connection !== "live" || projection.stale;
+    const disabled = supervisionDisabled(projection);
     const exposureError = state.network.exposureError || projection.tailscaleError;
     const exposureSeparator = exposureError && /[.!?]$/.test(exposureError.trim()) ? " " : ". ";
     const banners = [
@@ -936,7 +940,15 @@ export function createDashboardProjection(
   return {
     version: 1,
     repository: { ...context.repository },
-    run: { ...context.run },
+    run: {
+      ...context.run,
+      ...(coordinator.poll.lastSuccessfulPoll === undefined
+        ? {}
+        : { lastSuccessfulPoll: coordinator.poll.lastSuccessfulPoll }),
+      ...(coordinator.poll.nextScheduledPoll === undefined
+        ? {}
+        : { nextPoll: coordinator.poll.nextScheduledPoll }),
+    },
     totals: { ...coordinator.totals },
     lanes: coordinator.lanes.map((lane) => ({
       stage: lane.stage,
