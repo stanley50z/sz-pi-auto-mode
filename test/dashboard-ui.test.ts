@@ -62,6 +62,10 @@ test("Coordinator Stage Candidates map to the browser projection without tracker
       totals: { candidates: 0, active: 0, queued: 0, held: 0, retrying: 0, exhausted: 0 },
     }],
     totals: { candidates: 1, active: 0, queued: 1, held: 0, retrying: 0, exhausted: 0 },
+    poll: {
+      lastSuccessfulPoll: "2026-08-17T12:00:00.000Z",
+      nextScheduledPoll: "2026-08-17T12:00:30.000Z",
+    },
     recent: [{
       item: { kind: "pull-request", number: 61, url: "https://github.com/example/repository/pull/61" },
       title: "Harden tracker snapshot parsing",
@@ -84,6 +88,13 @@ test("Coordinator Stage Candidates map to the browser projection without tracker
   });
 
   assert.equal(projection.version, 1);
+  assert.deepEqual(projection.run, {
+    id: "run-45",
+    mode: "full",
+    lifecycle: "active",
+    lastSuccessfulPoll: "2026-08-17T12:00:00.000Z",
+    nextPoll: "2026-08-17T12:00:30.000Z",
+  });
   assert.deepEqual(projection.lanes[0]?.candidates[0], {
     key: "issue:68:auto-triage",
     itemKey: "issue:68",

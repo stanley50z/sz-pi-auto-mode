@@ -204,6 +204,10 @@ export interface CoordinatorProjection {
   readonly lanes: readonly StageLaneProjection[];
   readonly totals: StageCandidateTotals;
   readonly recent: readonly RecentStageCandidateProjection[];
+  readonly poll: {
+    readonly lastSuccessfulPoll?: string;
+    readonly nextScheduledPoll?: string;
+  };
 }
 
 export interface CoordinatorActivity {
@@ -264,6 +268,7 @@ export interface AutomodeCoordinatorOptions {
 
 const STATE_LABELS = new Set(["needs-triage", "needs-info", "ready-for-agent", "ready-for-human", "wontfix"]);
 const MAX_ATTEMPTS = 5;
+const POLL_INTERVAL_MS = 30_000;
 
 function hasConflictingTriageState(item: WorkflowItem): boolean {
   return item.labels.some((label) => STATE_LABELS.has(label) && label !== "needs-triage");
@@ -392,6 +397,8 @@ export class AutomodeCoordinator {
   private activitySequence = 0;
   private poller: { dispose(): void } | undefined;
   private lastSnapshotRevision: string | undefined;
+  private lastSuccessfulPoll: string | undefined;
+  private nextScheduledPoll: string | undefined;
   private started = false;
   private draining = false;
   private forcing = false;
@@ -587,6 +594,10 @@ export class AutomodeCoordinator {
       lanes,
       totals: candidateTotals(lanes.flatMap((lane) => lane.candidates)),
       recent: [...this.settledThisProcess.values()],
+      poll: {
+        ...(this.lastSuccessfulPoll === undefined ? {} : { lastSuccessfulPoll: this.lastSuccessfulPoll }),
+        ...(this.nextScheduledPoll === undefined ? {} : { nextScheduledPoll: this.nextScheduledPoll }),
+      },
     };
   }
 
@@ -656,6 +667,10 @@ export class AutomodeCoordinator {
     this.emitSupervision({ type: "projection", projection: this.projection });
   }
 
+  private scheduleNextPoll(): void {
+    this.nextScheduledPoll = new Date(this.clock.now().getTime() + POLL_INTERVAL_MS).toISOString();
+  }
+
   private updateActive(
     item: Pick<WorkflowItem, "kind" | "number">,
     update: Partial<Pick<ActiveStageCandidate, "status" | "reason" | "attempt" | "handle" | "workspace">>,
@@ -672,7 +687,10 @@ export class AutomodeCoordinator {
     await this.reconcile();
     await this.scan(true);
     if (!this.draining) {
-      this.poller = this.clock.every(30_000, async () => {
+      this.scheduleNextPoll();
+      this.refreshProjection();
+      this.poller = this.clock.every(POLL_INTERVAL_MS, async () => {
+        this.scheduleNextPoll();
         try {
           await this.scan(false);
         } catch (error) {
@@ -745,7 +763,11 @@ export class AutomodeCoordinator {
   private async scan(initial: boolean): Promise<void> {
     if (this.draining) return;
     const snapshot = await this.options.tracker.snapshot();
-    if (!initial && snapshot.revision === this.lastSnapshotRevision) return;
+    this.lastSuccessfulPoll = this.clock.now().toISOString();
+    if (!initial && snapshot.revision === this.lastSnapshotRevision) {
+      this.refreshProjection();
+      return;
+    }
     this.lastSnapshotRevision = snapshot.revision;
     this.replaceSnapshot(snapshot.items);
     this.refreshProjection();
@@ -1102,6 +1124,12 @@ export class AutomodeCoordinator {
     throw new Error(`Automode Coordinator polling failed: ${errorMessage(error)}`, { cause: error });
   }
 
+  /** Requests an immediate full tracker snapshot and eligibility scan. */
+  async refresh(): Promise<void> {
+    if (!this.started) throw new Error("Automode Coordinator has not started");
+    await this.scan(true);
+  }
+
   async waitForIdle(): Promise<void> {
     while (this.active.size > 0) {
       await Promise.allSettled([...this.active.values()].map(({ promise }) => promise));
@@ -1113,6 +1141,14 @@ export class AutomodeCoordinator {
       this.draining = true;
       this.poller?.dispose();
       this.poller = undefined;
+      this.nextScheduledPoll = undefined;
+      for (const stage of AUTOMATION_STAGES) {
+        if (this.operatingStates[stage] !== "ON") continue;
+        this.operatingStates[stage] = [...this.active.values()].some((candidate) => candidate.stage === stage)
+          ? "DRAINING"
+          : "OFF";
+      }
+      this.refreshProjection();
       this.finishDrainIfIdle();
       return "draining";
     }

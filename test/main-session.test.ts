@@ -10,6 +10,10 @@ import {
   startAutomodeMainSession,
   type StartAutomodeMainOptions,
 } from "../src/automode-main.js";
+import {
+  AutomodeCoordinator,
+} from "../src/coordinator.js";
+import type { CoordinatorDashboardOptions, DashboardProjection } from "../src/dashboard.js";
 import { resolveAutomodePaths } from "../src/paths.js";
 import {
   confirmSerializedAutomationStageConfiguration,
@@ -59,6 +63,25 @@ function confirmedConfiguration(
     serializedConfiguration,
     configurationConfirmation: confirmSerializedAutomationStageConfiguration(serializedConfiguration),
   };
+}
+
+function createIdleCoordinator(
+  configuration: ReturnType<typeof createAutomationStageConfiguration>,
+  events?: string[],
+): AutomodeCoordinator {
+  const record = (event: string) => { events?.push(event); };
+  return new AutomodeCoordinator({
+    configuration,
+    actor: "automation-user",
+    tracker: {
+      async listBookkeeping() { record("list-bookkeeping"); return []; },
+      async snapshot() { record("snapshot"); return { revision: "empty", items: [] }; },
+      async read() { throw new Error("No tracker item exists"); },
+      async claim() { throw new Error("No tracker item exists"); },
+      async upsertBookkeeping() { throw new Error("No bookkeeping write is expected"); },
+    },
+    sessions: { async start() { throw new Error("No Ticket Session is expected"); } },
+  });
 }
 
 test("the Automode Run guard cancels Main Session replacement and forking", async () => {
@@ -121,6 +144,170 @@ test("a fresh Main Session separates process-local operating state from the dura
   } finally {
     main.dispose();
   }
+  assert.equal(existsSync(main.coordinatorLockFile), false);
+});
+
+test("Ctrl-C during dashboard startup queues a drain before Coordinator discovery", async () => {
+  const fixture = mkdtempSync(join(tmpdir(), "automode-dashboard-interrupt-"));
+  const repository = join(fixture, "repository");
+  const home = join(fixture, "home");
+  mkdirSync(join(repository, ".git"), { recursive: true });
+  const configuration = createAutomationStageConfiguration("half", ["auto-triage"]);
+  const trackerCalls: string[] = [];
+  const coordinator = createIdleCoordinator(configuration, trackerCalls);
+  let releaseDashboard!: () => void;
+  const dashboardReady = new Promise<void>((resolve) => { releaseDashboard = resolve; });
+  const main = await startForTest({
+    repository,
+    home,
+    ...confirmedConfiguration("half", ["auto-triage"]),
+    coordinator,
+    createDashboard() {
+      return {
+        async start() {
+          await dashboardReady;
+          return { localUrl: "http://127.0.0.1:41738" };
+        },
+        publish() {},
+        appendActivity() {},
+        async stop() {},
+      };
+    },
+  });
+
+  const starting = main.startCoordinator();
+  assert.equal(main.interruptCoordinator(), "draining");
+  const disposing = main.dispose();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(existsSync(main.coordinatorLockFile), true);
+  releaseDashboard();
+  await starting;
+  await coordinator.whenStopped();
+  await disposing;
+  assert.deepEqual(trackerCalls, ["list-bookkeeping"]);
+  assert.equal(existsSync(main.coordinatorLockFile), false);
+});
+
+test("the dashboard starts before Coordinator discovery and stops after the drain", async () => {
+  const fixture = mkdtempSync(join(tmpdir(), "automode-dashboard-main-"));
+  const repository = join(fixture, "repository");
+  const home = join(fixture, "home");
+  mkdirSync(join(repository, ".git"), { recursive: true });
+  const configuration = createAutomationStageConfiguration("half", ["auto-triage"]);
+  const events: string[] = [];
+  const published: DashboardProjection[] = [];
+  let dashboardOptions: CoordinatorDashboardOptions | undefined;
+  const coordinator = createIdleCoordinator(configuration, events);
+  const main = await startForTest({
+    repository,
+    home,
+    ...confirmedConfiguration("half", ["auto-triage"]),
+    coordinator,
+    createDashboard(options) {
+      dashboardOptions = options;
+      return {
+        async start(initialProjection) {
+          events.push("dashboard-start");
+          published.push(initialProjection);
+          return {
+            localUrl: "http://127.0.0.1:41738",
+            exposureError: "tailscale unavailable",
+          };
+        },
+        publish(projection) { published.push(projection); },
+        appendActivity() {},
+        async stop() { events.push("dashboard-stop"); },
+      };
+    },
+  });
+
+  await main.startCoordinator();
+  assert.deepEqual(events.slice(0, 3), ["dashboard-start", "list-bookkeeping", "snapshot"]);
+  assert.ok(dashboardOptions);
+  assert.equal(published[0]?.run.lifecycle, "loading");
+  assert.equal(published.at(-1)?.run.lifecycle, "degraded");
+  assert.equal(published.at(-1)?.tailscaleError, "tailscale unavailable");
+
+  await dashboardOptions.onCommand({ type: "refresh" });
+  assert.equal(events.filter((event) => event === "snapshot").length, 2);
+  await dashboardOptions.onCommand({
+    type: "set-stage-state",
+    stage: "auto-triage",
+    state: "OFF",
+  });
+  assert.equal(
+    published.at(-1)?.lanes.find((lane) => lane.stage === "auto-triage")?.operatingState,
+    "OFF",
+  );
+  await dashboardOptions.onCommand({ type: "drain" });
+  await dashboardOptions.onCommand({ type: "drain" });
+  assert.equal(published.at(-1)?.run.lifecycle, "draining");
+  await coordinator.whenStopped();
+  assert.equal(main.interruptCoordinator(), "forcing");
+  await main.dispose();
+  assert.equal(events.at(-1), "dashboard-stop");
+});
+
+test("dashboard cleanup failure retains the Coordinator lock until a successful retry", async () => {
+  const fixture = mkdtempSync(join(tmpdir(), "automode-dashboard-cleanup-"));
+  const repository = join(fixture, "repository");
+  const home = join(fixture, "home");
+  mkdirSync(join(repository, ".git"), { recursive: true });
+  const configuration = createAutomationStageConfiguration("half", ["auto-triage"]);
+  const coordinator = createIdleCoordinator(configuration);
+  let stopCalls = 0;
+  const main = await startForTest({
+    repository,
+    home,
+    ...confirmedConfiguration("half", ["auto-triage"]),
+    coordinator,
+    createDashboard() {
+      return {
+        async start() { return { localUrl: "http://127.0.0.1:41738" }; },
+        publish() {},
+        appendActivity() {},
+        async stop() {
+          stopCalls += 1;
+          if (stopCalls === 1) throw new Error("Tailscale cleanup failed");
+        },
+      };
+    },
+  });
+
+  await main.startCoordinator();
+  main.interruptCoordinator();
+  await coordinator.whenStopped();
+  await assert.rejects(() => main.dispose(), /Tailscale cleanup failed/);
+  assert.equal(existsSync(main.coordinatorLockFile), true);
+  await main.dispose();
+  assert.equal(stopCalls, 2);
+  assert.equal(existsSync(main.coordinatorLockFile), false);
+});
+
+test("dashboard startup failure cleans up its attempt without leaking the Coordinator lock", async () => {
+  const fixture = mkdtempSync(join(tmpdir(), "automode-dashboard-startup-failure-"));
+  const repository = join(fixture, "repository");
+  const home = join(fixture, "home");
+  mkdirSync(join(repository, ".git"), { recursive: true });
+  let stopCalls = 0;
+  const main = await startForTest({
+    repository,
+    home,
+    ...confirmedConfiguration("half", ["auto-triage"]),
+    createDashboard() {
+      return {
+        async start() { throw new Error("Dashboard port unavailable"); },
+        publish() {},
+        appendActivity() {},
+        async stop() { stopCalls += 1; },
+      };
+    },
+  });
+
+  await assert.rejects(() => main.startCoordinator(), /Dashboard port unavailable/);
+  assert.equal(existsSync(main.coordinatorLockFile), true);
+  await assert.rejects(() => main.dispose(), /Dashboard port unavailable/);
+  assert.equal(stopCalls, 1);
   assert.equal(existsSync(main.coordinatorLockFile), false);
 });
 
