@@ -462,6 +462,22 @@ test("dashboard startup fails when the fixed port is occupied", async () => {
   }
 });
 
+test("black-box /exit force-stops active Ticket Sessions and exits", { timeout: 20_000 }, async () => {
+  const launched = launchDashboardBlackBox({
+    completionDelayMilliseconds: 60_000,
+    timeoutMilliseconds: 15_000,
+  });
+  try {
+    await launched.ready;
+    launched.submitCommand("/exit");
+    const result = await launched.exited;
+    assert.equal(result.exitCode, 0);
+    assert.match(result.visibleOutput, /\/exit: force-stop active Ticket Sessions, then exit/);
+  } finally {
+    await launched.stop();
+  }
+});
+
 test("black-box /automode supervision reaches live activity and graceful drain", { timeout: 30_000 }, async () => {
   const launched = launchDashboardBlackBox();
   let dashboardUrl: URL | undefined;
@@ -533,5 +549,6 @@ test("black-box /automode supervision reaches live activity and graceful drain",
   assert.match(visibleOutput, /Auto-Review (?:ON|DRAINING|OFF)/);
   assert.match(visibleOutput, /Candidates \d+ open\s+·\s+\d+ active\s+·\s+\d+ queued\s+·\s+\d+ held\s+·\s+\d+ retrying\s+·\s+\d+ exhausted/);
   assert.match(visibleOutput, /Poll last .*·\s+next/);
-  assert.match(visibleOutput, /Ctrl-C: graceful drain/);
+  assert.match(visibleOutput, /\/drain: graceful drain/);
+  assert.match(visibleOutput, /\/exit: force-stop active Ticket Sessions, then exit/);
 });

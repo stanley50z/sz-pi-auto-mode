@@ -9,13 +9,13 @@ openwiki:
   source_paths: [src/coordinator.ts, src/automode-main.ts, src/ticket-session.ts, src/github-tracker.ts, src/workspace.ts]
   symbols: [AutomodeCoordinator, AutomodeTicketSessionHost, GitHubTracker, WorkspaceManager]
   test_paths: [test/coordinator.test.ts, test/ticket-session.test.ts, test/ticket-session-result.test.ts, test/github-tracker.test.ts, test/workspace.test.ts]
-  invariants: [Coordinator reconciles all bookkeeping states before scanning., Snapshot revisions include updated_at changes., Fifth-attempt exhaustion preserves diagnostics until material tracker change., Cross-home or incompatible sessions are replaceable recovery artifacts., Review cleanup requires merged proof and fork heads fail fast without a writable remote., First interrupt drains and second interrupt forces while the Coordinator lock remains held until stop.]
+  invariants: [Coordinator reconciles all bookkeeping states before scanning., Snapshot revisions include updated_at changes., Fifth-attempt exhaustion preserves diagnostics until material tracker change., Cross-home or incompatible sessions are replaceable recovery artifacts., Review cleanup requires merged proof and fork heads fail fast without a writable remote., The Coordinator lock remains held until stop.]
   validation_commands: [npm run build, "node --test dist/test/coordinator.test.js dist/test/ticket-session.test.js dist/test/github-tracker.test.js dist/test/workspace.test.js"]
 ---
 
 # Automode Coordinator and Ticket Sessions
 
-The Main Session hosts `AutomodeCoordinator`; it is no longer only a startup boundary. `startAutomodeMainSession` wires the Coordinator to `GitHubTracker`, `AutomodeTicketSessionHost`, and `WorkspaceManager`, then exposes explicit start, interrupt, and disposal hooks. The Coordinator owns discovery and dispatch, while a Ticket Session performs the selected skill work in a child process. The Main Session publishes the Coordinator's projection and activity to the [Coordinator dashboard and Stage Lanes](dashboard.md), which delegates supervisory commands back to this Coordinator rather than performing work itself.
+The Main Session hosts `AutomodeCoordinator`; it is no longer only a startup boundary. `startAutomodeMainSession` wires the Coordinator to `GitHubTracker`, `AutomodeTicketSessionHost`, and `WorkspaceManager`, then uses the existing internal two-phase shutdown lifecycle while the Main Session maps `/drain` and `/exit` onto that boundary. The Coordinator owns discovery and dispatch, while a Ticket Session performs the selected skill work in a child process. The Main Session publishes the Coordinator's projection and activity to the [Coordinator dashboard and Stage Lanes](dashboard.md), which delegates supervisory commands back to this Coordinator rather than performing work itself.
 
 ## Reconciliation and dispatch
 

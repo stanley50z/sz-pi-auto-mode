@@ -147,7 +147,7 @@ test("a fresh Main Session separates process-local operating state from the dura
   assert.equal(existsSync(main.coordinatorLockFile), false);
 });
 
-test("Ctrl-C during dashboard startup queues a drain before Coordinator discovery", async () => {
+test("a graceful drain during dashboard startup stops Coordinator discovery", async () => {
   const fixture = mkdtempSync(join(tmpdir(), "automode-dashboard-interrupt-"));
   const repository = join(fixture, "repository");
   const home = join(fixture, "home");

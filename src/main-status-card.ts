@@ -1,5 +1,5 @@
 import type { InlineExtension, Theme } from "@earendil-works/pi-coding-agent";
-import { hyperlink, Key, matchesKey, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { hyperlink, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { DashboardProjection, DashboardStatus } from "./dashboard.js";
 import {
   AUTOMATION_STAGES,
@@ -19,7 +19,8 @@ export interface AutomodeStatusCard {
 
 export interface CreateAutomodeStatusCardOptions {
   readonly initial: AutomodeStatusCardSnapshot;
-  readonly onInterrupt: () => "draining" | "forcing";
+  readonly onDrain: () => void;
+  readonly onExit: () => void;
 }
 
 function pollTime(value: string | undefined): string {
@@ -59,7 +60,7 @@ function renderStatusCard(
     `${theme.fg("muted", "Stages")} ${stageSummary}`,
     `${theme.fg("muted", "Candidates")} ${totals.candidates} open  ·  ${totals.active} active  ·  ${totals.queued} queued  ·  ${totals.held} held  ·  ${totals.retrying} retrying  ·  ${totals.exhausted} exhausted`,
     `${theme.fg("muted", "Poll")} last ${pollTime(projection.run.lastSuccessfulPoll)}  ·  next ${pollTime(projection.run.nextPoll)}`,
-    theme.fg("warning", "Ctrl-C: graceful drain  ·  Ctrl-C again: force-stop active Ticket Sessions (Main Session only)"),
+    theme.fg("warning", "/drain: graceful drain  ·  /exit: force-stop active Ticket Sessions, then exit"),
   ];
   if (dashboard.exposureError) {
     lines.splice(4, 0, theme.fg(
@@ -88,6 +89,14 @@ export function createAutomodeStatusCard(
   const extension = {
     name: "automode-main-status-card",
     factory: (pi) => {
+      pi.registerCommand("drain", {
+        description: "Gracefully drain Automode, then exit",
+        handler: async () => { options.onDrain(); },
+      });
+      pi.registerCommand("exit", {
+        description: "Force-stop active Automode Ticket Sessions, then exit",
+        handler: async () => { options.onExit(); },
+      });
       pi.on("session_start", (_event, ctx) => {
         if (ctx.mode !== "tui") return;
         requestShutdown = () => ctx.shutdown();
@@ -101,11 +110,6 @@ export function createAutomodeStatusCard(
               requestRender = undefined;
             },
           };
-        });
-        ctx.ui.onTerminalInput((data) => {
-          if (!matchesKey(data, Key.ctrl("c"))) return undefined;
-          options.onInterrupt();
-          return { consume: true };
         });
       });
     },

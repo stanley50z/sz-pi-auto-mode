@@ -23,6 +23,7 @@ export interface DashboardBlackBoxRun {
   readonly ready: Promise<DashboardBlackBoxReady>;
   readonly exited: Promise<DashboardBlackBoxExit>;
   output(): string;
+  submitCommand(command: string): void;
   stop(): Promise<void>;
 }
 
@@ -224,6 +225,9 @@ export default function (pi) {
     ready: ready.promise,
     exited: exited.promise,
     output: () => output,
+    submitCommand(command) {
+      terminal.write(`${command}\r`);
+    },
     async stop() {
       if (!exitSettled) {
         try { terminal.kill(); } catch {}

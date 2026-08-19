@@ -259,6 +259,8 @@ export async function startAutomodeMainSession(
     url: `https://github.com/${validated.repositorySlug}`,
   } as const;
   let interruptCoordinator!: () => "draining" | "forcing";
+  let requestDrain!: () => void;
+  let requestForceStop!: () => void;
   let dashboardStatus: DashboardStatus = { localUrl: AUTOMODE_DASHBOARD_LOCAL_URL };
   const initialDashboardProjection = createDashboardProjection({
     repository: repositoryDashboardIdentity,
@@ -273,7 +275,8 @@ export async function startAutomodeMainSession(
       projection: initialDashboardProjection,
       dashboard: dashboardStatus,
     },
-    onInterrupt: () => interruptCoordinator(),
+    onDrain: () => requestDrain(),
+    onExit: () => requestForceStop(),
   });
   let runtime;
   let runRecordFile!: string;
@@ -416,6 +419,13 @@ export async function startAutomodeMainSession(
     }
     return result;
   };
+  requestDrain = () => {
+    if (lifecycle.shutdownPhase() === "none") interruptCoordinator();
+  };
+  requestForceStop = () => {
+    requestDrain();
+    if (lifecycle.shutdownPhase() !== "forcing") interruptCoordinator();
+  };
 
   let disposePromise: Promise<void> | undefined;
   const finalizeDispose = async () => {
@@ -488,16 +498,13 @@ export async function startAutomodeMainSession(
         initialMessages: [],
         verbose: false,
       });
-      const onInterrupt = () => { interruptCoordinator(); };
-      process.on("SIGINT", onInterrupt);
       try {
         await startCoordinator();
         await interactiveMode.run();
-        if (lifecycle.shutdownPhase() === "none") interruptCoordinator();
+        requestForceStop();
         await coordinator.whenStopped();
         lifecycle.markCoordinatorStopped();
       } finally {
-        process.off("SIGINT", onInterrupt);
         await dispose();
       }
     },

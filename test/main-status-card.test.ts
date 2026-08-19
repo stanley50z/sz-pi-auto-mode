@@ -35,21 +35,22 @@ function snapshot(lifecycle: AutomodeStatusCardSnapshot["projection"]["run"]["li
   };
 }
 
-test("the Main Session status card reacts to projection changes and owns two-step Ctrl-C", async () => {
+test("the Main Session status card reacts to projection changes and exposes /drain", async () => {
   let sessionStart: ((event: unknown, ctx: ExtensionContext) => void) | undefined;
+  const commands = new Map<string, (args: string, ctx: ExtensionContext) => void | Promise<void>>();
   const pi = {
     on(event: string, handler: (event: unknown, ctx: ExtensionContext) => void) {
       if (event === "session_start") sessionStart = handler;
     },
+    registerCommand(name: string, options: { handler(args: string, ctx: ExtensionContext): void | Promise<void> }) {
+      commands.set(name, options.handler);
+    },
   } as unknown as ExtensionAPI;
-  const interrupts: string[] = [];
+  let drains = 0;
   const card = createAutomodeStatusCard({
     initial: snapshot("loading"),
-    onInterrupt() {
-      const result = interrupts.length === 0 ? "draining" : "forcing";
-      interrupts.push(result);
-      return result;
-    },
+    onDrain() { drains += 1; },
+    onExit() {},
   });
   assert.equal(typeof card.extension, "object");
   if (typeof card.extension === "function") throw new Error("Expected the named status-card extension");
@@ -57,20 +58,20 @@ test("the Main Session status card reacts to projection changes and owns two-ste
   assert.ok(sessionStart);
 
   let widgetFactory: ((tui: { requestRender(): void }, theme: unknown) => { render(width: number): string[] }) | undefined;
-  let terminalInput: ((data: string) => { consume?: boolean } | undefined) | undefined;
+  let terminalCaptureCalls = 0;
   let shutdowns = 0;
   const ctx = {
     mode: "tui",
     hasUI: true,
     ui: {
       setWidget(_key: string, factory: typeof widgetFactory) { widgetFactory = factory; },
-      onTerminalInput(handler: typeof terminalInput) { terminalInput = handler; return () => undefined; },
+      onTerminalInput() { terminalCaptureCalls += 1; return () => undefined; },
     },
     shutdown() { shutdowns += 1; },
   } as unknown as ExtensionContext;
   sessionStart!({}, ctx);
   assert.ok(widgetFactory);
-  assert.ok(terminalInput);
+  assert.equal(terminalCaptureCalls, 0, "Automode must leave Ctrl-C and all terminal input to Pi");
 
   let renders = 0;
   const component = widgetFactory!({ requestRender() { renders += 1; } }, {
@@ -80,15 +81,57 @@ test("the Main Session status card reacts to projection changes and owns two-ste
   const rendered = component.render(200).join("\n");
   assert.match(rendered, /\u001b]8;;http:\/\/127\.0\.0\.1:41738/);
   assert.match(rendered, /\u001b]8;;https:\/\/automode\.example\.ts\.net/);
+  assert.match(rendered, /\/drain: graceful drain/);
+  assert.match(rendered, /\/exit: force-stop active Ticket Sessions, then exit/);
   card.publish(snapshot("active"));
   assert.equal(renders, 1);
 
-  assert.equal(terminalInput!("x"), undefined);
-  assert.deepEqual(terminalInput!("\u0003"), { consume: true });
-  assert.deepEqual(terminalInput!("\u0003"), { consume: true });
-  assert.deepEqual(interrupts, ["draining", "forcing"]);
+  assert.ok(commands.has("drain"));
+  await commands.get("drain")!("", ctx);
+  assert.equal(drains, 1);
 
   card.shutdownWhen(Promise.resolve());
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(shutdowns, 1);
+});
+
+test("/exit force-stops active Ticket Sessions before exiting the Main Session", async () => {
+  let sessionStart: ((event: unknown, ctx: ExtensionContext) => void) | undefined;
+  const commands = new Map<string, (args: string, ctx: ExtensionContext) => void | Promise<void>>();
+  const pi = {
+    on(event: string, handler: (event: unknown, ctx: ExtensionContext) => void) {
+      if (event === "session_start") sessionStart = handler;
+    },
+    registerCommand(name: string, options: { handler(args: string, ctx: ExtensionContext): void | Promise<void> }) {
+      commands.set(name, options.handler);
+    },
+  } as unknown as ExtensionAPI;
+  let forceStops = 0;
+  let releaseCoordinator!: () => void;
+  const coordinatorStopped = new Promise<void>((resolve) => { releaseCoordinator = resolve; });
+  const card = createAutomodeStatusCard({
+    initial: snapshot("active"),
+    onDrain() {},
+    onExit() { forceStops += 1; },
+  });
+  if (typeof card.extension === "function") throw new Error("Expected the named status-card extension");
+  await card.extension.factory(pi);
+  let shutdowns = 0;
+  const ctx = {
+    mode: "tui",
+    hasUI: true,
+    ui: { setWidget() {} },
+    shutdown() { shutdowns += 1; },
+  } as unknown as ExtensionContext;
+  sessionStart!({}, ctx);
+  card.shutdownWhen(coordinatorStopped);
+
+  assert.ok(commands.has("exit"));
+  await commands.get("exit")!("", ctx);
+  assert.equal(forceStops, 1);
+  assert.equal(shutdowns, 0);
+
+  releaseCoordinator();
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(shutdowns, 1);
 });
