@@ -75,28 +75,34 @@ const defaultDependencies: AutomodeBridgeDependencies = {
   launch: launchAutomode,
 };
 
+export async function runAutomodeCommand(
+  _args: string,
+  ctx: ExtensionCommandContext,
+  dependencies: AutomodeBridgeDependencies = defaultDependencies,
+): Promise<void> {
+  await ctx.waitForIdle();
+  const configuration = await dependencies.selectConfiguration(ctx);
+  if (configuration === null) return;
+  if (!ctx.model) throw new Error("/automode requires an active Pi model for the default Reviewer seat");
+  await dependencies.launch({
+    cwd: repositoryRoot(ctx.cwd),
+    serializedConfiguration: serializeAutomationStageConfiguration(configuration),
+    defaultReviewerExecution: {
+      harness: "pi",
+      provider: ctx.model.provider,
+      model: ctx.model.id,
+      reasoning: "high",
+    },
+    piPackageDir: launchingPiPackageDir(),
+  });
+}
+
 export default function automodeBridge(
   pi: ExtensionAPI,
   dependencies: AutomodeBridgeDependencies = defaultDependencies,
 ): void {
   pi.registerCommand("automode", {
     description: "Leave normal Pi and launch Automode in this repository",
-    handler: async (_args, ctx) => {
-      await ctx.waitForIdle();
-      const configuration = await dependencies.selectConfiguration(ctx);
-      if (configuration === null) return;
-      if (!ctx.model) throw new Error("/automode requires an active Pi model for the default Reviewer seat");
-      await dependencies.launch({
-        cwd: repositoryRoot(ctx.cwd),
-        serializedConfiguration: serializeAutomationStageConfiguration(configuration),
-        defaultReviewerExecution: {
-          harness: "pi",
-          provider: ctx.model.provider,
-          model: ctx.model.id,
-          reasoning: "high",
-        },
-        piPackageDir: launchingPiPackageDir(),
-      });
-    },
+    handler: (args, ctx) => runAutomodeCommand(args, ctx, dependencies),
   });
 }

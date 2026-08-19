@@ -8,7 +8,7 @@
   ],
   "pi": {
     "extensions": [
-      "./dist/src/bridge.js"
+      "./dist/src/bridge-entry.js"
     ]
   },
   "engines": {
