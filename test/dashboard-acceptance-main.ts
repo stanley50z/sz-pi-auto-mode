@@ -23,6 +23,16 @@ function completionDelayMilliseconds(): number {
   return milliseconds;
 }
 
+function drainCompletionDelayMilliseconds(): number | undefined {
+  const configured = process.env.AUTOMODE_DASHBOARD_ACCEPTANCE_DRAIN_DELAY_MS;
+  if (configured === undefined) return undefined;
+  const milliseconds = Number(configured);
+  if (!Number.isInteger(milliseconds) || milliseconds < 1) {
+    throw new Error("AUTOMODE_DASHBOARD_ACCEPTANCE_DRAIN_DELAY_MS must be a positive integer");
+  }
+  return milliseconds;
+}
+
 async function main(): Promise<void> {
   const repository = process.argv[2];
   if (!repository) throw new Error("Missing caller repository path");
@@ -37,6 +47,7 @@ async function main(): Promise<void> {
     serializedConfiguration,
     configurationConfirmation,
   );
+  const drainCompletionDelay = drainCompletionDelayMilliseconds();
   const item: WorkflowItem = {
     kind: "issue",
     number: 50,
@@ -56,6 +67,8 @@ async function main(): Promise<void> {
     async claim(_candidate, actor) { item.assignees = [actor]; },
     async upsertBookkeeping() {},
   };
+  let settleSession: (() => void) | undefined;
+  let drainSettlementTimer: NodeJS.Timeout | undefined;
   const sessions: TicketSessionHost = {
     async start() {
       let activityListener: ((activity: {
@@ -64,12 +77,20 @@ async function main(): Promise<void> {
         message: string;
         toolName: string;
       }) => void) | undefined;
+      let completionTimer: NodeJS.Timeout | undefined;
       const completion = new Promise<{ status: "clean" }>((resolveCompletion) => {
-        setTimeout(() => {
+        let settled = false;
+        settleSession = () => {
+          if (settled) return;
+          settled = true;
+          if (completionTimer) clearTimeout(completionTimer);
           item.outputPullRequest = "https://github.com/owner/repository/pull/51";
           item.materialVersion = "issue-50-delivered";
           resolveCompletion({ status: "clean" });
-        }, completionDelayMilliseconds());
+        };
+        if (drainCompletionDelay === undefined) {
+          completionTimer = setTimeout(settleSession, completionDelayMilliseconds());
+        }
       });
       setTimeout(() => {
         activityListener?.({
@@ -88,7 +109,13 @@ async function main(): Promise<void> {
           activityListener = listener;
           return () => { activityListener = undefined; };
         },
-        async terminate() {},
+        async terminate() {
+          if (drainSettlementTimer) {
+            clearTimeout(drainSettlementTimer);
+            drainSettlementTimer = undefined;
+          }
+          settleSession?.();
+        },
       };
     },
   };
@@ -116,6 +143,12 @@ async function main(): Promise<void> {
     createDashboard(options) {
       return createCoordinatorDashboard({
         ...options,
+        async onCommand(command) {
+          await options.onCommand(command);
+          if (command.type === "drain" && drainCompletionDelay !== undefined && !drainSettlementTimer) {
+            drainSettlementTimer = setTimeout(() => settleSession?.(), drainCompletionDelay);
+          }
+        },
         tailscale: {
           async expose() { throw new Error("Tailscale is unavailable in the acceptance harness"); },
           async stop() {},

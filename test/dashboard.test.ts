@@ -1,16 +1,15 @@
 import assert from "node:assert/strict";
-import { spawn as spawnPty } from "@lydell/node-pty";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer, request } from "node:http";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
 import test from "node:test";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   createCoordinatorDashboard,
   type DashboardProjection,
   type DashboardTailscaleExposure,
 } from "../src/dashboard.js";
+import {
+  launchDashboardBlackBox,
+  stripTerminalControl,
+} from "./dashboard-black-box-harness.js";
 
 interface DashboardHttpResponse {
   readonly status: number;
@@ -463,84 +462,12 @@ test("dashboard startup fails when the fixed port is occupied", async () => {
   }
 });
 
-function stripTerminalControl(value: string): string {
-  return value
-    .replace(/\x1b\][^\x07]*?(?:\x07|\x1b\\)/g, "")
-    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
-    .replace(/\r/g, "");
-}
-
-function renderedLocalDashboardHyperlink(value: string): URL | undefined {
-  const hyperlinks = value.matchAll(/\x1b\]8;[^;]*;([^\x07\x1b]+)(?:\x07|\x1b\\)/g);
-  for (const hyperlink of hyperlinks) {
-    const target = hyperlink[1];
-    if (!target) continue;
-    const url = new URL(target);
-    if (url.protocol === "http:" && url.hostname === "127.0.0.1") return url;
-  }
-  return undefined;
-}
-
 test("black-box /automode supervision reaches live activity and graceful drain", { timeout: 30_000 }, async () => {
-  const fixture = mkdtempSync(join(tmpdir(), "automode-dashboard-acceptance-"));
-  const repository = join(fixture, "repository");
-  mkdirSync(join(repository, ".git"), { recursive: true });
-  const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-  const proofExtension = join(fixture, "dashboard-acceptance-extension.mjs");
-  writeFileSync(proofExtension, `
-import automodeBridge, { selectAutomationStageConfiguration } from ${JSON.stringify(pathToFileURL(resolve(projectRoot, "dist/src/bridge.js")).href)};
-import { createAutomodeLaunchPlan } from ${JSON.stringify(pathToFileURL(resolve(projectRoot, "dist/src/launch.js")).href)};
-import { handoffTerminal } from ${JSON.stringify(pathToFileURL(resolve(projectRoot, "dist/src/handoff.js")).href)};
-const proofEntrypoint = ${JSON.stringify(resolve(projectRoot, "dist/test/dashboard-acceptance-main.js"))};
-export default function (pi) {
-  automodeBridge(pi, {
-    selectConfiguration: selectAutomationStageConfiguration,
-    launch: async (request) => {
-      const plan = createAutomodeLaunchPlan(request);
-      return handoffTerminal({
-        ...plan,
-        args: [...plan.args.slice(0, 2), proofEntrypoint, ...plan.args.slice(3)],
-      });
-    },
-  });
-}
-`);
-  const command = process.platform === "win32" ? `${process.env.APPDATA}/npm/pi.cmd` : "pi";
-  const terminal = spawnPty(command, [
-    "--no-session",
-    "--no-extensions",
-    "--offline",
-    "--model", "openai-codex/gpt-5.6-sol",
-    "-e", proofExtension,
-  ], {
-    cwd: repository,
-    env: { ...process.env, PI_OFFLINE: "1" },
-    name: "xterm-color",
-    cols: 100,
-    rows: 32,
-  });
-
-  let output = "";
-  let invoked = false;
-  let launched = false;
-  let supervisionStarted = false;
-  let supervisionComplete = false;
+  const launched = launchDashboardBlackBox();
   let dashboardUrl: URL | undefined;
-  let exitCode: number | undefined;
-  await new Promise<void>((resolveRun, rejectRun) => {
-    const timer = setTimeout(() => {
-      terminal.kill();
-      rejectRun(new Error(`Dashboard acceptance timed out:\n${stripTerminalControl(output)}`));
-    }, 25_000);
-    const finish = () => {
-      if (!supervisionComplete || exitCode === undefined) return;
-      clearTimeout(timer);
-      if (exitCode !== 0) {
-        rejectRun(new Error(`Dashboard acceptance exited ${exitCode}:\n${stripTerminalControl(output)}`));
-      } else {
-        resolveRun();
-      }
-    };
+  let visibleOutput = "";
+  try {
+    dashboardUrl = (await launched.ready).dashboardUrl;
     const supervise = async (renderedDashboardUrl: URL) => {
       const deadline = Date.now() + 8_000;
       type AcceptanceSnapshot = {
@@ -588,43 +515,13 @@ export default function (pi) {
       });
       assert.equal(drain.status, 204);
     };
-    terminal.onData((chunk) => {
-      output += chunk;
-      if (!invoked && output.includes(">")) {
-        invoked = true;
-        terminal.write("/automode\r");
-      }
-      if (!launched && output.includes("Launch Automode")) {
-        launched = true;
-        terminal.write("\r");
-      }
-      const renderedDashboardUrl = renderedLocalDashboardHyperlink(output);
-      if (!supervisionStarted && renderedDashboardUrl) {
-        supervisionStarted = true;
-        dashboardUrl = renderedDashboardUrl;
-        void supervise(renderedDashboardUrl).then(() => {
-          supervisionComplete = true;
-          finish();
-        }, (error) => {
-          terminal.kill();
-          clearTimeout(timer);
-          rejectRun(error);
-        });
-      }
-    });
-    terminal.onExit(({ exitCode: code }) => {
-      exitCode = code;
-      terminal.kill();
-      if (!supervisionStarted) {
-        clearTimeout(timer);
-        rejectRun(new Error(`Dashboard link never appeared:\n${stripTerminalControl(output)}`));
-        return;
-      }
-      finish();
-    });
-  });
+    await supervise(dashboardUrl);
+    visibleOutput = (await launched.exited).visibleOutput;
+  } finally {
+    await launched.stop();
+    if (!visibleOutput) visibleOutput = stripTerminalControl(launched.output());
+  }
 
-  const visibleOutput = stripTerminalControl(output);
   assert.ok(dashboardUrl, "the TUI must render an OSC-8 localhost dashboard hyperlink");
   assert.match(visibleOutput, /AUTOMODE MAIN SESSION/);
   assert.match(visibleOutput, /owner\/repository/);

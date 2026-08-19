@@ -138,6 +138,7 @@ async function main(): Promise<void> {
   let stopTimer: NodeJS.Timeout | undefined;
   let resolveDrained!: () => void;
   const drained = new Promise<void>((resolve) => { resolveDrained = resolve; });
+  let stopping: Promise<void> | undefined;
 
   const publish = () => dashboard.publish(projection);
   const onCommand = async (command: DashboardCommand) => {
@@ -162,7 +163,7 @@ async function main(): Promise<void> {
     projection = proofProjection(states, "draining", projection.run.lastSuccessfulPoll);
     publish();
     stopTimer = setTimeout(() => {
-      void dashboard.stop().then(resolveDrained);
+      stop();
     }, 4_000);
   };
 
@@ -192,13 +193,25 @@ async function main(): Promise<void> {
     },
   });
 
-  const stop = () => {
+  function stop() {
     if (stopTimer) clearTimeout(stopTimer);
-    void dashboard.stop().then(resolveDrained);
+    if (!stopping) stopping = dashboard.stop().finally(resolveDrained);
+  }
+  const onInput = (chunk: Buffer | string) => {
+    if (chunk.toString().trim().toUpperCase() === "STOP") stop();
   };
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
-  await drained;
+  process.stdin.on("data", onInput);
+  process.stdin.resume();
+  try {
+    await drained;
+  } finally {
+    process.off("SIGINT", stop);
+    process.off("SIGTERM", stop);
+    process.stdin.off("data", onInput);
+    process.stdin.pause();
+  }
 }
 
 await main();
