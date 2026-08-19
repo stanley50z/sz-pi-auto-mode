@@ -248,7 +248,7 @@ test("the dashboard starts before Coordinator discovery and stops after the drai
   assert.equal(events.at(-1), "dashboard-stop");
 });
 
-test("dashboard cleanup failure releases the Coordinator lock and remains retryable", async () => {
+test("dashboard cleanup failure retains the Coordinator lock until a successful retry", async () => {
   const fixture = mkdtempSync(join(tmpdir(), "automode-dashboard-cleanup-"));
   const repository = join(fixture, "repository");
   const home = join(fixture, "home");
@@ -278,9 +278,37 @@ test("dashboard cleanup failure releases the Coordinator lock and remains retrya
   main.interruptCoordinator();
   await coordinator.whenStopped();
   await assert.rejects(() => main.dispose(), /Tailscale cleanup failed/);
-  assert.equal(existsSync(main.coordinatorLockFile), false);
+  assert.equal(existsSync(main.coordinatorLockFile), true);
   await main.dispose();
   assert.equal(stopCalls, 2);
+  assert.equal(existsSync(main.coordinatorLockFile), false);
+});
+
+test("dashboard startup failure cleans up its attempt without leaking the Coordinator lock", async () => {
+  const fixture = mkdtempSync(join(tmpdir(), "automode-dashboard-startup-failure-"));
+  const repository = join(fixture, "repository");
+  const home = join(fixture, "home");
+  mkdirSync(join(repository, ".git"), { recursive: true });
+  let stopCalls = 0;
+  const main = await startForTest({
+    repository,
+    home,
+    ...confirmedConfiguration("half", ["auto-triage"]),
+    createDashboard() {
+      return {
+        async start() { throw new Error("Dashboard port unavailable"); },
+        publish() {},
+        appendActivity() {},
+        async stop() { stopCalls += 1; },
+      };
+    },
+  });
+
+  await assert.rejects(() => main.startCoordinator(), /Dashboard port unavailable/);
+  assert.equal(existsSync(main.coordinatorLockFile), true);
+  await assert.rejects(() => main.dispose(), /Dashboard port unavailable/);
+  assert.equal(stopCalls, 1);
+  assert.equal(existsSync(main.coordinatorLockFile), false);
 });
 
 test("failed startup validation does not persist an Automode Run Record", async () => {

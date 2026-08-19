@@ -12,25 +12,21 @@ import {
 } from "../src/coordinator.js";
 import { createCoordinatorDashboard } from "../src/dashboard.js";
 import { parseConfirmedAutomationStageConfiguration } from "../src/stage-configuration.js";
+import { parsePositiveIntegerMilliseconds } from "./positive-integer-milliseconds.js";
 
 function completionDelayMilliseconds(): number {
   const configured = process.env.AUTOMODE_DASHBOARD_ACCEPTANCE_DELAY_MS;
   if (configured === undefined) return 4_000;
-  const milliseconds = Number(configured);
-  if (!Number.isInteger(milliseconds) || milliseconds < 1) {
-    throw new Error("AUTOMODE_DASHBOARD_ACCEPTANCE_DELAY_MS must be a positive integer");
-  }
-  return milliseconds;
+  return parsePositiveIntegerMilliseconds(configured, "AUTOMODE_DASHBOARD_ACCEPTANCE_DELAY_MS");
 }
 
 function drainCompletionDelayMilliseconds(): number | undefined {
   const configured = process.env.AUTOMODE_DASHBOARD_ACCEPTANCE_DRAIN_DELAY_MS;
   if (configured === undefined) return undefined;
-  const milliseconds = Number(configured);
-  if (!Number.isInteger(milliseconds) || milliseconds < 1) {
-    throw new Error("AUTOMODE_DASHBOARD_ACCEPTANCE_DRAIN_DELAY_MS must be a positive integer");
-  }
-  return milliseconds;
+  return parsePositiveIntegerMilliseconds(
+    configured,
+    "AUTOMODE_DASHBOARD_ACCEPTANCE_DRAIN_DELAY_MS",
+  );
 }
 
 async function main(): Promise<void> {

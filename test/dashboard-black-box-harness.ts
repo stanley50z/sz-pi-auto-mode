@@ -3,17 +3,17 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { parsePositiveIntegerMilliseconds } from "./positive-integer-milliseconds.js";
 
-export interface DashboardBlackBoxReady {
+export interface DashboardBlackBoxLaunchIdentity {
   readonly dashboardUrl: URL;
   readonly emittedDashboardUrl: string;
   readonly processId: number;
 }
 
-export interface DashboardBlackBoxExit {
-  readonly dashboardUrl: URL;
-  readonly emittedDashboardUrl: string;
-  readonly processId: number;
+export type DashboardBlackBoxReady = DashboardBlackBoxLaunchIdentity;
+
+export interface DashboardBlackBoxExit extends DashboardBlackBoxLaunchIdentity {
   readonly exitCode: number;
   readonly output: string;
   readonly visibleOutput: string;
@@ -75,21 +75,20 @@ function renderedLocalDashboardTarget(value: string): string | undefined {
 export function launchDashboardBlackBox(
   options: DashboardBlackBoxOptions = {},
 ): DashboardBlackBoxRun {
-  const completionDelayMilliseconds = options.completionDelayMilliseconds ?? 4_000;
-  const drainCompletionDelayMilliseconds = options.drainCompletionDelayMilliseconds;
-  const timeoutMilliseconds = options.timeoutMilliseconds ?? 25_000;
-  if (!Number.isInteger(completionDelayMilliseconds) || completionDelayMilliseconds < 1) {
-    throw new Error("Dashboard black-box completion delay must be a positive integer");
-  }
-  if (!Number.isInteger(timeoutMilliseconds) || timeoutMilliseconds < 1) {
-    throw new Error("Dashboard black-box timeout must be a positive integer");
-  }
-  if (
-    drainCompletionDelayMilliseconds !== undefined
-    && (!Number.isInteger(drainCompletionDelayMilliseconds) || drainCompletionDelayMilliseconds < 1)
-  ) {
-    throw new Error("Dashboard black-box drain completion delay must be a positive integer");
-  }
+  const completionDelayMilliseconds = parsePositiveIntegerMilliseconds(
+    options.completionDelayMilliseconds ?? 4_000,
+    "Dashboard black-box completion delay",
+  );
+  const drainCompletionDelayMilliseconds = options.drainCompletionDelayMilliseconds === undefined
+    ? undefined
+    : parsePositiveIntegerMilliseconds(
+        options.drainCompletionDelayMilliseconds,
+        "Dashboard black-box drain completion delay",
+      );
+  const timeoutMilliseconds = parsePositiveIntegerMilliseconds(
+    options.timeoutMilliseconds ?? 25_000,
+    "Dashboard black-box timeout",
+  );
 
   const fixture = mkdtempSync(join(tmpdir(), "automode-dashboard-acceptance-"));
   const repository = join(fixture, "repository");
@@ -142,8 +141,7 @@ export default function (pi) {
   let output = "";
   let invoked = false;
   let launched = false;
-  let dashboardUrl: URL | undefined;
-  let emittedDashboardUrl: string | undefined;
+  let launchIdentity: DashboardBlackBoxLaunchIdentity | undefined;
   let readySettled = false;
   let exitSettled = false;
   let fixtureRemoved = false;
@@ -182,14 +180,13 @@ export default function (pi) {
     }
     const renderedDashboardTarget = renderedLocalDashboardTarget(output);
     if (!readySettled && renderedDashboardTarget) {
-      emittedDashboardUrl = renderedDashboardTarget;
-      dashboardUrl = new URL(renderedDashboardTarget);
-      readySettled = true;
-      ready.resolve({
-        dashboardUrl,
-        emittedDashboardUrl,
+      launchIdentity = {
+        dashboardUrl: new URL(renderedDashboardTarget),
+        emittedDashboardUrl: renderedDashboardTarget,
         processId: terminal.pid,
-      });
+      };
+      readySettled = true;
+      ready.resolve(launchIdentity);
     }
   });
   terminal.onExit(({ exitCode }) => {
@@ -205,15 +202,13 @@ export default function (pi) {
     }
     if (!exitSettled) {
       exitSettled = true;
-      if (!dashboardUrl || !emittedDashboardUrl) {
+      if (!launchIdentity) {
         exited.reject(failure("Dashboard acceptance exited before rendering its link"));
       } else if (exitCode !== 0) {
         exited.reject(failure(`Dashboard acceptance exited ${exitCode}`));
       } else {
         exited.resolve({
-          dashboardUrl,
-          emittedDashboardUrl,
-          processId: terminal.pid,
+          ...launchIdentity,
           exitCode,
           output,
           visibleOutput: stripTerminalControl(output),

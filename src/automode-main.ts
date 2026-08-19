@@ -69,6 +69,103 @@ export interface StartedAutomodeMainSession {
   dispose(): Promise<void>;
 }
 
+type CoordinatorShutdownPhase = "none" | "draining" | "forcing";
+type MainSessionPhase =
+  | "prepared"
+  | "dashboard-starting"
+  | "coordinator-starting"
+  | "coordinator-running"
+  | "coordinator-stopped"
+  | "dashboard-stopped"
+  | "disposed";
+
+class MainSessionLifecycle {
+  private phase: MainSessionPhase = "prepared";
+  private shutdown: CoordinatorShutdownPhase = "none";
+
+  beginDashboardStart(): void {
+    if (this.phase !== "prepared") {
+      throw new Error(`Cannot start the Automode Dashboard while the Main Session is ${this.phase}`);
+    }
+    this.phase = "dashboard-starting";
+  }
+
+  beginCoordinatorStart(): void {
+    if (this.phase !== "dashboard-starting") {
+      throw new Error(`Cannot start the Automode Coordinator while the Main Session is ${this.phase}`);
+    }
+    this.phase = "coordinator-starting";
+  }
+
+  markCoordinatorStarted(): void {
+    if (this.phase !== "coordinator-starting") {
+      throw new Error(`Cannot finish Automode Coordinator startup while the Main Session is ${this.phase}`);
+    }
+    this.phase = "coordinator-running";
+  }
+
+  hasStartedCoordinator(): boolean {
+    return this.phase === "coordinator-running" || this.phase === "coordinator-stopped";
+  }
+
+  isWaitingForCoordinatorStart(): boolean {
+    return this.phase === "dashboard-starting";
+  }
+
+  requestCoordinatorShutdown(): Exclude<CoordinatorShutdownPhase, "none"> {
+    if (
+      this.phase !== "dashboard-starting"
+      && this.phase !== "coordinator-starting"
+      && this.phase !== "coordinator-running"
+      && this.phase !== "coordinator-stopped"
+    ) {
+      throw new Error(`Cannot stop the Automode Coordinator while the Main Session is ${this.phase}`);
+    }
+    this.shutdown = this.shutdown === "none" ? "draining" : "forcing";
+    return this.shutdown;
+  }
+
+  shutdownPhase(): CoordinatorShutdownPhase {
+    return this.shutdown;
+  }
+
+  needsCoordinatorStop(): boolean {
+    return this.phase === "coordinator-starting" || this.phase === "coordinator-running";
+  }
+
+  markCoordinatorStopped(): void {
+    if (!this.needsCoordinatorStop()) {
+      throw new Error(`Cannot finish Automode Coordinator shutdown while the Main Session is ${this.phase}`);
+    }
+    this.phase = "coordinator-stopped";
+  }
+
+  needsDashboardStop(): boolean {
+    return this.phase === "dashboard-starting"
+      || this.phase === "coordinator-starting"
+      || this.phase === "coordinator-running"
+      || this.phase === "coordinator-stopped";
+  }
+
+  markDashboardStopped(): void {
+    if (!this.needsDashboardStop()) {
+      throw new Error(`Cannot finish Automode Dashboard shutdown while the Main Session is ${this.phase}`);
+    }
+    this.phase = "dashboard-stopped";
+  }
+
+  isDisposed(): boolean {
+    return this.phase === "disposed";
+  }
+
+  markDisposed(): void {
+    if (this.phase !== "prepared" && this.phase !== "dashboard-stopped") {
+      throw new Error(`Cannot release the Main Session while it is ${this.phase}`);
+    }
+    this.phase = "disposed";
+  }
+}
+
 export const automodeRunConfigurationGuard = {
   name: "automode-immutable-configuration",
   factory: (pi) => {
@@ -237,12 +334,8 @@ export async function startAutomodeMainSession(
       : { ...projection, tailscaleError: dashboardStatus.exposureError };
   };
 
-  let coordinatorStartInitiated = false;
-  let coordinatorStarted = false;
-  let coordinatorStopped = false;
-  let coordinatorInterrupts = 0;
+  const lifecycle = new MainSessionLifecycle();
   let coordinatorStartPromise: Promise<void> | undefined;
-  let dashboardStartAttempted = false;
   let unsubscribeDashboard: (() => void) | undefined;
   const dashboardFactory = options.createDashboard
     ? options.createDashboard
@@ -250,10 +343,10 @@ export async function startAutomodeMainSession(
   const dashboard = dashboardFactory({
     onCommand: async (command) => {
       if (command.type === "drain") {
-        if (coordinatorInterrupts === 0) interruptCoordinator();
+        if (lifecycle.shutdownPhase() === "none") interruptCoordinator();
         return;
       }
-      if (!coordinatorStarted) throw new Error("Automode Coordinator has not started");
+      if (!lifecycle.hasStartedCoordinator()) throw new Error("Automode Coordinator has not started");
       if (command.type === "refresh") {
         await coordinator.refresh();
         return;
@@ -274,7 +367,7 @@ export async function startAutomodeMainSession(
   const startCoordinator = async () => {
     if (coordinatorStartPromise) return coordinatorStartPromise;
     coordinatorStartPromise = (async () => {
-      dashboardStartAttempted = true;
+      lifecycle.beginDashboardStart();
       dashboardStatus = await dashboard.start(dashboardProjection());
       unsubscribeDashboard = coordinator.subscribe((event) => {
         if (event.type === "projection") {
@@ -292,30 +385,29 @@ export async function startAutomodeMainSession(
         });
       });
       publishDashboard();
-      const pendingInterrupts = coordinatorInterrupts;
+      const pendingShutdown = lifecycle.shutdownPhase();
       const coordinatorStarting = coordinator.start();
-      coordinatorStartInitiated = true;
-      for (let index = 0; index < pendingInterrupts; index += 1) {
-        coordinator.interrupt();
-      }
-      if (pendingInterrupts > 0) {
+      lifecycle.beginCoordinatorStart();
+      if (pendingShutdown !== "none") coordinator.interrupt();
+      if (pendingShutdown === "forcing") coordinator.interrupt();
+      if (pendingShutdown !== "none") {
         runLifecycle = "draining";
         publishDashboard();
       }
       statusCard.shutdownWhen(coordinator.whenStopped());
       await coordinatorStarting;
-      coordinatorStarted = true;
-      if (pendingInterrupts === 0) runLifecycle = activeLifecycle();
+      lifecycle.markCoordinatorStarted();
+      if (pendingShutdown === "none") runLifecycle = activeLifecycle();
       publishDashboard();
     })();
     return coordinatorStartPromise;
   };
   interruptCoordinator = () => {
     if (!coordinatorStartPromise) throw new Error("Automode Coordinator has not started");
-    coordinatorInterrupts += 1;
-    if (!coordinatorStartInitiated) {
-      if (coordinatorInterrupts === 1) runLifecycle = "draining";
-      return coordinatorInterrupts === 1 ? "draining" : "forcing";
+    const shutdown = lifecycle.requestCoordinatorShutdown();
+    if (lifecycle.isWaitingForCoordinatorStart()) {
+      if (shutdown === "draining") runLifecycle = "draining";
+      return shutdown;
     }
     const result = coordinator.interrupt();
     if (result === "draining") {
@@ -325,31 +417,26 @@ export async function startAutomodeMainSession(
     return result;
   };
 
-  let dashboardStopped = false;
-  let disposed = false;
   let disposePromise: Promise<void> | undefined;
   const finalizeDispose = async () => {
-    try {
-      if (dashboardStartAttempted && !dashboardStopped) {
-        await dashboard.stop();
-        dashboardStopped = true;
-      }
-    } finally {
-      if (!disposed) {
-        unsubscribeDashboard?.();
-        try {
-          runtime.session.dispose();
-        } finally {
-          lease.release();
-          disposed = true;
-        }
+    if (lifecycle.needsDashboardStop()) {
+      await dashboard.stop();
+      lifecycle.markDashboardStopped();
+    }
+    if (!lifecycle.isDisposed()) {
+      unsubscribeDashboard?.();
+      try {
+        runtime.session.dispose();
+      } finally {
+        lease.release();
+        lifecycle.markDisposed();
       }
     }
   };
   const disposeOnce = async () => {
     let startupError: unknown;
-    if (coordinatorStartPromise && !coordinatorStartInitiated) {
-      while (coordinatorInterrupts < 2) interruptCoordinator();
+    if (coordinatorStartPromise && lifecycle.isWaitingForCoordinatorStart()) {
+      while (lifecycle.shutdownPhase() !== "forcing") interruptCoordinator();
     }
     if (coordinatorStartPromise) {
       try {
@@ -358,10 +445,10 @@ export async function startAutomodeMainSession(
         startupError = error;
       }
     }
-    if (coordinatorStartInitiated && !coordinatorStopped) {
-      while (coordinatorInterrupts < 2) interruptCoordinator();
+    if (lifecycle.needsCoordinatorStop()) {
+      while (lifecycle.shutdownPhase() !== "forcing") interruptCoordinator();
       await coordinator.whenStopped();
-      coordinatorStopped = true;
+      lifecycle.markCoordinatorStopped();
     }
     let cleanupError: unknown;
     try {
@@ -406,9 +493,9 @@ export async function startAutomodeMainSession(
       try {
         await startCoordinator();
         await interactiveMode.run();
-        if (coordinatorInterrupts === 0) interruptCoordinator();
+        if (lifecycle.shutdownPhase() === "none") interruptCoordinator();
         await coordinator.whenStopped();
-        coordinatorStopped = true;
+        lifecycle.markCoordinatorStopped();
       } finally {
         process.off("SIGINT", onInterrupt);
         await dispose();
