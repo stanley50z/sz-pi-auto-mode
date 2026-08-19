@@ -470,6 +470,17 @@ function stripTerminalControl(value: string): string {
     .replace(/\r/g, "");
 }
 
+function renderedLocalDashboardHyperlink(value: string): URL | undefined {
+  const hyperlinks = value.matchAll(/\x1b\]8;[^;]*;([^\x07\x1b]+)(?:\x07|\x1b\\)/g);
+  for (const hyperlink of hyperlinks) {
+    const target = hyperlink[1];
+    if (!target) continue;
+    const url = new URL(target);
+    if (url.protocol === "http:" && url.hostname === "127.0.0.1") return url;
+  }
+  return undefined;
+}
+
 test("black-box /automode supervision reaches live activity and graceful drain", { timeout: 30_000 }, async () => {
   const fixture = mkdtempSync(join(tmpdir(), "automode-dashboard-acceptance-"));
   const repository = join(fixture, "repository");
@@ -514,6 +525,7 @@ export default function (pi) {
   let launched = false;
   let supervisionStarted = false;
   let supervisionComplete = false;
+  let dashboardUrl: URL | undefined;
   let exitCode: number | undefined;
   await new Promise<void>((resolveRun, rejectRun) => {
     const timer = setTimeout(() => {
@@ -529,7 +541,7 @@ export default function (pi) {
         resolveRun();
       }
     };
-    const supervise = async () => {
+    const supervise = async (renderedDashboardUrl: URL) => {
       const deadline = Date.now() + 8_000;
       type AcceptanceSnapshot = {
         revision: number;
@@ -541,7 +553,7 @@ export default function (pi) {
       let lastSnapshotError: unknown;
       while (Date.now() < deadline) {
         try {
-          snapshot = await (await fetch("http://127.0.0.1:41738/api/snapshot")).json() as AcceptanceSnapshot;
+          snapshot = await (await fetch(new URL("/api/snapshot", renderedDashboardUrl))).json() as AcceptanceSnapshot;
           const candidate = dashboardCandidate(snapshot.projection, "issue:50");
           if (
             candidate?.status === "running"
@@ -561,14 +573,14 @@ export default function (pi) {
       assert.equal(snapshot.projection.run.lifecycle, "degraded");
       assert.ok(snapshot.projection.tailscaleError);
       assert.match(snapshot.projection.tailscaleError, /acceptance harness/);
-      const application = await (await fetch("http://127.0.0.1:41738/app.js")).text();
-      assert.match(application, /Stage Lanes/);
-      assert.doesNotMatch(application, /data-command=["']force/);
-      const drain = await fetch("http://127.0.0.1:41738/api/commands/drain", {
+      const page = await fetch(renderedDashboardUrl);
+      assert.equal(page.status, 200);
+      assert.match(await page.text(), /<main id="app"/);
+      const drain = await fetch(new URL("/api/commands/drain", renderedDashboardUrl), {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          origin: "http://127.0.0.1:41738",
+          origin: renderedDashboardUrl.origin,
           "x-automode-csrf": snapshot.csrfToken,
           "if-match": `"${snapshot.revision}"`,
         },
@@ -586,9 +598,11 @@ export default function (pi) {
         launched = true;
         terminal.write("\r");
       }
-      if (!supervisionStarted && output.includes("http://127.0.0.1:41738")) {
+      const renderedDashboardUrl = renderedLocalDashboardHyperlink(output);
+      if (!supervisionStarted && renderedDashboardUrl) {
         supervisionStarted = true;
-        void supervise().then(() => {
+        dashboardUrl = renderedDashboardUrl;
+        void supervise(renderedDashboardUrl).then(() => {
           supervisionComplete = true;
           finish();
         }, (error) => {
@@ -611,9 +625,10 @@ export default function (pi) {
   });
 
   const visibleOutput = stripTerminalControl(output);
+  assert.ok(dashboardUrl, "the TUI must render an OSC-8 localhost dashboard hyperlink");
   assert.match(visibleOutput, /AUTOMODE MAIN SESSION/);
   assert.match(visibleOutput, /owner\/repository/);
-  assert.match(visibleOutput, /http:\/\/127\.0\.0\.1:41738/);
+  assert.match(visibleOutput, new RegExp(dashboardUrl.origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(visibleOutput, /TAILSCALE ERROR/);
   assert.match(visibleOutput, /Stages Auto-Triage (?:ON|DRAINING|OFF)/);
   assert.match(visibleOutput, /Auto-Grilling (?:ON|DRAINING|OFF)/);

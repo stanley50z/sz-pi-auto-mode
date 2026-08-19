@@ -12,8 +12,6 @@ import {
 } from "../src/automode-main.js";
 import {
   AutomodeCoordinator,
-  type CoordinatorTracker,
-  type TicketSessionHost,
 } from "../src/coordinator.js";
 import type { CoordinatorDashboardOptions, DashboardProjection } from "../src/dashboard.js";
 import { resolveAutomodePaths } from "../src/paths.js";
@@ -65,6 +63,25 @@ function confirmedConfiguration(
     serializedConfiguration,
     configurationConfirmation: confirmSerializedAutomationStageConfiguration(serializedConfiguration),
   };
+}
+
+function createIdleCoordinator(
+  configuration: ReturnType<typeof createAutomationStageConfiguration>,
+  events?: string[],
+): AutomodeCoordinator {
+  const record = (event: string) => { events?.push(event); };
+  return new AutomodeCoordinator({
+    configuration,
+    actor: "automation-user",
+    tracker: {
+      async listBookkeeping() { record("list-bookkeeping"); return []; },
+      async snapshot() { record("snapshot"); return { revision: "empty", items: [] }; },
+      async read() { throw new Error("No tracker item exists"); },
+      async claim() { throw new Error("No tracker item exists"); },
+      async upsertBookkeeping() { throw new Error("No bookkeeping write is expected"); },
+    },
+    sessions: { async start() { throw new Error("No Ticket Session is expected"); } },
+  });
 }
 
 test("the Automode Run guard cancels Main Session replacement and forking", async () => {
@@ -137,19 +154,7 @@ test("Ctrl-C during dashboard startup queues a drain before Coordinator discover
   mkdirSync(join(repository, ".git"), { recursive: true });
   const configuration = createAutomationStageConfiguration("half", ["auto-triage"]);
   const trackerCalls: string[] = [];
-  const tracker: CoordinatorTracker = {
-    async listBookkeeping() { trackerCalls.push("list-bookkeeping"); return []; },
-    async snapshot() { trackerCalls.push("snapshot"); return { revision: "empty", items: [] }; },
-    async read() { throw new Error("No tracker item exists"); },
-    async claim() { throw new Error("No tracker item exists"); },
-    async upsertBookkeeping() { throw new Error("No bookkeeping write is expected"); },
-  };
-  const coordinator = new AutomodeCoordinator({
-    configuration,
-    actor: "automation-user",
-    tracker,
-    sessions: { async start() { throw new Error("No Ticket Session is expected"); } },
-  });
+  const coordinator = createIdleCoordinator(configuration, trackerCalls);
   let releaseDashboard!: () => void;
   const dashboardReady = new Promise<void>((resolve) => { releaseDashboard = resolve; });
   const main = await startForTest({
@@ -192,28 +197,7 @@ test("the dashboard starts before Coordinator discovery and stops after the drai
   const events: string[] = [];
   const published: DashboardProjection[] = [];
   let dashboardOptions: CoordinatorDashboardOptions | undefined;
-  const tracker: CoordinatorTracker = {
-    async listBookkeeping() {
-      events.push("list-bookkeeping");
-      return [];
-    },
-    async snapshot() {
-      events.push("snapshot");
-      return { revision: "empty", items: [] };
-    },
-    async read() { throw new Error("No tracker item exists"); },
-    async claim() { throw new Error("No tracker item exists"); },
-    async upsertBookkeeping() { throw new Error("No bookkeeping write is expected"); },
-  };
-  const sessions: TicketSessionHost = {
-    async start() { throw new Error("No Ticket Session is expected"); },
-  };
-  const coordinator = new AutomodeCoordinator({
-    configuration,
-    actor: "automation-user",
-    tracker,
-    sessions,
-  });
+  const coordinator = createIdleCoordinator(configuration, events);
   const main = await startForTest({
     repository,
     home,
@@ -270,18 +254,7 @@ test("dashboard cleanup failure releases the Coordinator lock and remains retrya
   const home = join(fixture, "home");
   mkdirSync(join(repository, ".git"), { recursive: true });
   const configuration = createAutomationStageConfiguration("half", ["auto-triage"]);
-  const coordinator = new AutomodeCoordinator({
-    configuration,
-    actor: "automation-user",
-    tracker: {
-      async listBookkeeping() { return []; },
-      async snapshot() { return { revision: "empty", items: [] }; },
-      async read() { throw new Error("No tracker item exists"); },
-      async claim() { throw new Error("No tracker item exists"); },
-      async upsertBookkeeping() { throw new Error("No bookkeeping write is expected"); },
-    },
-    sessions: { async start() { throw new Error("No Ticket Session is expected"); } },
-  });
+  const coordinator = createIdleCoordinator(configuration);
   let stopCalls = 0;
   const main = await startForTest({
     repository,
