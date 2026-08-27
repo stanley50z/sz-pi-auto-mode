@@ -10,7 +10,7 @@ You are the authoritative Review Session for one open non-draft pull request. Th
 
 ## Prepare
 
-1. Re-read the pull request body, linked issue/specification, repository guidance, domain vocabulary, relevant ADRs, commits, validation evidence, and merge-base diff.
+1. Re-read the pull request body, linked issue/specification, repository guidance, domain vocabulary, relevant ADRs, commits, validation evidence, and merge-base diff. Load the [Agent Brief verification contract](../../native/triage/AGENT-BRIEF.md), apply it to the linked issue's brief, and identify its predicate, proof steps, and required evidence.
 2. Reuse the recorded Auto-Implement worktree or fetch the exact pull-request head into an isolated writable worktree. Fail explicitly if fixes cannot be pushed to the head.
 3. Pin the exact head SHA for the round.
 
@@ -36,7 +36,7 @@ You are the authoritative Review Session for one open non-draft pull request. Th
 
 ## Validate and merge
 
-1. Run the complete applicable local test/build validation and wait for required GitHub checks.
+1. Re-run every applicable proof step from the Agent Brief against the final head and compare the observation with its expected result. Confirm the pull request preserves the required evidence. Then run the complete applicable local test/build validation and wait for required GitHub checks. Unavailable required proof is a failed validation.
 2. Immediately confirm the head is current and mergeable.
 3. If another concurrently reviewed pull request caused a base conflict, perform one terminal Conflict-Fix Round: integrate the latest base, resolve only resulting conflicts, validate, push, and recheck without another panel round. A design/requirement conflict, failed validation, or second conflict fails explicitly.
 4. Squash-merge through repository controls.

@@ -18,7 +18,7 @@ Every comment or issue posted to the issue tracker during triage **must** start 
 
 ## Reference docs
 
-- [AGENT-BRIEF.md](AGENT-BRIEF.md) — how to write durable agent briefs
+- [Agent Brief verification contract](AGENT-BRIEF.md) — load when writing a `ready-for-agent` or `ready-for-human` brief
 - [OUT-OF-SCOPE.md](OUT-OF-SCOPE.md) — how the `.out-of-scope/` knowledge base works
 
 ## Roles
@@ -87,7 +87,7 @@ Show counts and a one-line summary per item. Let the maintainer pick.
 
 ## Quick state override
 
-If the maintainer says "move #42 to ready-for-agent", trust them and apply the role directly. Confirm what you're about to do (role changes, comment, close), then act. Skip grilling. If moving to `ready-for-agent` without a grilling session, ask whether they want to write an agent brief.
+If the maintainer says "move #42 to ready-for-agent", trust the requested state. Confirm the tracker mutations, then act without grilling. A direct state instruction does not waive the required brief: for `ready-for-agent` or `ready-for-human`, load the [Agent Brief verification contract](AGENT-BRIEF.md) and post a complete brief for that state.
 
 ## Needs-info template
 

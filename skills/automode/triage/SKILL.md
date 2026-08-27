@@ -18,9 +18,9 @@ Every generated tracker comment must start with:
 2. Search by domain concept for an existing implementation. Check matching `.out-of-scope/` decisions. For a bug, reproduce or validate the claim where feasible.
 3. Select exactly one category: `bug` or `enhancement`.
 4. Select exactly one state:
-   - `ready-for-agent` — the normal outcome when implementation is sufficiently specified. Include a durable Agent Brief with problem, desired outcome, evidence/context, requirements, acceptance criteria, constraints, and validation notes.
+   - `ready-for-agent` — the normal outcome when implementation is sufficiently specified. Load and follow the [Agent Brief verification contract](../../native/triage/AGENT-BRIEF.md). Post only when its completeness check passes.
    - `needs-info` — reporter facts or reproduction details are missing. Ask precise actionable questions.
-   - `ready-for-human` — unresolved product/design judgment or a required human action remains. Include the same Agent Brief structure and name the judgment/action.
+   - `ready-for-human` — unresolved product/design judgment or a required human action remains. Load and follow the same [Agent Brief verification contract](../../native/triage/AGENT-BRIEF.md), then name the open judgment or action that prevents unattended work.
    - `wontfix` — only when already implemented, clearly disproven/invalid, or previously rejected. Never create a new strategic rejection or `.out-of-scope/` record.
 5. Make routine judgments autonomously. Do not invoke grilling or ask the Coordinator/human to choose.
 
