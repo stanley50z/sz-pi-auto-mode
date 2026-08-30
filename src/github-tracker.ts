@@ -538,6 +538,8 @@ export class GitHubTracker implements Tracker {
     for (const value of pullValues) {
       const pull = record(value, "pull request output link");
       const pullNumber = positiveInteger(pull.number, "pull request output link number");
+      const pullRequest = pullRequests.get(pullNumber);
+      if (pullRequest?.state === "closed" && pullRequest.merged !== true) continue;
       const body = pull.body === null ? "" : stringField(pull.body, `pull request #${pullNumber} body`, true);
       const url = stringField(pull.html_url, `pull request #${pullNumber} URL`);
       for (const issueNumber of closingIssueNumbers(body, this.#repository)) {
@@ -548,7 +550,6 @@ export class GitHubTracker implements Tracker {
         }
         issue.outputPullRequest = url;
         issue.materialVersion = sha256({ base: issue.materialVersion, outputPullRequest: url });
-        const pullRequest = pullRequests.get(pullNumber);
         const implementationWorkspace = issue.bookkeeping?.value.skillName === "implement"
           ? issue.bookkeeping.value.workspace
           : undefined;

@@ -523,7 +523,7 @@ test("Coordinator restart restores Stage Operating State from the launch baselin
   await restarted.whenStopped();
 });
 
-test("recovery preserves active bookkeeping for a Stage restored OFF and resumes it when re-enabled", async () => {
+test("recovery resets attempts but preserves session continuity for a Stage restored OFF", async () => {
   const recovered = issue({
     number: 62,
     labels: ["ready-for-agent"],
@@ -545,7 +545,7 @@ test("recovery preserves active bookkeeping for a Stage restored OFF and resumes
   const sessions = new FakeTicketSessions((request) => {
     recovered.outputPullRequest = "https://github.com/owner/repository/pull/62";
     recovered.materialVersion = "62-delivered";
-    assert.equal(request.attempt, 3);
+    assert.equal(request.attempt, 1);
     assert.equal(request.resumeSessionFile, "/sessions/62.jsonl");
   });
   const coordinator = new AutomodeCoordinator({
@@ -874,7 +874,7 @@ test("Ticket Session launch failures are projected as retrying within the shared
   await coordinator.whenStopped();
 });
 
-test("a durable failed record resumes at the next attempt instead of resetting", async () => {
+test("a new Coordinator process resets a durable failed attempt budget", async () => {
   const recovered = issue({
     number: 40,
     labels: ["ready-for-agent"],
@@ -893,7 +893,7 @@ test("a durable failed record resumes at the next attempt instead of resetting",
     diagnostic: "process disappeared",
   });
   const sessions = new FakeTicketSessions((request) => {
-    assert.equal(request.attempt, 5);
+    assert.equal(request.attempt, 1);
     recovered.outputPullRequest = "https://github.com/owner/repository/pull/40";
     recovered.materialVersion = "40-delivered";
   });
@@ -910,7 +910,7 @@ test("a durable failed record resumes at the next attempt instead of resetting",
   await coordinator.waitForIdle();
 
   assert.equal(sessions.requests.length, 1);
-  assert.equal(tracker.records.get("issue:40")?.attempt, 5);
+  assert.equal(tracker.records.get("issue:40")?.attempt, 1);
   assert.equal(tracker.records.get("issue:40")?.lifecycle, "succeeded");
   coordinator.interrupt();
   await coordinator.whenStopped();
@@ -939,7 +939,7 @@ test("startup resumes recoverable bookkeeping before scanning for fresh claims",
     const item = tracker.items[0]!;
     item.outputPullRequest = "https://github.com/owner/repository/pull/41";
     item.materialVersion = "41-b";
-    assert.equal(request.attempt, 4);
+    assert.equal(request.attempt, 1);
     assert.equal(request.resumeSessionFile, "/sessions/41.jsonl");
   });
   const coordinator = new AutomodeCoordinator({
@@ -998,7 +998,7 @@ test("recovery finalizes tracker-complete work instead of redispatching it", asy
   await coordinator.whenStopped();
 });
 
-test("recovery never resets a durable fifth attempt", async () => {
+test("a new Coordinator process resets an exhausted attempt budget", async () => {
   const recovered = issue({
     number: 43,
     labels: ["ready-for-agent"],
@@ -1012,10 +1012,15 @@ test("recovery never resets a durable fifth attempt", async () => {
     stage: "auto-implement",
     skillName: "implement",
     attempt: 5,
-    lifecycle: "running",
+    lifecycle: "exhausted",
     materialVersion: recovered.materialVersion,
+    sessionId: "session-43",
+    sessionFile: "/sessions/43.jsonl",
   });
-  const sessions = new FakeTicketSessions(() => { throw new Error("must not relaunch"); });
+  const sessions = new FakeTicketSessions(() => {
+    recovered.outputPullRequest = "https://github.com/owner/repository/pull/43";
+    recovered.materialVersion = "43-complete";
+  });
   const coordinator = new AutomodeCoordinator({
     configuration: createAutomationStageConfiguration("half", ["auto-implement"]),
     actor: "automation-user",
@@ -1028,8 +1033,11 @@ test("recovery never resets a durable fifth attempt", async () => {
   await coordinator.start();
   await coordinator.waitForIdle();
 
-  assert.equal(sessions.requests.length, 0);
-  assert.equal(tracker.records.get("issue:43")?.lifecycle, "exhausted");
+  assert.deepEqual(sessions.requests.map(({ attempt, resumeSessionFile }) => ({ attempt, resumeSessionFile })), [{
+    attempt: 1,
+    resumeSessionFile: "/sessions/43.jsonl",
+  }]);
+  assert.equal(tracker.records.get("issue:43")?.lifecycle, "succeeded");
   coordinator.interrupt();
   await coordinator.whenStopped();
 });

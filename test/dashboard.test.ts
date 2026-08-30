@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createServer, request } from "node:http";
+import { request } from "node:http";
 import test from "node:test";
 import {
   CliDashboardTailscaleExposure,
@@ -18,6 +18,7 @@ interface DashboardHttpResponse {
 }
 
 function requestDashboard(
+  baseUrl: string,
   path: string,
   host: string,
   options: {
@@ -27,9 +28,10 @@ function requestDashboard(
   } = {},
 ): Promise<DashboardHttpResponse> {
   return new Promise((resolve, reject) => {
+    const target = new URL(baseUrl);
     const outgoing = request({
-      hostname: "127.0.0.1",
-      port: 41_738,
+      hostname: target.hostname,
+      port: Number(target.port),
       path,
       method: options.method,
       agent: false,
@@ -77,7 +79,7 @@ function projection(id = "run-1"): DashboardProjection {
   };
 }
 
-test("the Coordinator dashboard serves its initial projection on the preferred loopback URL", async () => {
+test("the Coordinator dashboard serves its initial projection on an available loopback URL", async () => {
   const dashboard = createCoordinatorDashboard({
     tailscale: unavailableTailscale,
     onCommand: async () => undefined,
@@ -86,17 +88,17 @@ test("the Coordinator dashboard serves its initial projection on the preferred l
   try {
     const initialProjection = projection("initial");
     const status = await dashboard.start(initialProjection);
-    assert.equal(status.localUrl, "http://127.0.0.1:41738");
+    assert.match(status.localUrl, /^http:\/\/127\.0\.0\.1:\d+$/);
     assert.equal(status.remoteUrl, undefined);
     assert.equal(status.exposureError, "tailscale executable was not found");
 
-    const response = await fetch("http://127.0.0.1:41738/api/snapshot");
+    const response = await fetch(`${status.localUrl}/api/snapshot`);
     assert.equal(response.status, 200);
     const snapshot = await response.json() as Record<string, unknown>;
     assert.equal(snapshot.revision, 1);
     assert.deepEqual(snapshot.projection, initialProjection);
     assert.deepEqual(snapshot.network, {
-      localUrl: "http://127.0.0.1:41738",
+      localUrl: status.localUrl,
       exposureError: "tailscale executable was not found",
     });
     assert.equal(typeof snapshot.csrfToken, "string");
@@ -110,20 +112,20 @@ test("the dashboard serves static assets and rejects untrusted Host headers", as
     tailscale: unavailableTailscale,
     onCommand: async () => undefined,
   });
-  await dashboard.start(projection());
+  const status = await dashboard.start(projection());
 
   try {
-    const page = await fetch("http://127.0.0.1:41738/");
+    const page = await fetch(status.localUrl);
     assert.equal(page.status, 200);
     const pageBody = await page.text();
     assert.match(pageBody, /Loading Stage Candidates/);
     assert.match(pageBody, /name="automode-snapshot" content="\/api\/snapshot"/);
-    const application = await fetch("http://127.0.0.1:41738/app.js");
+    const application = await fetch(`${status.localUrl}/app.js`);
     assert.equal(application.status, 200);
     assert.match(await application.text(), /Live Coordinator connection/);
-    assert.equal((await fetch("http://127.0.0.1:41738/styles.css")).status, 200);
+    assert.equal((await fetch(`${status.localUrl}/styles.css`)).status, 200);
 
-    assert.equal((await requestDashboard("/api/snapshot", "attacker.example")).status, 421);
+    assert.equal((await requestDashboard(status.localUrl, "/api/snapshot", "attacker.example")).status, 421);
   } finally {
     await dashboard.stop();
   }
@@ -303,11 +305,12 @@ test("Tailscale retains pending ownership when post-install verification fails",
 
 test("successful Tailscale exposure allows only its private host and same-origin mutations", async () => {
   const commands: unknown[] = [];
+  let exposedLocalUrl = "";
   let stopCalls = 0;
   const dashboard = createCoordinatorDashboard({
     tailscale: {
       async expose(localUrl) {
-        assert.equal(localUrl, "http://127.0.0.1:41738");
+        exposedLocalUrl = localUrl;
         return { remoteUrl: "https://automode.example.ts.net" };
       },
       async stop() { stopCalls += 1; },
@@ -316,17 +319,18 @@ test("successful Tailscale exposure allows only its private host and same-origin
   });
 
   try {
-    assert.deepEqual(await dashboard.start(projection()), {
-      localUrl: "http://127.0.0.1:41738",
-      remoteUrl: "https://automode.example.ts.net",
-    });
+    const status = await dashboard.start(projection());
+    assert.equal(status.localUrl, exposedLocalUrl);
+    assert.equal(status.remoteUrl, "https://automode.example.ts.net");
     const snapshotResponse = await requestDashboard(
+      status.localUrl,
       "/api/snapshot",
       "automode.example.ts.net",
     );
     assert.equal(snapshotResponse.status, 200);
     const snapshot = JSON.parse(snapshotResponse.body) as { revision: number; csrfToken: string };
     const commandResponse = await requestDashboard(
+      status.localUrl,
       "/api/commands/refresh",
       "automode.example.ts.net",
       {
@@ -354,11 +358,11 @@ test("the live event stream publishes replacement projections and structured act
     tailscale: unavailableTailscale,
     onCommand: async () => undefined,
   });
-  await dashboard.start(projection("one"));
+  const status = await dashboard.start(projection("one"));
 
   const controller = new AbortController();
   try {
-    const response = await fetch("http://127.0.0.1:41738/api/events", {
+    const response = await fetch(`${status.localUrl}/api/events`, {
       headers: { accept: "text/event-stream" },
       signal: controller.signal,
     });
@@ -389,7 +393,7 @@ test("the live event stream publishes replacement projections and structured act
     } as const;
     dashboard.appendActivity(activity);
     await readUntil('event: activity\ndata: {"id":"activity-43","itemKey":"issue:43","occurredAt":"2026-08-17T12:00:00.000Z","kind":"tool","message":"npm test","data":{"exitCode":0}}');
-    const snapshot = await (await fetch("http://127.0.0.1:41738/api/snapshot")).json() as {
+    const snapshot = await (await fetch(`${status.localUrl}/api/snapshot`)).json() as {
       activities: unknown[];
     };
     assert.deepEqual(snapshot.activities, [activity]);
@@ -406,7 +410,7 @@ test("activity retention is bounded per item with an explicit truncation marker"
     tailscale: unavailableTailscale,
     onCommand: async () => undefined,
   });
-  await dashboard.start(projection());
+  const status = await dashboard.start(projection());
   try {
     for (let index = 0; index < 505; index += 1) {
       dashboard.appendActivity({
@@ -418,7 +422,7 @@ test("activity retention is bounded per item with an explicit truncation marker"
         data: { attempt: 1, sessionId: "session-45", source: "live" },
       });
     }
-    const snapshot = await (await fetch("http://127.0.0.1:41738/api/snapshot")).json() as {
+    const snapshot = await (await fetch(`${status.localUrl}/api/snapshot`)).json() as {
       activities: Array<{ id: string; message?: string }>;
     };
     assert.equal(snapshot.activities.length, 500);
@@ -436,30 +440,30 @@ test("typed supervisory commands require same-origin, CSRF, and a current projec
     tailscale: unavailableTailscale,
     onCommand: async (command) => { commands.push(command); },
   });
-  await dashboard.start(projection("first"));
+  const status = await dashboard.start(projection("first"));
 
   try {
-    const snapshot = await (await fetch("http://127.0.0.1:41738/api/snapshot")).json() as {
+    const snapshot = await (await fetch(`${status.localUrl}/api/snapshot`)).json() as {
       revision: number;
       csrfToken: string;
     };
     const headers = {
       "content-type": "application/json",
-      origin: "http://127.0.0.1:41738",
+      origin: status.localUrl,
       "x-automode-csrf": snapshot.csrfToken,
       "if-match": `\"${snapshot.revision}\"`,
     };
-    const refresh = await fetch("http://127.0.0.1:41738/api/commands/refresh", {
+    const refresh = await fetch(`${status.localUrl}/api/commands/refresh`, {
       method: "POST", headers, body: "{}",
     });
     assert.equal(refresh.status, 204);
 
-    const drain = await fetch("http://127.0.0.1:41738/api/commands/drain", {
+    const drain = await fetch(`${status.localUrl}/api/commands/drain`, {
       method: "POST", headers, body: "{}",
     });
     assert.equal(drain.status, 204);
 
-    const stage = await fetch("http://127.0.0.1:41738/api/commands/stage-state", {
+    const stage = await fetch(`${status.localUrl}/api/commands/stage-state`, {
       method: "POST", headers,
       body: JSON.stringify({ stage: "auto-review", state: "DRAINING" }),
     });
@@ -470,13 +474,13 @@ test("typed supervisory commands require same-origin, CSRF, and a current projec
       { type: "set-stage-state", stage: "auto-review", state: "DRAINING" },
     ]);
 
-    const crossOrigin = await fetch("http://127.0.0.1:41738/api/commands/refresh", {
+    const crossOrigin = await fetch(`${status.localUrl}/api/commands/refresh`, {
       method: "POST",
       headers: { ...headers, origin: "https://attacker.example" },
       body: "{}",
     });
     assert.equal(crossOrigin.status, 403);
-    const missingCsrf = await fetch("http://127.0.0.1:41738/api/commands/refresh", {
+    const missingCsrf = await fetch(`${status.localUrl}/api/commands/refresh`, {
       method: "POST",
       headers: { ...headers, "x-automode-csrf": "wrong" },
       body: "{}",
@@ -484,7 +488,7 @@ test("typed supervisory commands require same-origin, CSRF, and a current projec
     assert.equal(missingCsrf.status, 403);
 
     dashboard.publish(projection("new"));
-    const stale = await fetch("http://127.0.0.1:41738/api/commands/refresh", {
+    const stale = await fetch(`${status.localUrl}/api/commands/refresh`, {
       method: "POST", headers, body: "{}",
     });
     assert.equal(stale.status, 409);
@@ -521,11 +525,10 @@ test("concurrent startup is idempotent and waits for the same Tailscale result",
 
   releaseExposure();
   try {
-    assert.deepEqual(await first, {
-      localUrl: "http://127.0.0.1:41738",
-      remoteUrl: "https://automode.example.ts.net",
-    });
-    assert.deepEqual(await second, await first);
+    const firstStatus = await first;
+    assert.match(firstStatus.localUrl, /^http:\/\/127\.0\.0\.1:\d+$/);
+    assert.equal(firstStatus.remoteUrl, "https://automode.example.ts.net");
+    assert.deepEqual(await second, firstStatus);
     assert.equal(exposureCalls, 1);
   } finally {
     await dashboard.stop();
@@ -544,7 +547,7 @@ test("concurrent shutdown shares failures and can retry Tailscale cleanup", asyn
     },
     onCommand: async () => undefined,
   });
-  await dashboard.start(projection());
+  const status = await dashboard.start(projection());
 
   const firstStop = dashboard.stop();
   const secondStop = dashboard.stop();
@@ -554,14 +557,7 @@ test("concurrent shutdown shares failures and can retry Tailscale cleanup", asyn
 
   await dashboard.stop();
   assert.equal(stopCalls, 2);
-  const replacement = createServer();
-  await new Promise<void>((resolve, reject) => {
-    replacement.once("error", reject);
-    replacement.listen(41_738, "127.0.0.1", resolve);
-  });
-  await new Promise<void>((resolve, reject) => {
-    replacement.close((error) => error ? reject(error) : resolve());
-  });
+  await assert.rejects(() => fetch(`${status.localUrl}/api/snapshot`));
 });
 
 test("shutdown waits for in-flight startup and removes the resulting exposure", async () => {
@@ -590,17 +586,10 @@ test("shutdown waits for in-flight startup and removes the resulting exposure", 
   assert.equal(stopBeforeExposure, "pending");
 
   releaseExposure();
-  await starting;
+  const status = await starting;
   await stopping;
   assert.equal(stopObservedEstablishedExposure, true);
-  const replacement = createServer();
-  await new Promise<void>((resolve, reject) => {
-    replacement.once("error", reject);
-    replacement.listen(41_738, "127.0.0.1", resolve);
-  });
-  await new Promise<void>((resolve, reject) => {
-    replacement.close((error) => error ? reject(error) : resolve());
-  });
+  await assert.rejects(() => fetch(`${status.localUrl}/api/snapshot`));
 });
 
 test("another dashboard uses an independent loopback port instead of blocking startup", async () => {

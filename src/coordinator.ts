@@ -704,25 +704,14 @@ export class AutomodeCoordinator {
     const records = await this.options.tracker.listBookkeeping();
     for (const record of records) {
       const key = itemKey(record.item);
-      if (record.lifecycle === "exhausted") {
-        this.exhausted.set(key, record);
-        continue;
-      }
       if (record.lifecycle === "awaiting-feedback") {
         this.awaitingFeedback.set(key, record);
         continue;
       }
-      if (!(["running", "retrying", "failed"] as TicketLifecycle[]).includes(record.lifecycle)) continue;
-      if (record.attempt >= MAX_ATTEMPTS) {
-        const exhausted: BookkeepingRecord = {
-          ...record,
-          lifecycle: "exhausted",
-          diagnostic: record.diagnostic ?? "Coordinator restarted after the fifth total attempt",
-        };
-        this.exhausted.set(key, exhausted);
-        await this.options.tracker.upsertBookkeeping(exhausted);
+      if (!(["running", "retrying", "failed", "exhausted"] as TicketLifecycle[]).includes(record.lifecycle)) {
         continue;
       }
+      const recovery = { ...record, attempt: 0 };
       const item = await this.options.tracker.read(record.item);
       const eligible = chooseEligible(item, this.options.actor, true);
       if (!eligible || eligible.stage !== record.stage || eligible.skillName !== record.skillName) {
@@ -753,9 +742,9 @@ export class AutomodeCoordinator {
         continue;
       }
       if (this.operatingStates[eligible.stage] === "ON") {
-        this.launch(item, eligible, record.attempt, record.sessionFile, record.workspace, record.sessionId);
+        this.launch(item, eligible, recovery.attempt, recovery.sessionFile, recovery.workspace, recovery.sessionId);
       } else {
-        this.pendingRecovery.set(key, record);
+        this.pendingRecovery.set(key, recovery);
       }
     }
   }

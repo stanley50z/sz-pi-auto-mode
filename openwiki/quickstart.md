@@ -22,7 +22,8 @@ This repository is an early-stage Pi extension centered on **Automode**, a disti
 - the MVP is organized into four Automation Stages: Auto-Triage, Auto-Grilling, Auto-Implement, and Auto-Review
 - startup attests the fixed Panel execution profiles regardless of the launch baseline; Auto-Grilling and Auto-Review use exactly two Panel seats: Pi / `openai-codex/gpt-5.6-sol` / high reasoning and Pi / `github-copilot/claude-fable-5` / high reasoning
 - the Automode Run Record is shared through the Git common directory, independently of Pi home/config roots, and is the durable Coordinator-bound record rather than the capability allowlist
-- the Coordinator reconciles all bookkeeping states before claims, uses complete snapshots whose revisions include `updated_at`, recovers missing, cross-home, or incompatible sessions and missing worktrees, requires merged proof before Auto-Review cleanup, preserves diagnostics after the fifth failed attempt, and fails fast on unwritable fork heads
+- the Coordinator reconciles all bookkeeping states before claims, resets recovered `running`, `retrying`, `failed`, and `exhausted` records to attempt one for each new Coordinator process while preserving valid Ticket Session history and workspaces, uses complete snapshots whose revisions include `updated_at`, recovers missing, cross-home, or incompatible sessions and missing worktrees, requires merged proof before Auto-Review cleanup, and fails fast on unwritable fork heads; the five-attempt budget is per Coordinator process, not persistent across restarts
+- closed unmerged pull requests are abandoned outputs: they do not conflict with an open or merged pull request closing the same issue
 - shutdown is controlled from the Main Session with `/drain` to gracefully drain and exit after active Ticket Sessions settle and `/exit` to force-stop active Ticket Sessions before exiting; Automode does not intercept `Ctrl-C`, so Pi retains its default TUI behavior, and the Coordinator releases its lock only after stopping
 - Personal-WeChat integration is planned separately from the Automode MVP
 - the Coordinator dashboard prefers loopback port `41738`, selects another free loopback port when occupied, optionally exposes a private Tailscale URL, projects Stage Candidates and bounded activity, and delegates only safe supervision commands; it can run concurrently for different repositories, adopts only an exact matching Tailscale handler, and removes only the exact handler it owns; the Main Session status card shows repository/run identity, dashboard links, Stage states, candidate totals, poll timing, lifecycle guidance, and Tailscale errors, and exposes `/drain` and `/exit` as the only user-facing shutdown commands
@@ -75,6 +76,7 @@ Start here, then follow the section pages below for the repository's runtime sea
 - [`docs/agents/issue-tracker.md`](../docs/agents/issue-tracker.md) — GitHub issue workflow and Wayfinder conventions
 - [`docs/agents/domain.md`](../docs/agents/domain.md) — how domain docs are meant to be consumed
 - [`docs/agents/triage-labels.md`](../docs/agents/triage-labels.md) — label mapping for skills and triage
+- [`docs/adr/0003-reset-attempt-budgets-on-process-launch.md`](../docs/adr/0003-reset-attempt-budgets-on-process-launch.md) — accepted rationale for per-process attempt budgets
 
 ## Source evidence
 

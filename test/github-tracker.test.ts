@@ -323,6 +323,52 @@ test("an open linked delivery pull request removes an issue from production elig
   assert.equal(followUp.outputPullRequest, undefined);
 });
 
+test("bookkeeping ignores abandoned pull requests that share a closing issue", async () => {
+  const pullIssue = (number: number) => issue(number, {
+    node_id: `PR_${number}`,
+    html_url: `https://github.com/owner/repository/pull/${number}`,
+    state: "closed",
+    labels: [],
+    assignees: [],
+    pull_request: { url: `https://api.github.com/repos/owner/repository/pulls/${number}` },
+  });
+  const pull = (number: number, mergedAt: string | null) => ({
+    number,
+    node_id: `PR_${number}`,
+    html_url: `https://github.com/owner/repository/pull/${number}`,
+    body: "Closes #8",
+    head: {
+      sha: `head-${number}`,
+      ref: `agent/issue-8-${number}`,
+      repo: { full_name: "owner/repository" },
+    },
+    draft: number === 12,
+    merged_at: mergedAt,
+  });
+  const runner = new FixtureRunner({
+    "repos/owner/repository/issues?state=all&per_page=100": [[
+      issue(8, { state: "closed", assignees: [] }),
+      pullIssue(12),
+      pullIssue(14),
+    ]],
+    "repos/owner/repository/pulls?state=all&per_page=100": [[
+      pull(12, null),
+      pull(14, "2026-08-14T12:00:00Z"),
+    ]],
+    "repos/owner/repository/issues/8/comments?per_page=100": [[]],
+    "repos/owner/repository/issues/12/comments?per_page=100": [[]],
+    "repos/owner/repository/issues/14/comments?per_page=100": [[]],
+  });
+  const tracker = new GitHubTracker({
+    cwd: "C:\\repository",
+    repository: "owner/repository",
+    actor: "automode-bot",
+    runner,
+  });
+
+  assert.deepEqual(await tracker.listBookkeeping(), []);
+});
+
 test("claim and release reread an issue and verify unambiguous ownership", async () => {
   let assignees: Array<{ login: string }> = [];
   const calls: Array<{ command: string; args: readonly string[]; cwd: string }> = [];

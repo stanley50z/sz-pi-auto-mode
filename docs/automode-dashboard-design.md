@@ -54,10 +54,10 @@ A Stage Candidate is displayed even when Automode cannot dispatch it. Cards dist
 - `CLAIMED` — claimed while Ticket Session/workspace startup is in progress
 - `RUNNING` — owned by a live Ticket Session
 - `WAITING` — durable Ticket Session is idle pending external feedback or state
-- `RETRYING` — a retry is scheduled within the five-attempt budget
+- `RETRYING` — a retry is scheduled within the current Coordinator process's five-attempt budget
 - `BLOCKED` — native dependencies prevent dispatch
 - `HUMAN-OWNED` — assignment or current Stage state leaves the item under human control
-- `EXHAUSTED` — five attempts were consumed; evidence is preserved
+- `EXHAUSTED` — the current Coordinator process consumed five attempts; a new Automode process resets the budget while preserving evidence
 
 Every non-running card explains why Automode has not picked it up. Lane headers show candidate, active, queued, and held totals.
 

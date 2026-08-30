@@ -69,7 +69,7 @@ The Coordinator-bound durable record that identifies an Automode Run and stores 
 _Avoid_: Automode Capability Profile, stage profile, `capability-profile.json`
 
 **Automode Coordinator**:
-The repository-singleton orchestrator for an Automode Run. At most one live Coordinator process owns the repository at a time; it discovers and claims eligible work, supervises independent Ticket Sessions without a concurrency limit, and reconstructs active work best-effort after restart from tracker, Git, worktree, and Pi session state. It runs in the Main Session and never performs ticket work itself.
+The repository-singleton orchestrator for an Automode Run. At most one live Coordinator process owns the repository at a time; it discovers and claims eligible work, supervises independent Ticket Sessions without a concurrency limit, and reconstructs active work best-effort after restart from tracker, Git, worktree, and Pi session state. Each Coordinator process owns a fresh five-attempt budget; restart clears retry and exhausted state while preserving resumable evidence. It runs in the Main Session and never performs ticket work itself.
 _Avoid_: Ticket worker, subagent
 
 **Main Session**:
