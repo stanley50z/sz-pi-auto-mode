@@ -93,7 +93,7 @@ test("a deterministic /automode journey advances triage, grilling, implementatio
         processId: `process-${request.item.number}`,
         sessionId: `session-${request.item.number}`,
         sessionFile: `/sessions/${request.item.number}.jsonl`,
-        completion: Promise.resolve({ status: "clean" }),
+        completion: Promise.resolve({ status: "clean", summary: "Fixture completed." }),
         terminate: async () => undefined,
       };
     },

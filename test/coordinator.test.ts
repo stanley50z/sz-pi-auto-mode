@@ -86,7 +86,7 @@ class FakeTicketSessions implements TicketSessionHost {
       processId: `process-${request.item.number}`,
       sessionId: `session-${request.item.number}`,
       sessionFile: `/sessions/${request.item.number}.jsonl`,
-      completion: Promise.resolve({ status: "clean" }),
+      completion: Promise.resolve({ status: "clean", summary: "Fixture completed." }),
       terminate: async () => undefined,
     };
   }
@@ -128,12 +128,12 @@ test("projects queued, claimed, and running lifecycle from Coordinator state", a
   let finishStartup!: () => void;
   const startupGate = new Promise<void>((resolve) => { finishStartup = resolve; });
   let finishSession!: () => void;
-  const completion = new Promise<{ status: "clean" }>((resolve) => {
+  const completion = new Promise<{ status: "clean"; summary: string }>((resolve) => {
     finishSession = () => {
       const item = tracker.items[0]!;
       item.outputPullRequest = "https://github.com/owner/repository/pull/60";
       item.materialVersion = "60-done";
-      resolve({ status: "clean" });
+      resolve({ status: "clean", summary: "Fixture completed." });
     };
   });
   let sessionStarts = 0;
@@ -382,11 +382,11 @@ test("Stage Operating State drains active work, suppresses dispatch, and scans i
           processId: "process-11",
           sessionId: "session-11",
           sessionFile: "/sessions/11.jsonl",
-          completion: new Promise<{ status: "clean" }>((resolve) => {
+          completion: new Promise<{ status: "clean"; summary: string }>((resolve) => {
             settleFirst = () => {
               item.outputPullRequest = "https://github.com/owner/repository/pull/11";
               item.materialVersion = "11-done";
-              resolve({ status: "clean" });
+              resolve({ status: "clean", summary: "Fixture completed." });
             };
           }),
           terminate: async () => undefined,
@@ -398,7 +398,7 @@ test("Stage Operating State drains active work, suppresses dispatch, and scans i
         processId: "process-12",
         sessionId: "session-12",
         sessionFile: "/sessions/12.jsonl",
-        completion: Promise.resolve({ status: "clean" }),
+        completion: Promise.resolve({ status: "clean", summary: "Fixture completed." }),
         terminate: async () => undefined,
       };
     },
@@ -459,7 +459,7 @@ test("a Stage drain preserves retry budget and session continuity for re-enable"
         processId: `process-${requests.length}`,
         sessionId: "session-63",
         sessionFile: "/sessions/63.jsonl",
-        completion: requests.length === 1 ? firstCompletion : Promise.resolve({ status: "clean" }),
+        completion: requests.length === 1 ? firstCompletion : Promise.resolve({ status: "clean", summary: "Fixture completed." }),
         terminate: async () => undefined,
       };
     },
@@ -704,13 +704,13 @@ test("workflow precedence dispatches each item once while unrelated eligible ite
   const sessions: TicketSessionHost = {
     async start(request) {
       requests.push(request);
-      const completion = new Promise<{ status: "clean" }>((resolve) => {
+      const completion = new Promise<{ status: "clean"; summary: string }>((resolve) => {
         releases.set(request.item.number, () => {
           const item = tracker.items.find((candidate) => candidate.number === request.item.number)!;
           item.state = "closed";
           if (item.kind === "pull-request") item.merged = true;
           item.materialVersion += "-done";
-          resolve({ status: "clean" });
+          resolve({ status: "clean", summary: "Fixture completed." });
         });
       });
       return {
@@ -820,12 +820,12 @@ test("Ticket Session launch failures are projected as retrying within the shared
   };
   let starts = 0;
   let finishThirdAttempt!: () => void;
-  const thirdAttempt = new Promise<{ status: "clean" }>((resolve) => {
+  const thirdAttempt = new Promise<{ status: "clean"; summary: string }>((resolve) => {
     finishThirdAttempt = () => {
       const item = tracker.items[0]!;
       item.outputPullRequest = "https://github.com/owner/repository/pull/39";
       item.materialVersion = "39-delivered";
-      resolve({ status: "clean" });
+      resolve({ status: "clean", summary: "Fixture completed." });
     };
   });
   const sessions: TicketSessionHost = {
@@ -1071,7 +1071,7 @@ test("Auto-Review requires merged proof and reports cleanup only after merge", a
         processId: `process-${starts}`,
         sessionId: "session-44",
         sessionFile: "/sessions/44.jsonl",
-        completion: Promise.resolve({ status: "clean" }),
+        completion: Promise.resolve({ status: "clean", summary: "Fixture completed." }),
         terminate: async () => undefined,
       };
     },
@@ -1100,6 +1100,117 @@ test("Auto-Review requires merged proof and reports cleanup only after merge", a
   await coordinator.whenStopped();
 });
 
+test("any waiting Ticket Session holds after one attempt and exposes its summary", async () => {
+  const implementation = issue({
+    number: 47,
+    labels: ["ready-for-agent"],
+    assignees: ["automation-user"],
+    materialVersion: "47-initial",
+  });
+  const tracker = new FakeTracker([implementation]);
+  const sessions = new FakeTicketSessions(() => undefined);
+  sessions.start = async (request) => {
+    sessions.requests.push(request);
+    return {
+      processId: "process-47",
+      sessionId: "session-47",
+      sessionFile: "/sessions/47.jsonl",
+      completion: Promise.resolve({
+        status: "waiting",
+        summary: "The issue contract needs one substantive clarification.",
+      }),
+      terminate: async () => undefined,
+    };
+  };
+  const clock = new ManualClock();
+  const supervision: CoordinatorSupervisionEvent[] = [];
+  const coordinator = new AutomodeCoordinator({
+    configuration: createAutomationStageConfiguration("half", ["auto-implement"]),
+    actor: "automation-user",
+    tracker,
+    sessions,
+    workspaces: fakeWorkspaces,
+    clock,
+  });
+  coordinator.subscribe((event) => supervision.push(event));
+
+  await coordinator.start();
+  await coordinator.waitForIdle();
+
+  assert.equal(sessions.requests.length, 1);
+  assert.equal(tracker.records.get("issue:47")?.lifecycle, "awaiting-feedback");
+  assert.equal(tracker.records.get("issue:47")?.attempt, 1);
+  assert.match(tracker.records.get("issue:47")?.diagnostic ?? "", /substantive clarification/);
+  assert.equal(candidateFor(coordinator, 47)?.status, "waiting");
+  assert.match(candidateFor(coordinator, 47)?.reason ?? "", /substantive clarification/);
+  assert.ok(supervision.some((event) =>
+    event.type === "activity" && /substantive clarification/.test(event.activity.message)
+  ));
+
+  await clock.callback?.();
+  assert.equal(sessions.requests.length, 1);
+  coordinator.interrupt();
+  await coordinator.whenStopped();
+});
+
+test("waiting does not pin an item that changed Stage during the Ticket Session", async () => {
+  const item = issue({ number: 48, labels: ["wayfinder:prototype"], materialVersion: "48-prototype" });
+  const tracker = new FakeTracker([item]);
+  const requests: TicketSessionRequest[] = [];
+  const sessions: TicketSessionHost = {
+    async start(request) {
+      requests.push(request);
+      if (request.skillName === "prototype") {
+        item.labels = ["needs-triage"];
+        item.assignees = [];
+        item.materialVersion = "48-triage";
+        return {
+          processId: "process-prototype-48",
+          sessionId: "session-prototype-48",
+          sessionFile: "/sessions/prototype-48.jsonl",
+          completion: Promise.resolve({
+            status: "waiting" as const,
+            summary: "Prototype feedback is required.",
+          }),
+          terminate: async () => undefined,
+        };
+      }
+      item.state = "closed";
+      item.materialVersion = "48-complete";
+      return {
+        processId: "process-triage-48",
+        sessionId: "session-triage-48",
+        sessionFile: "/sessions/triage-48.jsonl",
+        completion: Promise.resolve({ status: "clean" as const, summary: "Triage completed." }),
+        terminate: async () => undefined,
+      };
+    },
+  };
+  const clock = new ManualClock();
+  const coordinator = new AutomodeCoordinator({
+    configuration: createAutomationStageConfiguration("full", [
+      "auto-triage", "auto-grilling", "auto-implement", "auto-review",
+    ]),
+    actor: "automation-user",
+    tracker,
+    sessions,
+    workspaces: fakeWorkspaces,
+    clock,
+  });
+
+  await coordinator.start();
+  await coordinator.waitForIdle();
+  assert.equal(tracker.records.get("issue:48")?.lifecycle, "failed");
+  assert.equal(requests.length, 1);
+
+  await clock.callback?.();
+  await coordinator.waitForIdle();
+  assert.deepEqual(requests.map(({ skillName }) => skillName), ["prototype", "triage"]);
+  assert.equal(tracker.records.get("issue:48")?.lifecycle, "succeeded");
+  coordinator.interrupt();
+  await coordinator.whenStopped();
+});
+
 test("prototype waiting is idle until external material feedback resumes the same session", async () => {
   const prototype = issue({
     number: 45,
@@ -1120,7 +1231,7 @@ test("prototype waiting is idle until external material feedback resumes the sam
         sessionId: "prototype-session-45",
         sessionFile: "/sessions/prototype-45.jsonl",
         completion: Promise.resolve(
-          requests.length === 1 ? { status: "waiting" as const } : { status: "clean" as const },
+          requests.length === 1 ? { status: "waiting" as const, summary: "Waiting for feedback." } : { status: "clean" as const, summary: "Fixture completed." },
         ),
         terminate: async () => undefined,
       };
@@ -1140,7 +1251,7 @@ test("prototype waiting is idle until external material feedback resumes the sam
   await coordinator.waitForIdle();
   assert.equal(tracker.records.get("issue:45")?.lifecycle, "awaiting-feedback");
   assert.equal(candidateFor(coordinator, 45)?.status, "waiting");
-  assert.match(candidateFor(coordinator, 45)?.reason ?? "", /external feedback/i);
+  assert.match(candidateFor(coordinator, 45)?.reason ?? "", /material tracker change|waiting for feedback/i);
   assert.equal(
     coordinator.getProjection().lanes.find((lane) => lane.stage === "auto-implement")?.totals.held,
     1,
@@ -1176,7 +1287,7 @@ test("material feedback that changes Stage precedence leaves the old waiting ses
         sessionId: `session-${requests.length}`,
         sessionFile: `/sessions/${requests.length}.jsonl`,
         completion: Promise.resolve(
-          request.skillName === "prototype" ? { status: "waiting" as const } : { status: "clean" as const },
+          request.skillName === "prototype" ? { status: "waiting" as const, summary: "Waiting for feedback." } : { status: "clean" as const, summary: "Fixture completed." },
         ),
         terminate: async () => undefined,
       };

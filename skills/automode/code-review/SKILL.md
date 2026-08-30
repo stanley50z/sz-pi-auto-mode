@@ -10,7 +10,7 @@ You are the authoritative Review Session for one open non-draft pull request. Th
 
 ## Prepare
 
-1. Re-read the pull request body, linked issue/specification, repository guidance, domain vocabulary, relevant ADRs, commits, validation evidence, and merge-base diff. Load the [Agent Brief verification contract](../../native/triage/AGENT-BRIEF.md), apply it to the linked issue's brief, and identify its predicate, proof steps, and required evidence.
+1. Re-read the pull request body, linked issue/specification, repository guidance, domain vocabulary, relevant ADRs, commits, validation evidence, and merge-base diff. Load the [Agent Brief verification contract](../../native/triage/AGENT-BRIEF.md). When no Agent Brief exists, use an equivalently complete issue discussion as the work contract if it settles required behavior, public seams, verification, dependencies, and human gates. Do not reject review only because template headings are absent. Identify the work contract's predicate, proof steps, and required evidence.
 2. Reuse the recorded Auto-Implement worktree or fetch the exact pull-request head into an isolated writable worktree. Fail explicitly if fixes cannot be pushed to the head.
 3. Pin the exact head SHA for the round.
 
@@ -33,10 +33,11 @@ You are the authoritative Review Session for one open non-draft pull request. Th
 - Create linked standalone issues for valid out-of-scope findings.
 - Explain invalid findings. Fail explicitly on design instability that local changes cannot resolve.
 - Run at most three substantive panel rounds. Before round three, valid in-scope findings trigger fixes and another round. After round three, perform one terminal roundup: fix remaining valid in-scope findings and validate without launching another panel round.
+- If the work contract remains substantively incomplete or a required human decision blocks review, record the blocker once and call `automode_ticket_result` with `status: "waiting"`. The Coordinator holds the item until a material tracker update; do not consume retries by repeating an unchanged blocker.
 
 ## Validate and merge
 
-1. Re-run every applicable proof step from the Agent Brief against the final head and compare the observation with its expected result. Confirm the pull request preserves the required evidence. Then run the complete applicable local test/build validation and wait for required GitHub checks. Unavailable required proof is a failed validation.
+1. Re-run every applicable proof step from the work contract against the final head and compare the observation with its expected result. Confirm the pull request preserves the required evidence. Then run the complete applicable local test/build validation and wait for required GitHub checks. Unavailable required proof is a failed validation.
 2. Immediately confirm the head is current and mergeable.
 3. If another concurrently reviewed pull request caused a base conflict, perform one terminal Conflict-Fix Round: integrate the latest base, resolve only resulting conflicts, validate, push, and recheck without another panel round. A design/requirement conflict, failed validation, or second conflict fails explicitly.
 4. Squash-merge through repository controls.

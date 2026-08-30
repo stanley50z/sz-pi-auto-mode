@@ -20,7 +20,7 @@ export function createTicketSessionResultExtension(): TicketSessionResultExtensi
       pi.registerTool({
         name: "automode_ticket_result",
         label: "Automode Ticket Result",
-        description: "Report the final result of this Ticket Session exactly once after tracker and repository work is complete, or report waiting after publishing a prototype and recording its feedback request.",
+        description: "Report the final result exactly once after tracker and repository work is complete, or report waiting after recording a substantive blocker that requires a material tracker update.",
         parameters: Type.Object({
           status: StringEnum(["complete", "waiting"] as const),
           summary: Type.String({ minLength: 1 }),

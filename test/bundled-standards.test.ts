@@ -44,6 +44,8 @@ test("the Agent Brief is one verification contract shared by every delivery stag
   for (const stage of stages) {
     assert.match(stage, /\.\.\/\.\.\/native\/triage\/AGENT-BRIEF\.md/);
   }
+  assert.match(stages[1]!, /When no Agent Brief exists, use an equivalently complete issue discussion/);
+  assert.match(stages[2]!, /When no Agent Brief exists, use an equivalently complete issue discussion/);
   assert.match(stages[1]!, /Run every applicable proof step/);
   assert.match(stages[2]!, /Re-run every applicable proof step/);
 });

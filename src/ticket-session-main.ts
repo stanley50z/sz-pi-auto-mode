@@ -34,11 +34,16 @@ export interface TicketSessionChildActivity {
   isError?: boolean;
 }
 
+export interface TicketSessionChildPromptResult {
+  readonly status: Exclude<TicketSessionTerminalStatus, "error">;
+  readonly summary: string;
+}
+
 export interface TicketSessionChildSession {
   readonly sessionId: string;
   readonly sessionFile: string;
   subscribe(listener: (activity: TicketSessionChildActivity) => void): () => void;
-  prompt(prompt: string): Promise<Exclude<TicketSessionTerminalStatus, "error">>;
+  prompt(prompt: string): Promise<TicketSessionChildPromptResult>;
   abort(): Promise<void>;
   dispose(): void;
 }
@@ -51,6 +56,7 @@ export interface TicketSessionChildTerminalResult {
   status: TicketSessionTerminalStatus;
   sessionId?: string;
   sessionFile?: string;
+  summary?: string;
   error?: string;
 }
 
@@ -72,7 +78,7 @@ async function promptUntilSettled(
   session: TicketSessionChildSession,
   prompt: string,
   signal: AbortSignal | undefined,
-): Promise<Exclude<TicketSessionTerminalStatus, "error">> {
+): Promise<TicketSessionChildPromptResult> {
   if (!signal) return session.prompt(prompt);
   if (signal.aborted) {
     try {
@@ -143,13 +149,20 @@ export async function runTicketSessionChild(
     });
 
     const outcome = await promptUntilSettled(session, request.prompt, signal);
-    if (outcome !== "clean" && outcome !== "waiting") {
-      throw new Error(`Controlled Ticket Session returned an invalid terminal status: ${String(outcome)}`);
+    if (
+      !outcome
+      || typeof outcome !== "object"
+      || (outcome.status !== "clean" && outcome.status !== "waiting")
+      || typeof outcome.summary !== "string"
+      || outcome.summary.length === 0
+    ) {
+      throw new Error("Controlled Ticket Session returned an invalid terminal result");
     }
     return {
-      status: outcome,
+      status: outcome.status,
       sessionId: session.sessionId,
       sessionFile: session.sessionFile,
+      summary: outcome.summary,
     };
   } catch (error) {
     return {
@@ -322,7 +335,10 @@ export const createControlledTicketSession: TicketSessionChildSessionFactory = a
         if (error) throw new Error(`Ticket Session agent failed: ${error}`);
         const reported = resultReporter.read();
         if (!reported) throw new Error("Ticket Session settled without reporting a structured result");
-        return reported.status === "waiting" ? "waiting" : "clean";
+        return {
+          status: reported.status === "waiting" ? "waiting" : "clean",
+          summary: reported.summary,
+        };
       },
       abort: () => result.session.abort(),
       dispose: () => result.session.dispose(),

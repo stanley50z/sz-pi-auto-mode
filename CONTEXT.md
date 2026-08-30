@@ -81,7 +81,7 @@ The comprehensive browser supervision surface for one live Automode Coordinator.
 _Avoid_: Coordinator GUI, Ticket Session terminal, Main Session TUI
 
 **Ticket Session**:
-One durable logical Pi session that owns one eligible tracker ticket or pull request through its applicable Automode Stage Skill. It normally runs in an independent full background Pi process, persists conversation history through native Pi session storage, and may resume in a replacement process without sharing context with other items. It is not a subagent. A stage-specific Ticket Session keeps its stage-specific name, such as Grilling Session or Review Session.
+One durable logical Pi session that owns one eligible tracker ticket or pull request through its applicable Automode Stage Skill. It normally runs in an independent full background Pi process, persists conversation history through native Pi session storage, and may resume in a replacement process without sharing context with other items. A `waiting` result holds the item without consuming retries until a material tracker update, and its summary remains visible to supervision. It is not a subagent. A stage-specific Ticket Session keeps its stage-specific name, such as Grilling Session or Review Session.
 _Avoid_: Work item, Panel Member, shared worker session
 
 **Grilling Session**:

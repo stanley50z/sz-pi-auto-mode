@@ -81,10 +81,9 @@ export interface TicketSessionRequest {
   readonly workspace?: TicketWorkspaceIdentity;
 }
 
-export interface TicketSessionTerminalResult {
-  readonly status: "clean" | "error" | "waiting";
-  readonly error?: string;
-}
+export type TicketSessionTerminalResult =
+  | { readonly status: "clean" | "waiting"; readonly summary: string; readonly error?: never }
+  | { readonly status: "error"; readonly error?: string; readonly summary?: never };
 
 export type TicketSessionActivityKind = "pi" | "tool" | "error" | "terminal" | "coordinator";
 
@@ -514,7 +513,9 @@ export class AutomodeCoordinator {
         && waiting.materialVersion === item.materialVersion
       ) {
         status = "waiting";
-        reason = "The durable Ticket Session is waiting for external feedback or a material tracker change.";
+        reason = waiting.diagnostic
+          ? `The Ticket Session is waiting for a material tracker change. ${waiting.diagnostic}`
+          : "The durable Ticket Session is waiting for external feedback or a material tracker change.";
         attempt = waiting.attempt;
         if (waiting.sessionId && waiting.sessionFile) {
           session = {
@@ -990,7 +991,7 @@ export class AutomodeCoordinator {
       this.emitActivity(item, choice, attempt, handle, "terminal", {
         occurredAt: this.clock.now().toISOString(),
         kind: terminal.status === "error" ? "error" : "terminal",
-        message: terminal.error ?? `Ticket Session settled with ${terminal.status}.`,
+        message: terminal.error ?? terminal.summary ?? `Ticket Session settled with ${terminal.status}.`,
       });
       const activeAfterCompletion = this.active.get(itemKey(item));
       activeAfterCompletion?.unsubscribe?.();
@@ -1003,7 +1004,26 @@ export class AutomodeCoordinator {
           : `The Ticket Session settled after reporting ${terminal.status}.`,
       );
       this.refreshProjection();
-      if (choice.skillName === "prototype" && terminal.status === "waiting") {
+      if (terminal.status === "waiting") {
+        const recognized = recognizedChoice(fresh);
+        if (recognized?.stage !== choice.stage || recognized.skillName !== choice.skillName) {
+          await this.options.tracker.upsertBookkeeping({
+            version: 1,
+            coordinatorId: this.options.coordinatorId,
+            item: itemReference(fresh),
+            stage: choice.stage,
+            skillName: choice.skillName,
+            attempt,
+            lifecycle: "failed",
+            materialVersion: fresh.materialVersion,
+            processId: handle.processId,
+            sessionId: handle.sessionId,
+            sessionFile: handle.sessionFile,
+            workspace: preparedWorkspace,
+            diagnostic: terminal.summary,
+          });
+          return;
+        }
         const waiting: BookkeepingRecord = {
           version: 1,
           coordinatorId: this.options.coordinatorId,
@@ -1017,6 +1037,7 @@ export class AutomodeCoordinator {
           sessionId: handle.sessionId,
           sessionFile: handle.sessionFile,
           workspace: preparedWorkspace,
+          diagnostic: terminal.summary,
         };
         this.awaitingFeedback.set(itemKey(fresh), waiting);
         await this.options.tracker.upsertBookkeeping(waiting);

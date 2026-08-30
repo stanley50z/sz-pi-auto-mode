@@ -52,16 +52,30 @@ test("Coordinator Stage Candidates map to the browser projection without tracker
       totals: { candidates: 0, active: 0, queued: 0, held: 0, retrying: 0, exhausted: 0 },
     }, {
       stage: "auto-implement",
-      operatingState: "OFF",
-      candidates: [],
-      totals: { candidates: 0, active: 0, queued: 0, held: 0, retrying: 0, exhausted: 0 },
+      operatingState: "ON",
+      candidates: [{
+        item: { kind: "issue", number: 69, url: "https://github.com/example/repository/issues/69" },
+        title: "Clarify the implementation contract",
+        stage: "auto-implement",
+        skillName: "implement",
+        status: "waiting",
+        reason: "The Ticket Session is waiting. Add the missing deployment decision.",
+        attempt: 1,
+        session: {
+          processId: "process-69",
+          sessionId: "session-69",
+          sessionFile: "/sessions/69.jsonl",
+          workspace: "/worktrees/issue-69",
+        },
+      }],
+      totals: { candidates: 1, active: 0, queued: 0, held: 1, retrying: 0, exhausted: 0 },
     }, {
       stage: "auto-review",
       operatingState: "OFF",
       candidates: [],
       totals: { candidates: 0, active: 0, queued: 0, held: 0, retrying: 0, exhausted: 0 },
     }],
-    totals: { candidates: 1, active: 0, queued: 1, held: 0, retrying: 0, exhausted: 0 },
+    totals: { candidates: 2, active: 0, queued: 1, held: 1, retrying: 0, exhausted: 0 },
     poll: {
       lastSuccessfulPoll: "2026-08-17T12:00:00.000Z",
       nextScheduledPoll: "2026-08-17T12:00:30.000Z",
@@ -113,6 +127,10 @@ test("Coordinator Stage Candidates map to the browser projection without tracker
       attempts: [],
     },
   });
+  assert.equal(
+    projection.lanes[2]?.candidates[0]?.activity,
+    "The Ticket Session is waiting. Add the missing deployment decision.",
+  );
   assert.deepEqual(projection.recent[0], {
     key: "pull-request:61:auto-review:recent:2026-08-17T12:00:00.000Z",
     itemKey: "pull-request:61",

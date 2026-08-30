@@ -60,6 +60,7 @@ export interface TicketSessionTerminalResult {
   status: TicketSessionTerminalStatus;
   sessionId?: string;
   sessionFile?: string;
+  summary?: string;
   error?: string;
   exitCode: number | null;
   signal: NodeJS.Signals | null;
@@ -117,6 +118,7 @@ interface ChildTerminalResult {
   status: TicketSessionTerminalStatus;
   sessionId?: string;
   sessionFile?: string;
+  summary?: string;
   error?: string;
 }
 
@@ -223,9 +225,12 @@ function isChildTerminal(message: unknown): message is ChildTerminalMessage {
     && typeof candidate.result.sessionFile !== "string"
   ) return false;
   if (candidate.result.error !== undefined && typeof candidate.result.error !== "string") return false;
+  if (candidate.result.summary !== undefined && typeof candidate.result.summary !== "string") return false;
   if (candidate.result.status !== "error") {
     return typeof candidate.result.sessionId === "string"
-      && typeof candidate.result.sessionFile === "string";
+      && typeof candidate.result.sessionFile === "string"
+      && typeof candidate.result.summary === "string"
+      && candidate.result.summary.length > 0;
   }
   return typeof candidate.result.error === "string";
 }
@@ -676,10 +681,13 @@ export class AutomodeTicketSessionHost implements CoordinatorTicketSessionHost {
           };
         }
       }
-      return {
-        status: result.status,
-        ...(result.error === undefined ? {} : { error: result.error }),
-      };
+      if (result.status === "error") {
+        return { status: "error" as const, ...(result.error === undefined ? {} : { error: result.error }) };
+      }
+      if (!result.summary) {
+        return { status: "error" as const, error: "Ticket Session completed without a structured summary" };
+      }
+      return { status: result.status, summary: result.summary };
     }).finally(stopObserving);
     this.#startingRuns.delete(key);
     return {

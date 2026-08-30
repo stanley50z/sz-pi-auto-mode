@@ -74,7 +74,7 @@ async function main(): Promise<void> {
         toolName: string;
       }) => void) | undefined;
       let completionTimer: NodeJS.Timeout | undefined;
-      const completion = new Promise<{ status: "clean" }>((resolveCompletion) => {
+      const completion = new Promise<{ status: "clean"; summary: string }>((resolveCompletion) => {
         let settled = false;
         settleSession = () => {
           if (settled) return;
@@ -82,7 +82,7 @@ async function main(): Promise<void> {
           if (completionTimer) clearTimeout(completionTimer);
           item.outputPullRequest = "https://github.com/owner/repository/pull/51";
           item.materialVersion = "issue-50-delivered";
-          resolveCompletion({ status: "clean" });
+          resolveCompletion({ status: "clean", summary: "Fixture completed." });
         };
         if (drainCompletionDelay === undefined) {
           completionTimer = setTimeout(settleSession, completionDelayMilliseconds());

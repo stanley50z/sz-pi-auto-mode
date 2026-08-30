@@ -798,6 +798,7 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
       ...(typeof details.toolName === "string" ? { toolName: details.toolName } : {})
     };
     validateActivityEntry(event, "activity.event");
+    if (candidate) candidate.activity = event.message;
     let attempts = state.activityLog.get(activityKey);
     if (!attempts) {
       attempts = new Map();
@@ -919,6 +920,7 @@ function mapDashboardCandidate(
     stage: candidate.stage,
     status: candidate.status,
     reason: candidate.reason,
+    ...(candidate.status === "waiting" ? { activity: candidate.reason } : {}),
     attempt: candidate.attempt,
     ...(candidate.session === undefined ? {} : {
       session: {

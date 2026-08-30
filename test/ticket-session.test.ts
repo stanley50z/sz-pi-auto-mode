@@ -60,7 +60,7 @@ async function runFixtureChild(): Promise<void> {
       writeFileSync(sessionFile, `${JSON.stringify({ type: "session", version: 3, id: sessionId, cwd: process.cwd() })}\n`);
       appendFileSync(sessionFile, `${JSON.stringify({ type: "prompt", prompt })}\n`);
       activity?.({ activity: "agent_settled" });
-      return "clean";
+      return { status: "clean", summary: "Fixture completed." };
     },
     async abort() {},
     dispose() {},
@@ -141,6 +141,7 @@ test("TicketSessionHost launches one child in the actual item cwd with determini
       status: "clean",
       sessionId: "session-17",
       sessionFile: join(cwd, "session-17.jsonl"),
+      summary: "Triage completed.",
     },
   });
   child.exitCode = 0;
@@ -149,6 +150,7 @@ test("TicketSessionHost launches one child in the actual item cwd with determini
     status: "clean",
     sessionId: "session-17",
     sessionFile: join(cwd, "session-17.jsonl"),
+    summary: "Triage completed.",
     exitCode: 0,
     signal: null,
   });
@@ -211,6 +213,7 @@ test("Coordinator recovery replaces mismatched in-root session history instead o
       status: "clean",
       sessionId: "replacement-session",
       sessionFile: replacementSessionFile,
+      summary: "Replacement completed.",
     },
   });
   child.exitCode = 0;
@@ -261,7 +264,7 @@ test("a fresh Ticket Session validates its persisted identity before reporting s
   child.emit("message", {
     type: "ticket-session:terminal",
     version: 1,
-    result: { status: "clean", sessionId: "fresh-session", sessionFile },
+    result: { status: "clean", sessionId: "fresh-session", sessionFile, summary: "Implementation completed." },
   });
   child.exitCode = 0;
   child.emit("exit", 0, null);
@@ -349,7 +352,7 @@ test("the Coordinator host exposes persisted Pi history and future structured ac
   child.emit("message", {
     type: "ticket-session:terminal",
     version: 1,
-    result: { status: "clean", sessionId: "session-history", sessionFile },
+    result: { status: "clean", sessionId: "session-history", sessionFile, summary: "Implementation completed." },
   });
   child.exitCode = 0;
   child.emit("exit", 0, null);
@@ -417,7 +420,7 @@ test("the child reports persistent identity and structured activity around one c
     async prompt(prompt) {
       prompts.push(prompt);
       activityListener?.({ activity: "tool_execution_start", toolName: "read" });
-      return "clean";
+      return { status: "clean", summary: "Triage completed." };
     },
     async abort() {},
     dispose() { disposed = true; },
@@ -450,6 +453,7 @@ test("the child reports persistent identity and structured activity around one c
     status: "clean",
     sessionId: "durable-session",
     sessionFile,
+    summary: "Triage completed.",
   });
   assert.equal(disposed, true);
 });
@@ -513,7 +517,7 @@ test("graceful termination aborts and disposes the controlled child session", as
     sessionId: "graceful-session",
     sessionFile: join(cwd, "graceful-session.jsonl"),
     subscribe: () => () => {},
-    prompt: () => new Promise<"clean">(() => {}),
+    prompt: () => new Promise<never>(() => {}),
     async abort() { aborted += 1; },
     dispose() { disposed += 1; },
   }), () => {}, { cwd, signal: controller.signal });
@@ -569,7 +573,7 @@ test("an exact persisted session file can resume and settle waiting", async () =
       sessionId: "persisted-session-id",
       sessionFile,
       subscribe: () => () => {},
-      async prompt() { return "waiting"; },
+      async prompt() { return { status: "waiting", summary: "Waiting for feedback." }; },
       async abort() {},
       dispose() {},
     };
@@ -580,6 +584,7 @@ test("an exact persisted session file can resume and settle waiting", async () =
     status: "waiting",
     sessionId: "persisted-session-id",
     sessionFile,
+    summary: "Waiting for feedback.",
   });
 });
 
@@ -636,7 +641,7 @@ writeFileSync(${JSON.stringify(preloadMarker)}, "loaded");
   assert.equal(existsSync(handle.sessionFile), false);
   writeFileSync(promptRelease, "continue");
 
-  assert.deepEqual(await handle.completion, { status: "clean" });
+  assert.deepEqual(await handle.completion, { status: "clean", summary: "Fixture completed." });
   assert.equal(existsSync(handle.sessionFile), true);
   assert.match(
     readFileSync(handle.sessionFile, "utf8"),
