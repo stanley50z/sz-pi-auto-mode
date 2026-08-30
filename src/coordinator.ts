@@ -1,3 +1,4 @@
+import { AutomodeRestartRequiredError } from "./restart-required.js";
 import {
   AUTOMATION_STAGES,
   AUTOMATION_STAGE_LABELS,
@@ -938,6 +939,7 @@ export class AutomodeCoordinator {
           workspace: preparedWorkspace,
         });
       } catch (error) {
+        const restartRequired = error instanceof AutomodeRestartRequiredError;
         const finalAttempt = attempt === MAX_ATTEMPTS;
         const record: BookkeepingRecord = {
           version: 1,
@@ -946,11 +948,16 @@ export class AutomodeCoordinator {
           stage: choice.stage,
           skillName: choice.skillName,
           attempt,
-          lifecycle: finalAttempt ? "exhausted" : "retrying",
+          lifecycle: restartRequired ? "failed" : finalAttempt ? "exhausted" : "retrying",
           materialVersion: item.materialVersion,
           diagnostic: errorMessage(error),
           workspace: preparedWorkspace,
         };
+        if (restartRequired) {
+          await this.options.tracker.upsertBookkeeping(record);
+          this.interrupt();
+          return;
+        }
         if (finalAttempt) {
           this.exhausted.set(itemKey(item), record);
         } else {

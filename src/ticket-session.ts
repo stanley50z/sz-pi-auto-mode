@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, openSync, readSync, realpathSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, realpathSync } from "node:fs";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +12,7 @@ import type {
   TicketSessionObservedActivity,
 } from "./coordinator.js";
 import { resolveAutomodePaths } from "./paths.js";
+import { AutomodeRestartRequiredError } from "./restart-required.js";
 import type { AutomationStageConfiguration } from "./stage-configuration.js";
 import { createAssistantTranscript } from "./ticket-transcript.js";
 
@@ -162,6 +164,22 @@ function defaultChildEntrypoint(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "ticket-session-main.js");
 }
 
+function ticketSessionRuntimeFingerprint(entrypoint: string): string {
+  const directory = dirname(entrypoint);
+  const files = readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".js"))
+    .map((entry) => entry.name)
+    .sort();
+  const hash = createHash("sha256");
+  for (const file of files) {
+    hash.update(file);
+    hash.update("\0");
+    hash.update(readFileSync(resolve(directory, file)));
+    hash.update("\0");
+  }
+  return hash.digest("hex");
+}
+
 const defaultLauncher: TicketSessionProcessLauncher = ({ entrypoint, cwd, env }) => {
   const runtimeLoader = env.AUTOMODE_PI_RUNTIME_LOADER;
   if (!runtimeLoader) throw new Error("Ticket Session is missing the launching Pi runtime loader");
@@ -263,11 +281,15 @@ export class TicketSessionHost {
   readonly #launcher: TicketSessionProcessLauncher;
   readonly #env: NodeJS.ProcessEnv;
   readonly #terminationGraceMs: number;
+  readonly #runtimeFingerprint: string | undefined;
 
   constructor(options: TicketSessionHostOptions = {}) {
     this.#entrypoint = resolve(options.childEntrypoint ?? defaultChildEntrypoint());
     this.#launcher = options.launcher ?? defaultLauncher;
     this.#env = { ...(options.env ?? process.env) };
+    this.#runtimeFingerprint = options.launcher === undefined
+      ? ticketSessionRuntimeFingerprint(this.#entrypoint)
+      : undefined;
     this.#terminationGraceMs = options.terminationGraceMs ?? 5_000;
     if (!Number.isFinite(this.#terminationGraceMs) || this.#terminationGraceMs < 0) {
       throw new Error("Ticket Session termination grace period must be non-negative");
@@ -275,6 +297,14 @@ export class TicketSessionHost {
   }
 
   launch(request: TicketSessionLaunchRequest): TicketSessionRun {
+    if (
+      this.#runtimeFingerprint !== undefined
+      && ticketSessionRuntimeFingerprint(this.#entrypoint) !== this.#runtimeFingerprint
+    ) {
+      throw new AutomodeRestartRequiredError(
+        "The Ticket Session runtime changed while this Coordinator was running; restart Automode before dispatching more work",
+      );
+    }
     const cwd = realpathSync(resolve(request.cwd));
     const childRequest: TicketSessionChildRequest = {
       cwd,

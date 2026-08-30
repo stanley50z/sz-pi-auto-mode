@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   CliPanelProcessLauncher,
   type PanelCommandRunner,
@@ -35,7 +36,7 @@ test("the production launcher runs controlled Pi and Claude Code seats with exac
   const runner: PanelCommandRunner = {
     async run(command, args, cwd, env) {
       calls.push({ command, args, cwd, env });
-      if (command === "pi") {
+      if (args.includes("--mode")) {
         return {
           exitCode: 0,
           signal: null,
@@ -54,9 +55,11 @@ test("the production launcher runs controlled Pi and Claude Code seats with exac
       };
     },
   };
+  const piPackageDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../node_modules/@earendil-works/pi-coding-agent");
   const launcher = new CliPanelProcessLauncher({
     cwd: "C:/repository",
     normalAgentDir: "C:/normal-agent",
+    piPackageDir,
     runner,
   });
 
@@ -65,7 +68,9 @@ test("the production launcher runs controlled Pi and Claude Code seats with exac
 
   assert.deepEqual(JSON.parse(pi.stdout), answer);
   assert.deepEqual(JSON.parse(claude.stdout), answer);
-  assert.deepEqual(calls[0]!.args.slice(0, 8), [
+  assert.equal(calls[0]!.command, process.execPath);
+  assert.equal(calls[0]!.args[0], resolve(piPackageDir, "dist/bundle/cli.js"));
+  assert.deepEqual(calls[0]!.args.slice(1, 9), [
     "--mode", "json", "-p", "--no-session", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes",
   ]);
   assert.ok(calls[0]!.args.includes("openai-codex"));

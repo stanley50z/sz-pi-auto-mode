@@ -56,6 +56,7 @@ export const processPanelCommandRunner: PanelCommandRunner = {
 export interface CliPanelProcessLauncherOptions {
   readonly cwd: string;
   readonly normalAgentDir: string;
+  readonly piPackageDir: string;
   readonly runner?: PanelCommandRunner;
   readonly env?: NodeJS.ProcessEnv;
 }
@@ -128,12 +129,14 @@ function assertTools(tools: readonly string[]): void {
 export class CliPanelProcessLauncher implements ProductionPanelProcessLauncher {
   readonly #cwd: string;
   readonly #normalAgentDir: string;
+  readonly #piCliEntrypoint: string;
   readonly #runner: PanelCommandRunner;
   readonly #env: NodeJS.ProcessEnv;
 
   constructor(options: CliPanelProcessLauncherOptions) {
     this.#cwd = resolve(options.cwd);
     this.#normalAgentDir = resolve(options.normalAgentDir);
+    this.#piCliEntrypoint = resolve(options.piPackageDir, "dist", "bundle", "cli.js");
     this.#runner = options.runner ?? processPanelCommandRunner;
     this.#env = { ...(options.env ?? process.env), PI_CODING_AGENT_DIR: this.#normalAgentDir };
   }
@@ -141,7 +144,8 @@ export class CliPanelProcessLauncher implements ProductionPanelProcessLauncher {
   async launch(request: PanelSeatLaunchRequest): Promise<PanelProcessResult> {
     assertTools(request.tools);
     if (request.attribution.harness === "pi") {
-      const result = await this.#runner.run("pi", [
+      const result = await this.#runner.run(process.execPath, [
+        this.#piCliEntrypoint,
         "--mode", "json",
         "-p",
         "--no-session",

@@ -151,6 +151,11 @@ export interface ReviewPanelResult {
   readonly reports: readonly AttributedReviewReport[];
 }
 
+function panelFailureDiagnostic(failure: PanelSeatFailure): string {
+  const seat = failure.attribution;
+  return `${seat.seat} (${seat.harness} ${seat.providerSlug}/${seat.modelSlug} ${seat.reasoningLevel}): ${failure.error}`;
+}
+
 export class PanelRuntimeError extends Error {
   readonly failures: readonly PanelSeatFailure[];
   readonly successfulResults: readonly unknown[];
@@ -160,7 +165,10 @@ export class PanelRuntimeError extends Error {
     failures: readonly PanelSeatFailure[],
     successfulResults: readonly unknown[] = [],
   ) {
-    super(message);
+    const diagnostic = failures.length === 0
+      ? message
+      : `${message}\n${failures.map(panelFailureDiagnostic).join("\n")}`;
+    super(diagnostic);
     this.name = "PanelRuntimeError";
     this.failures = immutableClone(failures);
     this.successfulResults = immutableClone(successfulResults);

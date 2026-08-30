@@ -14,6 +14,7 @@ import {
   type WorkflowItem,
   type WorkflowSnapshot,
 } from "../src/coordinator.js";
+import { AutomodeRestartRequiredError } from "../src/restart-required.js";
 import { createAutomationStageConfiguration } from "../src/stage-configuration.js";
 
 class ManualClock implements CoordinatorClock {
@@ -113,6 +114,29 @@ function candidateFor(coordinator: AutomodeCoordinator, itemNumber: number) {
     .flatMap((lane) => lane.candidates)
     .find((candidate) => candidate.item.number === itemNumber);
 }
+
+test("a changed Automode runtime stops dispatch until the Coordinator restarts", async () => {
+  const tracker = new FakeTracker([issue({ number: 59, materialVersion: "59-a" })]);
+  const sessions = new FakeTicketSessions(() => {
+    throw new AutomodeRestartRequiredError("The Ticket Session runtime changed; restart Automode");
+  });
+  const coordinator = new AutomodeCoordinator({
+    configuration: createAutomationStageConfiguration("half", ["auto-triage"]),
+    actor: "automation-user",
+    tracker,
+    sessions,
+    clock: new ManualClock(),
+  });
+
+  await coordinator.start();
+  await coordinator.waitForIdle();
+
+  assert.equal(sessions.requests.length, 1);
+  assert.equal(tracker.records.get("issue:59")?.lifecycle, "failed");
+  assert.equal(tracker.records.get("issue:59")?.attempt, 1);
+  assert.match(tracker.records.get("issue:59")?.diagnostic ?? "", /restart Automode/i);
+  await coordinator.whenStopped();
+});
 
 test("projects queued, claimed, and running lifecycle from Coordinator state", async () => {
   const tracker = new FakeTracker([

@@ -158,6 +158,21 @@ test("TicketSessionHost launches one child in the actual item cwd with determini
   });
 });
 
+test("the production host requires a Coordinator restart after its Ticket Session runtime changes", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "ticket-runtime-change-"));
+  const childEntrypoint = join(cwd, "ticket-session-main.js");
+  writeFileSync(childEntrypoint, "// runtime version one\n");
+  const host = new TicketSessionHost({ childEntrypoint, env: {} });
+  writeFileSync(childEntrypoint, "// runtime version two\n");
+
+  assert.throws(() => host.launch({
+    cwd,
+    skillName: "triage",
+    itemUrl: "https://github.com/owner/repository/issues/171",
+    configuration,
+  }), /Ticket Session runtime changed.*restart Automode/i);
+});
+
 test("the Ticket Session protocol rejects a tool summary without a positive count", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "ticket-invalid-tools-"));
   const child = new FakeTicketProcess();

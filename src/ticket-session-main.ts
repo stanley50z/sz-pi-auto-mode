@@ -214,9 +214,12 @@ export const createControlledTicketSession: TicketSessionChildSessionFactory = a
   const extensions = [resultReporter.extension];
   const tools = [...profile.tools, "automode_ticket_result"];
   if (request.skillName === "grilling" || request.skillName === "code-review") {
+    const piPackageDir = process.env.AUTOMODE_PI_PACKAGE_DIR;
+    if (!piPackageDir) throw new Error("Ticket Session is missing the launching Pi package directory");
     const panelLauncher = createProductionPanelSeatLauncher(new CliPanelProcessLauncher({
       cwd,
       normalAgentDir: paths.normalAgentDir,
+      piPackageDir,
     }));
     extensions.push(createTicketPanelExtension(panelLauncher, profile.panelExecutions));
     tools.push("automode_panel");
