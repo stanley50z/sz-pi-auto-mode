@@ -269,6 +269,52 @@ test("an issue with GitHub's omitted dependency summary has no open blockers", a
   assert.equal(snapshot.blockedBy, 0);
 });
 
+test("a declared blocker missing its native GitHub relationship fails closed", async () => {
+  const runner = new FixtureRunner({
+    "repos/owner/repository/issues/37": issue(37, {
+      assignees: [],
+      body: "## Blocked by\n\n- #12\n- #13\n",
+      issue_dependencies_summary: { blocked_by: 0, total_blocked_by: 0 },
+    }),
+    "repos/owner/repository/issues/37/comments?per_page=100": [[]],
+    "repos/owner/repository/pulls?state=open&per_page=100": [[]],
+  });
+  const tracker = new GitHubTracker({
+    cwd: "C:\\repository",
+    repository: "owner/repository",
+    actor: "automode-bot",
+    runner,
+  });
+
+  await assert.rejects(
+    tracker.reread({ kind: "issue", number: 37 }),
+    /declares 2 blockers but GitHub has 0 native dependency relationships/,
+  );
+});
+
+test("the documented top-of-body blocker fallback also requires native relationships", async () => {
+  const runner = new FixtureRunner({
+    "repos/owner/repository/issues/38": issue(38, {
+      assignees: [],
+      body: "Blocked by: #12, #13\n\n## What to build\n\nThe next slice.",
+      issue_dependencies_summary: { blocked_by: 0, total_blocked_by: 0 },
+    }),
+    "repos/owner/repository/issues/38/comments?per_page=100": [[]],
+    "repos/owner/repository/pulls?state=open&per_page=100": [[]],
+  });
+  const tracker = new GitHubTracker({
+    cwd: "C:\\repository",
+    repository: "owner/repository",
+    actor: "automode-bot",
+    runner,
+  });
+
+  await assert.rejects(
+    tracker.reread({ kind: "issue", number: 38 }),
+    /declares 2 blockers but GitHub has 0 native dependency relationships/,
+  );
+});
+
 test("an updated_at-only external change advances the complete snapshot revision", async () => {
   let updatedAt = "2026-08-14T11:00:00Z";
   const runner: GitHubCommandRunner = {
@@ -516,6 +562,7 @@ test("bookkeeping creates one marked comment, updates it in place, and does not 
     attempt: 2,
     lifecycle: "retrying",
     materialVersion: "external-b",
+    diagnostic: "Ticket Session child exited without a terminal result",
   };
 
   await tracker.upsertBookkeeping(first);
@@ -525,6 +572,11 @@ test("bookkeeping creates one marked comment, updates it in place, and does not 
   const recovered = await tracker.listBookkeeping();
 
   assert.equal(commentBody?.split("\n", 1)[0], AUTOMODE_BOOKKEEPING_MARKER);
+  assert.match(commentBody!, /### Automode status/);
+  assert.match(commentBody!, /\| Lifecycle \| `retrying` \|/);
+  assert.match(commentBody!, /\| Attempt \| 2 \|/);
+  assert.match(commentBody!, /Ticket Session child exited without a terminal result/);
+  assert.doesNotMatch(commentBody!, /C:\/sessions\/session-9\.jsonl/);
   assert.equal(created.materialVersion, updated.materialVersion);
   assert.notEqual(created.bookkeepingRevision, updated.bookkeepingRevision);
   assert.deepEqual(updated.bookkeeping?.value, second);

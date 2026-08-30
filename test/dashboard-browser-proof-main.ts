@@ -53,7 +53,7 @@ const proofCandidates: Readonly<Record<AutomationStage, readonly DashboardStageC
     stage: "auto-implement",
     status: "running",
     reason: "Owned by a live Ticket Session.",
-    activity: "npm test — live activity proof",
+    activity: "The implementation now passes the full suite.",
     attempt: 2,
     session: {
       processId: "dashboard-proof-process",
@@ -195,16 +195,28 @@ async function main(): Promise<void> {
     viewports: ["1440x900", "1024x768", "390x844"],
   })}\n`);
   dashboard.appendActivity({
-    id: "proof-live-activity",
+    id: "proof-live-thinking",
     itemKey: "issue:50",
     occurredAt: new Date().toISOString(),
-    kind: "tool",
-    message: "npm test — live activity proof",
+    kind: "thinking",
+    message: "**Reviewing code consistency and diffs**",
     data: {
       source: "live",
       attempt: 2,
       sessionId: "dashboard-proof-session",
-      toolName: "bash",
+      toolCount: 3,
+    },
+  });
+  dashboard.appendActivity({
+    id: "proof-live-assistant",
+    itemKey: "issue:50",
+    occurredAt: new Date().toISOString(),
+    kind: "assistant",
+    message: "The implementation now passes the full suite.",
+    data: {
+      source: "live",
+      attempt: 2,
+      sessionId: "dashboard-proof-session",
     },
   });
 

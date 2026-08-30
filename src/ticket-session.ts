@@ -12,8 +12,9 @@ import type {
 } from "./coordinator.js";
 import { resolveAutomodePaths } from "./paths.js";
 import type { AutomationStageConfiguration } from "./stage-configuration.js";
+import { createAssistantTranscript } from "./ticket-transcript.js";
 
-export const TICKET_SESSION_PROTOCOL_VERSION = 1 as const;
+export const TICKET_SESSION_PROTOCOL_VERSION = 2 as const;
 
 export interface TicketSessionLaunchRequest {
   cwd: string;
@@ -81,13 +82,25 @@ export interface TicketSessionLifecycleEvent {
   sessionFile?: string;
 }
 
-export interface TicketSessionActivityEvent {
+interface TicketSessionActivityEventBase {
   type: "activity";
   activity: string;
   timestamp: number;
-  toolName?: string;
-  isError?: boolean;
 }
+
+export type TicketSessionActivityEvent =
+  | (TicketSessionActivityEventBase & {
+      kind: "assistant" | "thinking";
+      toolCount?: number;
+    })
+  | (TicketSessionActivityEventBase & {
+      kind: "tools";
+      toolCount: number;
+    })
+  | (TicketSessionActivityEventBase & {
+      kind: "error";
+      toolCount?: never;
+    });
 
 export type TicketSessionEvent =
   | TicketSessionLifecycleEvent
@@ -124,25 +137,25 @@ interface ChildTerminalResult {
 
 interface ChildEventMessage {
   type: "ticket-session:event";
-  version: 1;
+  version: typeof TICKET_SESSION_PROTOCOL_VERSION;
   event: TicketSessionLifecycleEvent | TicketSessionActivityEvent;
 }
 
 interface ChildTerminalMessage {
   type: "ticket-session:terminal";
-  version: 1;
+  version: typeof TICKET_SESSION_PROTOCOL_VERSION;
   result: ChildTerminalResult;
 }
 
 export interface TicketSessionStartMessage {
   type: "ticket-session:start";
-  version: 1;
+  version: typeof TICKET_SESSION_PROTOCOL_VERSION;
   request: TicketSessionChildRequest;
 }
 
 export interface TicketSessionTerminateMessage {
   type: "ticket-session:terminate";
-  version: 1;
+  version: typeof TICKET_SESSION_PROTOCOL_VERSION;
 }
 
 function defaultChildEntrypoint(): string {
@@ -200,11 +213,17 @@ function isChildEvent(message: unknown): message is ChildEventMessage {
     }
     return true;
   }
-  return candidate.event.type === "activity"
-    && typeof candidate.event.activity === "string"
-    && typeof candidate.event.timestamp === "number"
-    && (candidate.event.toolName === undefined || typeof candidate.event.toolName === "string")
-    && (candidate.event.isError === undefined || typeof candidate.event.isError === "boolean");
+  if (
+    candidate.event.type !== "activity"
+    || typeof candidate.event.activity !== "string"
+    || typeof candidate.event.timestamp !== "number"
+    || !["assistant", "thinking", "tools", "error"].includes(candidate.event.kind)
+  ) return false;
+  const toolCount = candidate.event.toolCount;
+  const validToolCount = typeof toolCount === "number" && Number.isSafeInteger(toolCount) && toolCount > 0;
+  if (candidate.event.kind === "tools") return validToolCount;
+  if (candidate.event.kind === "error") return candidate.event.toolCount === undefined;
+  return candidate.event.toolCount === undefined || validToolCount;
 }
 
 function isChildTerminal(message: unknown): message is ChildTerminalMessage {
@@ -449,14 +468,11 @@ function boundedTicketActivityText(value: string): string {
 function persistedContentText(content: unknown): string {
   if (typeof content === "string") return boundedTicketActivityText(content);
   if (!Array.isArray(content)) return "";
-  const combined = content.flatMap((block): string[] => {
+  return boundedTicketActivityText(content.flatMap((block): string[] => {
     if (!block || typeof block !== "object") return [];
-    const candidate = block as { type?: unknown; text?: unknown; name?: unknown };
-    if (candidate.type === "text" && typeof candidate.text === "string") return [candidate.text];
-    if (candidate.type === "toolCall" && typeof candidate.name === "string") return [`Requested tool: ${candidate.name}`];
-    return [];
-  }).join("\n");
-  return boundedTicketActivityText(combined);
+    const candidate = block as { type?: unknown; text?: unknown };
+    return candidate.type === "text" && typeof candidate.text === "string" ? [candidate.text] : [];
+  }).join("\n"));
 }
 
 function readPersistedTicketSessionHistory(sessionFile: string): {
@@ -466,53 +482,27 @@ function readPersistedTicketSessionHistory(sessionFile: string): {
   const session = SessionManager.open(sessionFile);
   let historyAttempt = 0;
   const history = session.buildContextEntries().flatMap((entry): TicketSessionObservedActivity[] => {
-    if (entry.type === "compaction") {
-      return [{ attempt: Math.max(1, historyAttempt), occurredAt: entry.timestamp, kind: "pi", message: `Compaction summary: ${boundedTicketActivityText(entry.summary)}` }];
-    }
-    if (entry.type === "branch_summary") {
-      return [{ attempt: Math.max(1, historyAttempt), occurredAt: entry.timestamp, kind: "pi", message: `Branch summary: ${boundedTicketActivityText(entry.summary)}` }];
-    }
-    if (entry.type === "custom_message" && entry.display) {
-      const message = persistedContentText(entry.content);
-      return message ? [{ attempt: Math.max(1, historyAttempt), occurredAt: entry.timestamp, kind: "pi", message: `Session context: ${message}` }] : [];
+    if (entry.type === "compaction" || entry.type === "branch_summary") {
+      return [{
+        attempt: Math.max(1, historyAttempt),
+        occurredAt: entry.timestamp,
+        kind: "thinking",
+        message: boundedTicketActivityText(entry.summary),
+      }];
     }
     if (entry.type !== "message") return [];
     const message = entry.message;
     if (message.role === "user") {
       const text = persistedContentText(message.content);
       if (/^\/skill:[^\s]+\s+https?:\/\//.test(text.trim())) historyAttempt += 1;
-      return text ? [{ attempt: Math.max(1, historyAttempt), occurredAt: entry.timestamp, kind: "pi", message: `User: ${text}` }] : [];
+      return [];
     }
-    if (message.role === "assistant") {
-      const text = persistedContentText(message.content);
-      if (!text) return [];
-      return [{
-        attempt: Math.max(1, historyAttempt),
-        occurredAt: entry.timestamp,
-        kind: message.stopReason === "error" ? "error" : "pi",
-        message: `Assistant: ${text}`,
-      }];
-    }
-    if (message.role === "toolResult") {
-      const text = persistedContentText(message.content);
-      return [{
-        attempt: Math.max(1, historyAttempt),
-        occurredAt: entry.timestamp,
-        kind: message.isError ? "error" : "tool",
-        message: text || `${message.toolName} completed without text output.`,
-        toolName: message.toolName,
-      }];
-    }
-    if (message.role === "bashExecution") {
-      return [{
-        attempt: Math.max(1, historyAttempt),
-        occurredAt: entry.timestamp,
-        kind: message.exitCode && message.exitCode !== 0 ? "error" : "tool",
-        message: boundedTicketActivityText(message.output || message.command),
-        toolName: "bash",
-      }];
-    }
-    return [];
+    if (message.role !== "assistant") return [];
+    const attempt = Math.max(1, historyAttempt);
+    return createAssistantTranscript(message.content, {
+      isError: message.stopReason === "error",
+      maxMessageLength: MAX_TICKET_ACTIVITY_TEXT,
+    }).map((activity) => ({ ...activity, attempt, occurredAt: entry.timestamp }));
   });
   if (history.length <= MAX_PERSISTED_HISTORY_EVENTS) {
     return { sessionId: session.getSessionId(), history };
@@ -570,12 +560,19 @@ function persistedHistoryValidationError(cause: unknown): Error {
 
 function observedActivity(event: TicketSessionEvent): TicketSessionObservedActivity | undefined {
   if (event.type !== "activity") return undefined;
-  return {
+  const base = {
     occurredAt: new Date(event.timestamp).toISOString(),
-    kind: event.isError ? "error" : event.toolName ? "tool" : "pi",
     message: boundedTicketActivityText(event.activity),
-    ...(event.toolName === undefined ? {} : { toolName: event.toolName }),
   };
+  if (event.kind === "tools") return { ...base, kind: event.kind, toolCount: event.toolCount };
+  if (event.kind === "assistant" || event.kind === "thinking") {
+    return {
+      ...base,
+      kind: event.kind,
+      ...(event.toolCount === undefined ? {} : { toolCount: event.toolCount }),
+    };
+  }
+  return { ...base, kind: event.kind };
 }
 
 export interface AutomodeTicketSessionHostOptions {

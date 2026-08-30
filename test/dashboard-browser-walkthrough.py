@@ -296,7 +296,7 @@ try:
     wait_for_element("#stage-lanes", timeout=10.0, visible=True)
     wait_until(lambda: has_accessible("heading", "Stage Lanes"), "Stage Lanes heading")
     wait_until(lambda: "Live Coordinator connection" in body_text(), "live Coordinator connection")
-    wait_until(lambda: "live activity proof" in body_text(), "live Ticket Session activity")
+    wait_until(lambda: "The implementation now passes the full suite." in body_text(), "live Ticket Session activity")
     if "Lifecycle\nACTIVE" not in body_text():
         raise AssertionError("Missing representative active lifecycle")
 
@@ -318,10 +318,21 @@ try:
     press_key("Enter")
     wait_until(lambda: has_enabled_button("Turn off Auto-Grilling"), "enabled Auto-Grilling ON control")
 
+    set_exact_viewport(1440, 900)
     tab_to("Inspect #50")
     press_key("Enter")
     wait_until(lambda: has_accessible("dialog", "#50"), "read-only activity drawer")
-    wait_until(lambda: "npm test \u2014 live activity proof" in body_text(), "drawer live activity")
+    wait_until(lambda: "The implementation now passes the full suite." in body_text(), "drawer assistant activity")
+    wait_until(lambda: "+ 3 tool calls" in body_text(), "drawer collapsed tool count")
+    capture_screenshot(str(artifact_dir / "activity-drawer-1440x900.png"))
+    click_at_xy(100, 100)
+    wait_until(lambda: not has_accessible("dialog", "#50"), "backdrop click to close activity drawer")
+    if "Inspect #50" not in active_control()["name"]:
+        raise AssertionError("Backdrop close did not restore focus to the inspected Stage Candidate")
+
+    set_exact_viewport(390, 844)
+    press_key("Enter")
+    wait_until(lambda: has_accessible("dialog", "#50"), "reopened activity drawer")
     capture_screenshot(str(artifact_dir / "activity-drawer-390x844.png"))
     press_key("Escape")
     wait_until(lambda: not has_accessible("dialog", "#50"), "Escape to close activity drawer")
@@ -393,7 +404,7 @@ try:
     tab_to("Inspect #50")
     press_key("Enter")
     wait_until(lambda: has_accessible("dialog", "#50"), "black-box activity drawer")
-    wait_until(lambda: "npm test \u2014 live activity proof" in body_text(), "black-box drawer live activity")
+    wait_until(lambda: "The implementation now passes the full suite." in body_text(), "black-box drawer live activity")
     capture_screenshot(str(artifact_dir / "black-box-live-activity-390x844.png"))
     press_key("Escape")
     wait_until(lambda: not has_accessible("dialog", "#50"), "black-box drawer close")
@@ -431,7 +442,7 @@ try:
         },
         "viewports": [f"{width}x{height}" for width, height in VIEWPORTS],
         "states": ["active", "queued", "blocked", "draining", "exhausted", "disconnected", "empty"],
-        "screenshots": 21,
+        "screenshots": 22,
         "keyboard": ["Stage control", "card inspection", "Escape", "Close", "refresh", "graceful drain"],
         "syntheticLimit": "active/queued/blocked/exhausted/full-empty visual fixtures only",
     }

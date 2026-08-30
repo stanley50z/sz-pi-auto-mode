@@ -7,6 +7,7 @@ import {
   AutomodeCoordinator,
   type CoordinatorTracker,
   type TicketSessionHost,
+  type TicketSessionObservedActivity,
   type TicketWorkspaceManager,
   type WorkflowItem,
 } from "../src/coordinator.js";
@@ -67,12 +68,7 @@ async function main(): Promise<void> {
   let drainSettlementTimer: NodeJS.Timeout | undefined;
   const sessions: TicketSessionHost = {
     async start() {
-      let activityListener: ((activity: {
-        occurredAt: string;
-        kind: "tool";
-        message: string;
-        toolName: string;
-      }) => void) | undefined;
+      let activityListener: ((activity: TicketSessionObservedActivity) => void) | undefined;
       let completionTimer: NodeJS.Timeout | undefined;
       const completion = new Promise<{ status: "clean"; summary: string }>((resolveCompletion) => {
         let settled = false;
@@ -91,9 +87,8 @@ async function main(): Promise<void> {
       setTimeout(() => {
         activityListener?.({
           occurredAt: new Date().toISOString(),
-          kind: "tool",
-          message: "npm test — live activity proof",
-          toolName: "bash",
+          kind: "assistant",
+          message: "The implementation now passes the full suite.",
         });
       }, 250);
       return {

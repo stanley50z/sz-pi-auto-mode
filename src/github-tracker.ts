@@ -16,6 +16,7 @@ import type {
 const execFileAsync = promisify(execFile);
 
 export const AUTOMODE_BOOKKEEPING_MARKER = "<!-- sz-pi-automode:bookkeeping:v1 -->";
+const AUTOMODE_BOOKKEEPING_DATA_PREFIX = "<!-- sz-pi-automode:data:";
 
 export interface GitHubCommandRunner {
   run(command: string, args: readonly string[], cwd: string): Promise<string>;
@@ -93,6 +94,21 @@ function sha256(value: unknown): string {
 
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function declaredBlockingIssueNumbers(body: string): number[] {
+  const fallbackLine = /^Blocked by:[ \t]*([^\r\n]*)/iu.exec(body);
+  const heading = /^##[ \t]+Blocked by[ \t]*$/imu.exec(body);
+  if (!fallbackLine && !heading) return [];
+  let section = fallbackLine?.[1];
+  if (section === undefined) {
+    const remainder = body.slice(heading!.index + heading![0].length);
+    const nextHeading = /\r?\n##[ \t]+/u.exec(remainder);
+    section = nextHeading ? remainder.slice(0, nextHeading.index) : remainder;
+  }
+  const numbers = new Set<number>();
+  for (const match of section.matchAll(/#([1-9][0-9]*)\b/gu)) numbers.add(Number(match[1]));
+  return [...numbers].sort((left, right) => left - right);
 }
 
 function closingIssueNumbers(body: string, repository: string): number[] {
@@ -246,7 +262,16 @@ function parseBookkeepingBody(body: string, context: string): TrackerBookkeeping
   if (!body.startsWith(prefix)) {
     throw new Error(`Malformed GitHub ${context}: invalid bookkeeping marker framing`);
   }
-  const serialized = body.slice(prefix.length);
+  const remainder = body.slice(prefix.length);
+  let serialized = remainder;
+  if (remainder.startsWith(AUTOMODE_BOOKKEEPING_DATA_PREFIX)) {
+    const end = remainder.indexOf(" -->");
+    const encoded = end < 0 ? "" : remainder.slice(AUTOMODE_BOOKKEEPING_DATA_PREFIX.length, end);
+    if (!/^[A-Za-z0-9+/]+={0,2}$/u.test(encoded)) {
+      throw new Error(`Malformed GitHub ${context}: invalid hidden bookkeeping data`);
+    }
+    serialized = Buffer.from(encoded, "base64").toString("utf8");
+  }
   const envelope = record(parseJson(serialized, `${context} bookkeeping JSON`), `${context} bookkeeping`);
   if (envelope.version !== 1 || Object.keys(envelope).some((key) => key !== "version" && key !== "value")) {
     throw new Error(`Malformed GitHub ${context}: invalid bookkeeping envelope`);
@@ -254,9 +279,38 @@ function parseBookkeepingBody(body: string, context: string): TrackerBookkeeping
   return normalizeBookkeeping(envelope.value, `${context} bookkeeping value`);
 }
 
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>]/gu, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+  })[character]!);
+}
+
+function renderBookkeeping(value: TrackerBookkeeping): string {
+  const rows = [
+    ["Stage", `\`${value.stage}\``],
+    ["Skill", `\`${value.skillName}\``],
+    ["Lifecycle", `\`${value.lifecycle}\``],
+    ["Attempt", String(value.attempt)],
+    ...(value.sessionId === undefined ? [] : [["Session", `<code>${escapeHtml(value.sessionId)}</code>`]]),
+    ...(value.processId === undefined ? [] : [["Process", `<code>${escapeHtml(value.processId)}</code>`]]),
+    ...(value.workspace === undefined
+      ? []
+      : [["Workspace branch", `<code>${escapeHtml(value.workspace.branch)}</code>`]]),
+  ];
+  const table = rows.map(([field, fieldValue]) => `| ${field} | ${fieldValue} |`).join("\n");
+  const diagnostic = value.diagnostic === undefined
+    ? ""
+    : `\n\n**Diagnostic**\n\n<pre>${escapeHtml(value.diagnostic)}</pre>`;
+  return `### Automode status\n\n| Field | Value |\n| --- | --- |\n${table}${diagnostic}`;
+}
+
 function serializeBookkeeping(value: TrackerBookkeeping): string {
   const normalized = normalizeBookkeeping(value, "bookkeeping update");
-  return `${AUTOMODE_BOOKKEEPING_MARKER}\n${JSON.stringify({ version: 1, value: normalized })}`;
+  const envelope = JSON.stringify({ version: 1, value: normalized });
+  const hidden = Buffer.from(envelope, "utf8").toString("base64");
+  return `${AUTOMODE_BOOKKEEPING_MARKER}\n${AUTOMODE_BOOKKEEPING_DATA_PREFIX}${hidden} -->\n\n${renderBookkeeping(normalized)}`;
 }
 
 interface NormalizedComments {
@@ -473,6 +527,18 @@ export class GitHubTracker implements Tracker {
         `issue #${number} dependency summary`,
       );
     const body = issue.body === null ? "" : stringField(issue.body, `issue #${number} body`, true);
+    if (kind === "issue" && dependencySummary?.total_blocked_by !== undefined) {
+      const declaredBlockers = declaredBlockingIssueNumbers(body);
+      const nativeRelationships = nonNegativeInteger(
+        dependencySummary.total_blocked_by,
+        `issue #${number} total_blocked_by count`,
+      );
+      if (declaredBlockers.length > nativeRelationships) {
+        throw new Error(
+          `GitHub issue #${number} declares ${declaredBlockers.length} blockers but GitHub has ${nativeRelationships} native dependency relationships`,
+        );
+      }
+    }
     const base = {
       id: `${this.#repository}#${number}`,
       nodeId: stringField(issue.node_id, `issue #${number} node id`),

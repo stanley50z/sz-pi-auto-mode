@@ -24,13 +24,25 @@ export type DashboardCandidateStatus =
   | "exhausted"
   | "settled";
 
-export interface DashboardActivityEntry {
+interface DashboardActivityEntryBase {
   readonly id: string;
   readonly timestamp: string;
-  readonly kind: "pi" | "tool" | "error" | "terminal" | "coordinator";
   readonly message: string;
-  readonly toolName?: string;
 }
+
+export type DashboardActivityEntry =
+  | (DashboardActivityEntryBase & {
+      readonly kind: "assistant" | "thinking";
+      readonly toolCount?: number;
+    })
+  | (DashboardActivityEntryBase & {
+      readonly kind: "tools";
+      readonly toolCount: number;
+    })
+  | (DashboardActivityEntryBase & {
+      readonly kind: "error" | "terminal" | "coordinator";
+      readonly toolCount?: never;
+    });
 
 export interface DashboardSessionAttempt {
   readonly attempt: number;
@@ -362,14 +374,21 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .drawer-meta span { display: block; color: var(--muted); font-size: 10px; }
 .drawer-meta strong { display: block; margin-top: 3px; overflow-wrap: anywhere; }
 .feed { overflow: auto; padding: 16px 18px 30px; }
-.attempt { margin-bottom: 14px; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; }
+.attempt { margin-bottom: 18px; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; }
 .attempt-header { display: flex; justify-content: space-between; gap: 12px; background: var(--surface-raised); color: var(--muted); padding: 9px 11px; font-size: 11px; }
-.event { display: grid; grid-template-columns: 92px 86px minmax(0, 1fr); gap: 10px; border-top: 1px solid #1d2d43; padding: 10px 11px; }
-.event time { color: var(--dim); font-size: 11px; }
-.event-kind { color: var(--accent); font-size: 11px; font-weight: 900; }
-.event.tool .event-kind { color: var(--warning); }
-.event.error .event-kind, .event.terminal .event-kind { color: var(--danger); }
-.event p { margin: 0; overflow-wrap: anywhere; }
+.transcript { padding: 16px 14px 18px; }
+.transcript-row { color: var(--text); font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; white-space: pre-wrap; }
+.transcript-row + .transcript-row { margin-top: 18px; }
+.transcript-thinking { color: #8992a2; font-style: italic; font-weight: 650; }
+.transcript-thinking strong { font-weight: 750; }
+.transcript-assistant { color: #e6e9ef; }
+.transcript-tools { color: #8a919f; font-style: italic; }
+.transcript-tool-count { margin-left: 7px; color: #8a919f; font-style: italic; font-weight: 500; white-space: nowrap; }
+.transcript-row code { border-radius: 3px; background: #172132; color: #8fd0c7; padding: 1px 4px; font: inherit; }
+.transcript-bullet { display: block; padding-left: 18px; text-indent: -14px; }
+.transcript-system { border-left: 2px solid var(--line-strong); padding-left: 10px; color: var(--muted); font-size: 11px; }
+.transcript-system.error, .transcript-system.terminal { border-left-color: var(--danger); color: #ffb6bd; }
+.transcript-system-label { margin-right: 7px; font-weight: 900; text-transform: uppercase; }
 .terminal-result { border-top: 1px solid var(--line); color: var(--muted); padding: 9px 11px; font-size: 11px; }
 .no-session { display: grid; min-height: 300px; place-items: center; padding: 28px; text-align: center; }
 .no-session h3 { margin-bottom: 6px; }
@@ -460,7 +479,7 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
     window.setTimeout(() => { announcer.textContent = message; }, 20);
   };
   const CANDIDATE_STATUSES = new Set(["queued", "claimed", "running", "waiting", "retrying", "blocked", "human-owned", "exhausted", "settled"]);
-  const ACTIVITY_KINDS = new Set(["pi", "tool", "error", "terminal", "coordinator"]);
+  const ACTIVITY_KINDS = new Set(["assistant", "thinking", "tools", "error", "terminal", "coordinator"]);
   const RUN_LIFECYCLES = new Set(["loading", "active", "draining", "degraded", "empty"]);
   const STAGE_STATES = new Set(["ON", "DRAINING", "OFF"]);
   const MAX_ACTIVITY_EVENTS_PER_ATTEMPT = 500;
@@ -483,7 +502,11 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
   }
 
   function validateActivityEntry(value, path) {
-    if (!isRecord(value) || typeof value.id !== "string" || typeof value.timestamp !== "string" || !ACTIVITY_KINDS.has(value.kind) || typeof value.message !== "string" || !optionalString(value.toolName)) contractError(path);
+    if (!isRecord(value) || typeof value.id !== "string" || typeof value.timestamp !== "string" || !ACTIVITY_KINDS.has(value.kind) || typeof value.message !== "string") contractError(path);
+    const validToolCount = Number.isInteger(value.toolCount) && value.toolCount > 0;
+    if (value.kind === "tools" && !validToolCount) contractError(path + ".toolCount");
+    if ((value.kind === "error" || value.kind === "terminal" || value.kind === "coordinator") && value.toolCount !== undefined) contractError(path + ".toolCount");
+    if ((value.kind === "assistant" || value.kind === "thinking") && value.toolCount !== undefined && !validToolCount) contractError(path + ".toolCount");
   }
 
   function validateSession(value, path) {
@@ -590,9 +613,41 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
         : '<div class="empty-lane">No Stage Candidates</div>') + "</div></section>";
   }
 
+  function toolCountText(count) {
+    return "+ " + count + " tool " + (count === 1 ? "call" : "calls");
+  }
+
+  function inlineTranscriptMarkdown(value) {
+    return escapeHtml(value)
+      .replace(/\x60([^\x60\n]+)\x60/g, "<code>$1</code>")
+      .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+  }
+
+  function transcriptMessage(value) {
+    return value.split(/\r?\n/).map((line) => {
+      const bullet = /^\s*[-*]\s+(.+)$/.exec(line);
+      return bullet
+        ? '<span class="transcript-bullet">• ' + inlineTranscriptMarkdown(bullet[1]) + "</span>"
+        : inlineTranscriptMarkdown(line);
+    }).join("<br>");
+  }
+
   function eventRow(event) {
-    const eventLabel = event.kind === "tool" && event.toolName ? event.toolName : event.kind;
-    return '<div class="event ' + escapeHtml(event.kind) + '"><time datetime="' + escapeHtml(event.timestamp) + '">' + escapeHtml(formatTime(event.timestamp)) + '</time><span class="event-kind">' + escapeHtml(eventLabel.toUpperCase()) + "</span><p>" + escapeHtml(event.message) + "</p></div>";
+    const suffix = event.toolCount
+      ? '<span class="transcript-tool-count">' + toolCountText(event.toolCount) + "</span>"
+      : "";
+    if (event.kind === "assistant" || event.kind === "thinking") {
+      return '<div class="transcript-row transcript-' + event.kind + '"><span>' + transcriptMessage(event.message) + "</span>" + suffix + "</div>";
+    }
+    if (event.kind === "tools") {
+      return '<div class="transcript-row transcript-tools">' + toolCountText(event.toolCount || 1) + "</div>";
+    }
+    return '<div class="transcript-row transcript-system ' + escapeHtml(event.kind) + '"><span class="transcript-system-label">' + escapeHtml(event.kind) + "</span>" + transcriptMessage(event.message) + "</div>";
+  }
+
+  function transcript(events) {
+    return '<div class="transcript">' + events.map(eventRow).join("") + "</div>";
   }
 
   function drawer(candidate) {
@@ -602,7 +657,7 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
     const content = session
       ? '<div class="feed">' + session.attempts.map((attempt) =>
           '<section class="attempt" aria-label="Attempt ' + attempt.attempt + '"><header class="attempt-header"><span>Attempt ' + attempt.attempt + " · " + (attempt.state === "current" ? "current" : "prior history") + "</span><span>" + (attempt.state === "current" ? "● LIVE" : "SETTLED") + "</span></header>" +
-          (attempt.events.length ? attempt.events.map(eventRow).join("") : '<p class="terminal-result">No structured activity received yet.</p>') +
+          (attempt.events.length ? transcript(attempt.events) : '<p class="terminal-result">No transcript activity received yet.</p>') +
           (attempt.terminalResult ? '<div class="terminal-result"><strong>Terminal result:</strong> ' + escapeHtml(attempt.terminalResult) + "</div>" : "") + "</section>"
         ).join("") + "</div>"
       : '<div class="no-session"><div><h3>No Ticket Session exists yet</h3><p>' + escapeHtml(candidate.reason) + "</p><p>Inspecting this candidate is read-only. Activity will appear only after the Coordinator dispatches it.</p></div></div>";
@@ -767,6 +822,9 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
     document.querySelector('[data-command="drain"]')?.addEventListener("click", () => sendCommand({ type: "drain" }));
     document.querySelector(".recent")?.addEventListener("toggle", (event) => { state.recentOpen = event.currentTarget.open; });
     document.querySelector("[data-close-drawer]")?.addEventListener("click", closeDrawer);
+    document.querySelector(".drawer-backdrop")?.addEventListener("click", (event) => {
+      if (event.target === event.currentTarget) closeDrawer();
+    });
   }
 
   function pruneActivityLog() {
@@ -795,7 +853,7 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
       timestamp: message.occurredAt,
       kind: ACTIVITY_KINDS.has(message.kind) ? message.kind : "coordinator",
       message: message.message || (message.data === undefined ? message.kind : JSON.stringify(message.data)),
-      ...(typeof details.toolName === "string" ? { toolName: details.toolName } : {})
+      ...(Number.isInteger(details.toolCount) ? { toolCount: details.toolCount } : {})
     };
     validateActivityEntry(event, "activity.event");
     if (candidate) candidate.activity = event.message;

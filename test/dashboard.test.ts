@@ -387,12 +387,12 @@ test("the live event stream publishes replacement projections and structured act
       id: "activity-43",
       itemKey: "issue:43",
       occurredAt: "2026-08-17T12:00:00.000Z",
-      kind: "tool",
-      message: "npm test",
+      kind: "assistant",
+      message: "Focused tests passed.",
       data: { exitCode: 0 },
     } as const;
     dashboard.appendActivity(activity);
-    await readUntil('event: activity\ndata: {"id":"activity-43","itemKey":"issue:43","occurredAt":"2026-08-17T12:00:00.000Z","kind":"tool","message":"npm test","data":{"exitCode":0}}');
+    await readUntil('event: activity\ndata: {"id":"activity-43","itemKey":"issue:43","occurredAt":"2026-08-17T12:00:00.000Z","kind":"assistant","message":"Focused tests passed.","data":{"exitCode":0}}');
     const snapshot = await (await fetch(`${status.localUrl}/api/snapshot`)).json() as {
       activities: unknown[];
     };
@@ -417,7 +417,7 @@ test("activity retention is bounded per item with an explicit truncation marker"
         id: `activity-${index}`,
         itemKey: "issue:45",
         occurredAt: `2026-08-17T12:00:${String(index % 60).padStart(2, "0")}.000Z`,
-        kind: "pi",
+        kind: "assistant",
         message: `activity ${index}`,
         data: { attempt: 1, sessionId: "session-45", source: "live" },
       });
@@ -651,7 +651,7 @@ test("black-box /automode supervision reaches live activity and graceful drain",
           const candidate = dashboardCandidate(snapshot.projection, "issue:50");
           if (
             candidate?.status === "running"
-            && snapshot.activities.some((activity) => activity.message?.includes("live activity proof"))
+            && snapshot.activities.some((activity) => activity.message?.includes("passes the full suite"))
           ) break;
         } catch (error) {
           lastSnapshotError = error;
@@ -663,7 +663,7 @@ test("black-box /automode supervision reaches live activity and graceful drain",
       }
       const candidate = dashboardCandidate(snapshot.projection, "issue:50");
       assert.equal(candidate?.status, "running");
-      assert.ok(snapshot.activities.some((activity) => activity.message?.includes("live activity proof")));
+      assert.ok(snapshot.activities.some((activity) => activity.message?.includes("passes the full suite")));
       assert.equal(snapshot.projection.run.lifecycle, "degraded");
       assert.ok(snapshot.projection.tailscaleError);
       assert.match(snapshot.projection.tailscaleError, /acceptance harness/);

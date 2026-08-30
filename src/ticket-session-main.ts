@@ -27,12 +27,12 @@ import {
   type TicketSessionTerminalStatus,
 } from "./ticket-session.js";
 import { createAutomationStageConfiguration } from "./stage-configuration.js";
+import { createAssistantTranscript } from "./ticket-transcript.js";
 
-export interface TicketSessionChildActivity {
-  activity: string;
-  toolName?: string;
-  isError?: boolean;
-}
+export type TicketSessionChildActivity =
+  | { activity: string; kind: "assistant" | "thinking"; toolCount?: number }
+  | { activity: string; kind: "tools"; toolCount: number }
+  | { activity: string; kind: "error"; toolCount?: never };
 
 export interface TicketSessionChildPromptResult {
   readonly status: Exclude<TicketSessionTerminalStatus, "error">;
@@ -176,44 +176,22 @@ export async function runTicketSessionChild(
   }
 }
 
-function boundedActivityDetail(value: unknown): string {
-  let serialized: string;
-  try {
-    serialized = typeof value === "string" ? value : JSON.stringify(value);
-  } catch {
-    serialized = String(value);
-  }
-  return serialized.length > 2_000 ? `${serialized.slice(0, 2_000)}…` : serialized;
-}
-
-/** Converts native Pi events to bounded, structured read-only dashboard activity. */
-export function ticketSessionActivityFromAgentEvent(event: AgentSessionEvent): TicketSessionChildActivity {
-  if (event.type === "tool_execution_start") {
-    return {
-      activity: `Started ${event.toolName}: ${boundedActivityDetail(event.args)}`,
-      toolName: event.toolName,
-    };
-  }
-  if (event.type === "tool_execution_update") {
-    return {
-      activity: `Updated ${event.toolName}: ${boundedActivityDetail(event.partialResult)}`,
-      toolName: event.toolName,
-    };
-  }
-  if (event.type === "tool_execution_end") {
-    return {
-      activity: `${event.isError ? "Failed" : "Completed"} ${event.toolName}: ${boundedActivityDetail(event.result)}`,
-      toolName: event.toolName,
-      isError: event.isError,
-    };
-  }
+/** Converts native retry and completed assistant events into ultra-collapsed transcript rows. */
+export function ticketSessionActivityFromAgentEvent(
+  event: AgentSessionEvent,
+): readonly TicketSessionChildActivity[] {
   if (event.type === "auto_retry_start") {
-    return { activity: `Retry ${event.attempt}/${event.maxAttempts}: ${event.errorMessage}`, isError: true };
+    return [{
+      activity: `Retry ${event.attempt}/${event.maxAttempts}: ${event.errorMessage}`,
+      kind: "error",
+    }];
   }
-  const activity: TicketSessionChildActivity = { activity: event.type };
-  if ("toolName" in event && typeof event.toolName === "string") activity.toolName = event.toolName;
-  if ("isError" in event && typeof event.isError === "boolean") activity.isError = event.isError;
-  return activity;
+  if (event.type !== "message_end") return [];
+  const message = event.message;
+  if (message.role !== "assistant") return [];
+  return createAssistantTranscript(message.content, {
+    isError: message.stopReason === "error",
+  }).map(({ message: activity, ...transcript }) => ({ activity, ...transcript }));
 }
 
 /**
@@ -327,7 +305,9 @@ export const createControlledTicketSession: TicketSessionChildSessionFactory = a
       sessionId: result.session.sessionId,
       sessionFile,
       subscribe(listener) {
-        return result.session.subscribe((event) => listener(ticketSessionActivityFromAgentEvent(event)));
+        return result.session.subscribe((event) => {
+          for (const activity of ticketSessionActivityFromAgentEvent(event)) listener(activity);
+        });
       },
       async prompt(prompt) {
         await result.session.prompt(prompt);

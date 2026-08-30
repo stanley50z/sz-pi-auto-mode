@@ -85,15 +85,33 @@ export type TicketSessionTerminalResult =
   | { readonly status: "clean" | "waiting"; readonly summary: string; readonly error?: never }
   | { readonly status: "error"; readonly error?: string; readonly summary?: never };
 
-export type TicketSessionActivityKind = "pi" | "tool" | "error" | "terminal" | "coordinator";
+export type TicketSessionActivityKind =
+  | "assistant"
+  | "thinking"
+  | "tools"
+  | "error"
+  | "terminal"
+  | "coordinator";
 
-export interface TicketSessionObservedActivity {
+interface TicketSessionObservedActivityBase {
   readonly attempt?: number;
   readonly occurredAt: string;
-  readonly kind: TicketSessionActivityKind;
   readonly message: string;
-  readonly toolName?: string;
 }
+
+export type TicketSessionObservedActivity =
+  | (TicketSessionObservedActivityBase & {
+      readonly kind: "assistant" | "thinking";
+      readonly toolCount?: number;
+    })
+  | (TicketSessionObservedActivityBase & {
+      readonly kind: "tools";
+      readonly toolCount: number;
+    })
+  | (TicketSessionObservedActivityBase & {
+      readonly kind: "error" | "terminal" | "coordinator";
+      readonly toolCount?: never;
+    });
 
 export interface TicketSessionHandle {
   readonly processId: string;
@@ -223,7 +241,7 @@ export interface CoordinatorActivity {
     readonly sessionId: string;
     readonly sessionFile: string;
     readonly workspace?: string;
-    readonly toolName?: string;
+    readonly toolCount?: number;
   };
 }
 
@@ -452,7 +470,7 @@ export class AutomodeCoordinator {
           sessionId: handle.sessionId,
           sessionFile: handle.sessionFile,
           ...(active?.workspace === undefined ? {} : { workspace: active.workspace.worktree }),
-          ...(activity.toolName === undefined ? {} : { toolName: activity.toolName }),
+          ...(activity.toolCount === undefined ? {} : { toolCount: activity.toolCount }),
         },
       },
     });

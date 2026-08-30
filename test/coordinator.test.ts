@@ -8,6 +8,7 @@ import {
   type CoordinatorTracker,
   type TicketSessionHandle,
   type TicketSessionHost,
+  type TicketSessionObservedActivity,
   type TicketSessionRequest,
   type TicketWorkspaceManager,
   type WorkflowItem,
@@ -137,12 +138,7 @@ test("projects queued, claimed, and running lifecycle from Coordinator state", a
     };
   });
   let sessionStarts = 0;
-  let emitActivity!: (activity: {
-    readonly occurredAt: string;
-    readonly kind: "tool";
-    readonly message: string;
-    readonly toolName: string;
-  }) => void;
+  let emitActivity!: (activity: TicketSessionObservedActivity) => void;
   const sessions: TicketSessionHost = {
     async start() {
       sessionStarts += 1;
@@ -153,8 +149,8 @@ test("projects queued, claimed, and running lifecycle from Coordinator state", a
         sessionFile: "/sessions/60.jsonl",
         history: [{
           occurredAt: "2026-08-17T11:59:00.000Z",
-          kind: "pi",
-          message: "Recovered persisted Pi conversation history.",
+          kind: "thinking",
+          message: "**Recovering persisted Pi conversation history**",
         }],
         subscribe(listener) {
           emitActivity = listener;
@@ -207,9 +203,8 @@ test("projects queued, claimed, and running lifecycle from Coordinator state", a
   );
   emitActivity({
     occurredAt: "2026-08-17T12:00:00.000Z",
-    kind: "tool",
+    kind: "assistant",
     message: "Focused tests are running.",
-    toolName: "bash",
   });
   assert.equal(
     supervision.find((event) => event.type === "activity" && event.activity.message === "Focused tests are running.")?.type,

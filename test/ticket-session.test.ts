@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   AutomodeTicketSessionHost,
+  TICKET_SESSION_PROTOCOL_VERSION,
   TicketSessionHost,
   type TicketSessionProcess,
   type TicketSessionProcessLauncher,
@@ -16,6 +17,7 @@ import {
   createControlledTicketSession,
   runTicketSessionChild,
   ticketSessionActivityFromAgentEvent,
+  type TicketSessionChildActivity,
   type TicketSessionChildSession,
 } from "../src/ticket-session-main.js";
 import { resolveAutomodePaths } from "../src/paths.js";
@@ -34,7 +36,7 @@ async function sendFixtureMessage(message: unknown): Promise<void> {
 async function runFixtureChild(): Promise<void> {
   const message = await new Promise<unknown>((resolveMessage) => process.once("message", resolveMessage));
   const start = message as TicketSessionStartMessage;
-  if (start.type !== "ticket-session:start" || start.version !== 1) {
+  if (start.type !== "ticket-session:start" || start.version !== TICKET_SESSION_PROTOCOL_VERSION) {
     throw new Error("Fixture child received invalid start request");
   }
   const sessionId = "fixture-persistent-session";
@@ -43,7 +45,7 @@ async function runFixtureChild(): Promise<void> {
     : process.cwd();
   mkdirSync(sessionDir, { recursive: true });
   const sessionFile = join(sessionDir, "fixture-ticket-session.jsonl");
-  let activity: ((event: { activity: string }) => void) | undefined;
+  let activity: ((event: TicketSessionChildActivity) => void) | undefined;
   let sends = Promise.resolve();
   const result = await runTicketSessionChild(start.request, async () => ({
     sessionId,
@@ -59,16 +61,16 @@ async function runFixtureChild(): Promise<void> {
       }
       writeFileSync(sessionFile, `${JSON.stringify({ type: "session", version: 3, id: sessionId, cwd: process.cwd() })}\n`);
       appendFileSync(sessionFile, `${JSON.stringify({ type: "prompt", prompt })}\n`);
-      activity?.({ activity: "agent_settled" });
+      activity?.({ activity: "Fixture completed.", kind: "assistant" });
       return { status: "clean", summary: "Fixture completed." };
     },
     async abort() {},
     dispose() {},
   }), (event) => {
-    sends = sends.then(() => sendFixtureMessage({ type: "ticket-session:event", version: 1, event }));
+    sends = sends.then(() => sendFixtureMessage({ type: "ticket-session:event", version: TICKET_SESSION_PROTOCOL_VERSION, event }));
   });
   await sends;
-  await sendFixtureMessage({ type: "ticket-session:terminal", version: 1, result });
+  await sendFixtureMessage({ type: "ticket-session:terminal", version: TICKET_SESSION_PROTOCOL_VERSION, result });
   process.disconnect();
 }
 
@@ -123,7 +125,7 @@ test("TicketSessionHost launches one child in the actual item cwd with determini
   assert.equal(launches[0]!.entrypoint, join(cwd, "ticket-session-main.js"));
   assert.deepEqual(child.sent, [{
     type: "ticket-session:start",
-    version: 1,
+    version: TICKET_SESSION_PROTOCOL_VERSION,
     request: {
       cwd,
       skillName: "triage",
@@ -136,7 +138,7 @@ test("TicketSessionHost launches one child in the actual item cwd with determini
 
   child.emit("message", {
     type: "ticket-session:terminal",
-    version: 1,
+    version: TICKET_SESSION_PROTOCOL_VERSION,
     result: {
       status: "clean",
       sessionId: "session-17",
@@ -154,6 +156,48 @@ test("TicketSessionHost launches one child in the actual item cwd with determini
     exitCode: 0,
     signal: null,
   });
+});
+
+test("the Ticket Session protocol rejects a tool summary without a positive count", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "ticket-invalid-tools-"));
+  const child = new FakeTicketProcess();
+  const host = new TicketSessionHost({
+    childEntrypoint: join(cwd, "ticket-session-main.js"),
+    launcher: () => child,
+  });
+  const run = host.launch({
+    cwd,
+    skillName: "triage",
+    itemUrl: "https://github.com/owner/repository/issues/170",
+    configuration,
+  });
+  child.emit("message", {
+    type: "ticket-session:event",
+    version: TICKET_SESSION_PROTOCOL_VERSION,
+    event: {
+      type: "lifecycle",
+      state: "ready",
+      timestamp: Date.now(),
+      sessionId: "session-170",
+      sessionFile: join(cwd, "session-170.jsonl"),
+    },
+  });
+  await run.ready;
+
+  child.emit("message", {
+    type: "ticket-session:event",
+    version: TICKET_SESSION_PROTOCOL_VERSION,
+    event: {
+      type: "activity",
+      activity: "+ tool calls",
+      timestamp: Date.now(),
+      kind: "tools",
+    },
+  });
+  assert.deepEqual(child.killed, ["SIGKILL"]);
+  child.signalCode = "SIGKILL";
+  child.emit("exit", null, "SIGKILL");
+  assert.match((await run.completion).error ?? "", /invalid protocol message/);
 });
 
 test("Coordinator recovery replaces mismatched in-root session history instead of importing its context", async () => {
@@ -192,7 +236,7 @@ test("Coordinator recovery replaces mismatched in-root session history instead o
   });
   child.emit("message", {
     type: "ticket-session:event",
-    version: 1,
+    version: TICKET_SESSION_PROTOCOL_VERSION,
     event: {
       type: "lifecycle",
       state: "ready",
@@ -208,7 +252,7 @@ test("Coordinator recovery replaces mismatched in-root session history instead o
   assert.equal(handle.sessionId, "replacement-session");
   child.emit("message", {
     type: "ticket-session:terminal",
-    version: 1,
+    version: TICKET_SESSION_PROTOCOL_VERSION,
     result: {
       status: "clean",
       sessionId: "replacement-session",
@@ -247,7 +291,7 @@ test("a fresh Ticket Session validates its persisted identity before reporting s
   });
   child.emit("message", {
     type: "ticket-session:event",
-    version: 1,
+    version: TICKET_SESSION_PROTOCOL_VERSION,
     event: {
       type: "lifecycle",
       state: "ready",
@@ -263,7 +307,7 @@ test("a fresh Ticket Session validates its persisted identity before reporting s
   })}\n`);
   child.emit("message", {
     type: "ticket-session:terminal",
-    version: 1,
+    version: TICKET_SESSION_PROTOCOL_VERSION,
     result: { status: "clean", sessionId: "fresh-session", sessionFile, summary: "Implementation completed." },
   });
   child.exitCode = 0;
@@ -285,9 +329,9 @@ test("the Coordinator host exposes persisted Pi history and future structured ac
   writeFileSync(sessionFile, [
     JSON.stringify({ type: "session", version: 3, id: "session-history", timestamp: "2026-08-17T11:59:00.000Z", cwd }),
     JSON.stringify({ type: "message", id: "entry001", parentId: null, timestamp: "2026-08-17T11:59:01.000Z", message: { role: "user", content: "/skill:implement https://github.com/owner/repository/issues/45", timestamp: 1 } }),
-    JSON.stringify({ type: "message", id: "entry002", parentId: "entry001", timestamp: "2026-08-17T11:59:02.000Z", message: { role: "assistant", content: [{ type: "text", text: "Reading the repository." }], timestamp: 2 } }),
+    JSON.stringify({ type: "message", id: "entry002", parentId: "entry001", timestamp: "2026-08-17T11:59:02.000Z", message: { role: "assistant", content: [{ type: "thinking", thinking: "**Reading the repository**" }, { type: "toolCall", id: "read-1", name: "read", arguments: { path: "CONTEXT.md" } }], timestamp: 2 } }),
     JSON.stringify({ type: "message", id: "entry003", parentId: "entry002", timestamp: "2026-08-17T11:59:03.000Z", message: { role: "user", content: "/skill:implement https://github.com/owner/repository/issues/45", timestamp: 3 } }),
-    JSON.stringify({ type: "message", id: "entry004", parentId: "entry003", timestamp: "2026-08-17T11:59:04.000Z", message: { role: "assistant", content: [{ type: "text", text: "Resuming the retry." }], timestamp: 4 } }),
+    JSON.stringify({ type: "message", id: "entry004", parentId: "entry003", timestamp: "2026-08-17T11:59:04.000Z", message: { role: "assistant", content: [{ type: "text", text: "Resuming the retry." }, { type: "toolCall", id: "read-2", name: "read", arguments: { path: "src/app.ts" } }, { type: "toolCall", id: "bash-1", name: "bash", arguments: { command: "npm test" } }], timestamp: 4 } }),
   ].join("\n") + "\n");
   const child = new FakeTicketProcess();
   const processHost = new TicketSessionHost({
@@ -311,7 +355,7 @@ test("the Coordinator host exposes persisted Pi history and future structured ac
   });
   child.emit("message", {
     type: "ticket-session:event",
-    version: 1,
+    version: TICKET_SESSION_PROTOCOL_VERSION,
     event: {
       type: "lifecycle",
       state: "ready",
@@ -322,36 +366,35 @@ test("the Coordinator host exposes persisted Pi history and future structured ac
   });
   const handle = await starting;
   assert.equal((child.sent[0] as TicketSessionStartMessage).request.resumeSessionFile, realpathSync(sessionFile));
-  assert.deepEqual(handle.history?.map(({ attempt, kind, message }) => ({ attempt, kind, message })), [
-    { attempt: 1, kind: "pi", message: "User: /skill:implement https://github.com/owner/repository/issues/45" },
-    { attempt: 1, kind: "pi", message: "Assistant: Reading the repository." },
-    { attempt: 2, kind: "pi", message: "User: /skill:implement https://github.com/owner/repository/issues/45" },
-    { attempt: 2, kind: "pi", message: "Assistant: Resuming the retry." },
+  assert.deepEqual(handle.history?.map(({ attempt, kind, message, toolCount }) => ({ attempt, kind, message, toolCount })), [
+    { attempt: 1, kind: "thinking", message: "**Reading the repository**", toolCount: 1 },
+    { attempt: 2, kind: "assistant", message: "Resuming the retry.", toolCount: 2 },
   ]);
 
   const observed: unknown[] = [];
   const unsubscribe = handle.subscribe?.((activity) => observed.push(activity));
   child.emit("message", {
     type: "ticket-session:event",
-    version: 1,
+    version: TICKET_SESSION_PROTOCOL_VERSION,
     event: {
       type: "activity",
-      activity: "tool_execution_start",
+      activity: "**Reviewing code consistency and diffs**",
       timestamp: Date.parse("2026-08-17T12:00:01.000Z"),
-      toolName: "read",
+      kind: "thinking",
+      toolCount: 2,
     },
   });
   assert.deepEqual(observed, [{
     occurredAt: "2026-08-17T12:00:01.000Z",
-    kind: "tool",
-    message: "tool_execution_start",
-    toolName: "read",
+    kind: "thinking",
+    message: "**Reviewing code consistency and diffs**",
+    toolCount: 2,
   }]);
   unsubscribe?.();
 
   child.emit("message", {
     type: "ticket-session:terminal",
-    version: 1,
+    version: TICKET_SESSION_PROTOCOL_VERSION,
     result: { status: "clean", sessionId: "session-history", sessionFile, summary: "Implementation completed." },
   });
   child.exitCode = 0;
@@ -385,7 +428,7 @@ test("the Coordinator host rejects cross-directory session history and force-sto
   });
   child.emit("message", {
     type: "ticket-session:event",
-    version: 1,
+    version: TICKET_SESSION_PROTOCOL_VERSION,
     event: {
       type: "lifecycle",
       state: "ready",
@@ -408,7 +451,7 @@ test("the child reports persistent identity and structured activity around one c
   const cwd = mkdtempSync(join(tmpdir(), "ticket-child-"));
   const sessionFile = join(cwd, "session.jsonl");
   const prompts: string[] = [];
-  let activityListener: ((activity: { activity: string; toolName?: string; isError?: boolean }) => void) | undefined;
+  let activityListener: ((activity: TicketSessionChildActivity) => void) | undefined;
   let disposed = false;
   const session: TicketSessionChildSession = {
     sessionId: "durable-session",
@@ -419,7 +462,7 @@ test("the child reports persistent identity and structured activity around one c
     },
     async prompt(prompt) {
       prompts.push(prompt);
-      activityListener?.({ activity: "tool_execution_start", toolName: "read" });
+      activityListener?.({ activity: "Reading the repository.", kind: "assistant" });
       return { status: "clean", summary: "Triage completed." };
     },
     async abort() {},
@@ -458,18 +501,39 @@ test("the child reports persistent identity and structured activity around one c
   assert.equal(disposed, true);
 });
 
-test("native Pi tool results retain bounded payload and error details for dashboard activity", () => {
+test("native Pi events become an ultra-collapsed transcript", () => {
   assert.deepEqual(ticketSessionActivityFromAgentEvent({
-    type: "tool_execution_end",
-    toolCallId: "tool-1",
-    toolName: "bash",
-    result: { content: [{ type: "text", text: "npm test failed" }], details: { exitCode: 1 } },
-    isError: true,
-  } as never), {
-    activity: 'Failed bash: {"content":[{"type":"text","text":"npm test failed"}],"details":{"exitCode":1}}',
-    toolName: "bash",
-    isError: true,
-  });
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "**Reviewing code consistency and diffs**" },
+        { type: "toolCall", id: "review-1", name: "read", arguments: { path: "a.ts" } },
+        { type: "toolCall", id: "review-2", name: "read", arguments: { path: "b.ts" } },
+        { type: "toolCall", id: "review-3", name: "bash", arguments: { command: "git diff" } },
+      ],
+      stopReason: "toolUse",
+    },
+  } as never), [{
+    activity: "**Reviewing code consistency and diffs**",
+    kind: "thinking",
+    toolCount: 3,
+  }]);
+  assert.deepEqual(ticketSessionActivityFromAgentEvent({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: "The implementation now passes the full suite." }],
+      stopReason: "stop",
+    },
+  } as never), [{
+    activity: "The implementation now passes the full suite.",
+    kind: "assistant",
+  }]);
+  assert.deepEqual(ticketSessionActivityFromAgentEvent({ type: "message_start" } as never), []);
+  assert.deepEqual(ticketSessionActivityFromAgentEvent({ type: "message_update" } as never), []);
+  assert.deepEqual(ticketSessionActivityFromAgentEvent({ type: "tool_execution_start" } as never), []);
+  assert.deepEqual(ticketSessionActivityFromAgentEvent({ type: "tool_execution_end" } as never), []);
 });
 
 test("terminate is idempotent and forces a child that does not stop gracefully", async () => {
@@ -691,8 +755,9 @@ writeFileSync(${JSON.stringify(preloadMarker)}, "loaded");
     (event as { type?: string; state?: string }).type === "lifecycle"
     && (event as { state?: string }).state === "ready"), true);
   assert.equal(events.some((event) =>
-    (event as { type?: string; activity?: string }).type === "activity"
-    && (event as { activity?: string }).activity === "agent_settled"), true);
+    (event as { type?: string; activity?: string; kind?: string }).type === "activity"
+    && (event as { activity?: string }).activity === "Fixture completed."
+    && (event as { kind?: string }).kind === "assistant"), true);
 });
 
 }
