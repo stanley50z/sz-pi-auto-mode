@@ -24,7 +24,7 @@ export function createAutomodeLaunchPlan(
   environment.AUTOMODE_STAGE_CONFIGURATION_CONFIRMATION = confirmSerializedAutomationStageConfiguration(
     request.serializedConfiguration,
   );
-  environment.AUTOMODE_DEFAULT_REVIEWER_EXECUTION = JSON.stringify(request.defaultReviewerExecution);
+  environment.AUTOMODE_MAIN_EXECUTION = JSON.stringify(request.mainExecution);
   return {
     command: process.execPath,
     args: ["--import", runtimeLoaderUrl, childEntrypoint, request.cwd, normalAgentDir ?? ""],

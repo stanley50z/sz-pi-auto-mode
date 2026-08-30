@@ -7,7 +7,6 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
   createAutomodeCapabilityProfile,
   type ExecutionProfile,
-  type PiExecutionProfile,
 } from "./capability-profile.js";
 import { repositoryRoot, resolveAutomodePaths } from "./paths.js";
 
@@ -21,7 +20,6 @@ export type ExecutionProfileAttestor = (profiles: readonly ExecutionProfile[]) =
 
 export interface ValidateAutomodeStartupOptions {
   repository: string;
-  defaultReviewerExecution: PiExecutionProfile;
   home?: string;
   normalAgentDir?: string;
   runner?: StartupCommandRunner;
@@ -47,13 +45,8 @@ export const processStartupCommandRunner: StartupCommandRunner = {
   },
 };
 
-function requiredExecutionProfiles(
-  defaultReviewerExecution: PiExecutionProfile | undefined,
-): readonly ExecutionProfile[] {
-  if (!defaultReviewerExecution) {
-    throw new Error("Automode requires the default Reviewer execution profile");
-  }
-  return createAutomodeCapabilityProfile(defaultReviewerExecution).panelExecutions;
+function requiredExecutionProfiles(): readonly ExecutionProfile[] {
+  return createAutomodeCapabilityProfile().panelExecutions;
 }
 
 export async function attestClaudeCodeExecutionProfile(
@@ -265,7 +258,7 @@ export async function validateAutomodeStartup(
   if (typeof viewed.viewerPermission !== "string" || !hasGitHubPermission(viewed.viewerPermission, permission)) {
     throw new Error(`GitHub repository access failed: Automode requires ${permission} permission`);
   }
-  const profiles = requiredExecutionProfiles(options.defaultReviewerExecution);
+  const profiles = requiredExecutionProfiles();
   try {
     if (options.attestExecutions) await options.attestExecutions(profiles);
     else await defaultExecutionAttestor(profiles, options, runner);

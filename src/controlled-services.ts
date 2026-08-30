@@ -17,6 +17,7 @@ export interface ControlledServicesOptions {
   paths: AutomodePaths;
   skillPaths: readonly string[];
   systemPrompt: string;
+  modelsPath?: string;
   extensions?: readonly InlineExtension[];
 }
 
@@ -67,7 +68,7 @@ export async function createControlledServices(
   const repository = repositoryRoot(options.cwd);
   const modelRuntime = await ModelRuntime.create({
     authPath: join(options.paths.normalAgentDir, "auth.json"),
-    modelsPath: null,
+    modelsPath: options.modelsPath ?? null,
     signal: AbortSignal.timeout(30_000),
   });
   const settingsManager = SettingsManager.inMemory(AUTOMODE_SETTINGS);

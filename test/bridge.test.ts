@@ -73,7 +73,7 @@ test("a confirmed configuration is serialized and launches from the repository r
   const launches: Array<{
     cwd: string;
     serializedConfiguration: string;
-    defaultReviewerExecution: {
+    mainExecution: {
       harness: "pi";
       provider: string;
       model: string;
@@ -93,7 +93,7 @@ test("a confirmed configuration is serialized and launches from the repository r
   assert.deepEqual(launches, [{
     cwd: repository,
     serializedConfiguration: '{"mode":"full","stages":["auto-triage","auto-grilling","auto-implement","auto-review"]}',
-    defaultReviewerExecution: {
+    mainExecution: {
       harness: "pi",
       provider: "anthropic",
       model: "claude-opus-4-8",

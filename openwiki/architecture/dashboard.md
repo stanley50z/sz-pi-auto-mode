@@ -9,7 +9,7 @@ openwiki:
   source_paths: [src/dashboard.ts, src/dashboard-ui.ts, src/automode-main.ts, src/main-status-card.ts, src/coordinator.ts, src/ticket-session-main.ts]
   symbols: [CoordinatorDashboard, DashboardProjection, DashboardCommand, HttpCoordinatorDashboard, createDashboardProjection, createAutomodeStatusCard]
   test_paths: [test/dashboard.test.ts, test/dashboard-ui.test.ts, test/coordinator.test.ts, test/main-session.test.ts, test/main-status-card.test.ts, test/ticket-session.test.ts]
-  invariants: [The dashboard binds to loopback port 41738., Tailscale exposure is optional and failures leave localhost access available., Browser mutations require an allowed host same-origin checks CSRF and revision matching., Dashboard activity and recent history are process-local and bounded., Dashboard commands delegate to the Coordinator and never perform ticket work.]
+  invariants: [The dashboard prefers loopback port 41738 and falls back to an operating-system-selected free loopback port., Tailscale exposure is optional and failures leave localhost access available., Only the exact owned Tailscale handler is removed., Browser mutations require an allowed host same-origin checks CSRF and revision matching., Dashboard commands delegate to the Coordinator and never perform ticket work.]
   validation_commands: [npm run build, "node --test dist/test/dashboard.test.js dist/test/dashboard-ui.test.js dist/test/main-status-card.test.js"]
 ---
 
@@ -42,9 +42,9 @@ sequenceDiagram
 
 ## Network and browser contract
 
-`src/dashboard.ts` binds the HTTP server to `127.0.0.1:41738` (`AUTOMODE_DASHBOARD_LOCAL_URL`). It serves the generated static assets from `src/dashboard-ui.ts`, `/api/snapshot`, and a live event stream. The server tries `tailscale serve --bg --yes` for a private `.ts.net` URL; an unavailable or invalid exposure records `exposureError` and preserves localhost-only operation. Existing Tailscale Serve configuration is rejected rather than overwritten, and disposal resets only exposure created by this dashboard. The Main Session status card always shows the exact local URL and shows the remote URL only after it has been validated as HTTPS on `.ts.net`.
+`src/dashboard.ts` prefers `127.0.0.1:41738` (`AUTOMODE_DASHBOARD_LOCAL_URL`) and falls back to an operating-system-selected free loopback port when that port is occupied. It serves the generated static assets from `src/dashboard-ui.ts`, `/api/snapshot`, and a live event stream. The server tries `tailscale serve --bg --yes` for a private `.ts.net` URL; an unavailable or invalid exposure records `exposureError` and preserves localhost-only operation. It adopts an existing root handler only when it targets the dashboard's exact local URL; otherwise it allocates an unused HTTPS port and installs its own root handler. Disposal removes only that exact currently-owned handler, preserving unrelated Tailscale Serve configuration. Different repositories can therefore run Automode concurrently. The Main Session status card always shows the exact local URL and shows the remote URL only after it has been validated as HTTPS on `.ts.net`.
 
-Requests are constrained by an allowlist of loopback and validated private tailnet hosts. Mutation endpoints require POST, an allowed `Origin`, the per-server CSRF token, and the current projection revision through `If-Match`; command bodies are strict and bounded. Security headers disable framing, caching, ambient origins, and non-self resources. Port collision therefore fails dashboard startup before Coordinator discovery or claims.
+Requests are constrained by an allowlist of loopback and validated private tailnet hosts. Mutation endpoints require POST, an allowed `Origin`, the per-server CSRF token, and the current projection revision through `If-Match`; command bodies are strict and bounded. Security headers disable framing, caching, ambient origins, and non-self resources. The preferred-port collision is handled before Coordinator discovery or claims by selecting a free loopback port.
 
 ## Projection, lanes, and controls
 

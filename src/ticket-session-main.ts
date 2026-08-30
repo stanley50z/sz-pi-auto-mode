@@ -10,6 +10,7 @@ import {
 import { attestCanonicalCommands, isPathInside } from "./attestation.js";
 import { createAutomodeCapabilityProfile } from "./capability-profile.js";
 import { createControlledServices } from "./controlled-services.js";
+import { resolvePiExecutionModel } from "./model-execution.js";
 import { CliPanelProcessLauncher } from "./panel-process.js";
 import { createProductionPanelSeatLauncher } from "./panel-runtime.js";
 import { repositoryRoot, resolveAutomodePaths } from "./paths.js";
@@ -210,7 +211,7 @@ export const createControlledTicketSession: TicketSessionChildSessionFactory = a
   const cwd = realpathSync(resolve(request.cwd));
   repositoryRoot(cwd);
   createAutomationStageConfiguration(request.configuration.mode, request.configuration.stages);
-  const profile = createAutomodeCapabilityProfile(request.defaultReviewerExecution);
+  const profile = createAutomodeCapabilityProfile();
   const requestedSkill = profile.skills.find((skill) => skill.name === request.skillName);
   if (!requestedSkill || requestedSkill.kind !== "stage" || requestedSkill.owner !== "automode") {
     throw new Error(`Skill is not an Automode Stage Skill: ${request.skillName}`);
@@ -237,17 +238,7 @@ export const createControlledTicketSession: TicketSessionChildSessionFactory = a
     systemPrompt: "You are an authoritative Automode Ticket Session. Perform only the one canonically dispatched item workflow in this persistent session. You must finish by calling automode_ticket_result exactly once; never merely describe completion in prose.",
   });
   const expectedExecution = profile.ordinaryTicketExecution;
-  const available = await services.modelRuntime.getAvailable(expectedExecution.provider, {
-    signal: AbortSignal.timeout(30_000),
-  });
-  const model = available.find((candidate) =>
-    candidate.provider === expectedExecution.provider && candidate.id === expectedExecution.model
-  );
-  if (!model) {
-    throw new Error(
-      `Required execution profile is unavailable: ${expectedExecution.provider}/${expectedExecution.model}`,
-    );
-  }
+  const model = await resolvePiExecutionModel(services, expectedExecution);
 
   const assignment = {
     itemUrl: request.itemUrl,

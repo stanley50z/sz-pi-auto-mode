@@ -115,7 +115,7 @@ test("the Main Session rejects environment tampering between confirmation and ch
     cwd: repository,
     serializedConfiguration: confirmed,
     piPackageDir: resolve(dirname(fileURLToPath(import.meta.url)), "../../node_modules/@earendil-works/pi-coding-agent"),
-    defaultReviewerExecution: {
+    mainExecution: {
       harness: "pi",
       provider: "openai-codex",
       model: "gpt-5.6-sol",
@@ -127,7 +127,7 @@ test("the Main Session rejects environment tampering between confirmation and ch
     USERPROFILE: join(fixture, "home"),
   });
   assert.equal(
-    plan.env!.AUTOMODE_DEFAULT_REVIEWER_EXECUTION,
+    plan.env!.AUTOMODE_MAIN_EXECUTION,
     '{"harness":"pi","provider":"openai-codex","model":"gpt-5.6-sol","reasoning":"high"}',
   );
   plan.env!.AUTOMODE_STAGE_CONFIGURATION = serializeAutomationStageConfiguration(
@@ -171,7 +171,6 @@ test("PTY walkthrough launches Full-Auto and Half-Auto stage selections in fresh
   assert.deepEqual(full.proof.panelExecutions, [
     { harness: "pi", provider: "openai-codex", model: "gpt-5.6-sol", reasoning: "high" },
     { harness: "pi", provider: "github-copilot", model: "claude-fable-5", reasoning: "high" },
-    { harness: "pi", provider: "openai-codex", model: "gpt-5.6-sol", reasoning: "high" },
   ]);
   assert.notEqual(full.proof.pid, full.bridgePid);
   assert.equal(full.proof.sessionName, "Automode Main — Full-Auto");

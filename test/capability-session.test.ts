@@ -8,19 +8,11 @@ import { createCapabilitySession } from "../src/capability-session.js";
 import { resolveAutomodePaths } from "../src/paths.js";
 
 const repository = realpathSync(process.cwd());
-const defaultReviewerExecution = {
-  harness: "pi",
-  provider: "anthropic",
-  model: "claude-opus-4-8",
-  reasoning: "high",
-} as const;
-
 test("a controlled capability session exposes every pre-attested Stage capability", async () => {
   const home = mkdtempSync(join(tmpdir(), "automode-capability-"));
   const controlled = await createCapabilitySession({
     cwd: repository,
     home,
-    defaultReviewerExecution,
     model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
   });
 
@@ -124,7 +116,6 @@ test("ambient user and project executable resources never enter the controlled s
   const controlled = await createCapabilitySession({
     cwd: isolatedRepository,
     home,
-    defaultReviewerExecution,
     model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
   });
   try {
@@ -147,7 +138,6 @@ test("project executable resources require both explicit trust and an allowlist"
     () => createCapabilitySession({
       cwd: repository,
       home: mkdtempSync(join(tmpdir(), "automode-untrusted-")),
-      defaultReviewerExecution,
       model,
       projectResources: {
         trusted: false,
@@ -160,7 +150,6 @@ test("project executable resources require both explicit trust and an allowlist"
     () => createCapabilitySession({
       cwd: repository,
       home: mkdtempSync(join(tmpdir(), "automode-shadowed-")),
-      defaultReviewerExecution,
       model,
       projectResources: {
         trusted: true,
@@ -173,7 +162,6 @@ test("project executable resources require both explicit trust and an allowlist"
   const controlled = await createCapabilitySession({
     cwd: repository,
     home: mkdtempSync(join(tmpdir(), "automode-allowlist-")),
-    defaultReviewerExecution,
     model,
     projectResources: {
       trusted: true,

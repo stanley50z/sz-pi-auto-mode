@@ -4,7 +4,6 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isPathInside } from "./attestation.js";
-import type { PiExecutionProfile } from "./capability-profile.js";
 import type {
   TicketSessionHandle as CoordinatorTicketSessionHandle,
   TicketSessionHost as CoordinatorTicketSessionHost,
@@ -21,7 +20,6 @@ export interface TicketSessionLaunchRequest {
   skillName: string;
   itemUrl: string;
   configuration: AutomationStageConfiguration;
-  defaultReviewerExecution: PiExecutionProfile;
   sessionName?: string;
   resumeSessionFile?: string;
   home?: string;
@@ -260,7 +258,6 @@ export class TicketSessionHost {
       itemUrl: request.itemUrl,
       prompt: createCanonicalTicketSessionPrompt(request.skillName, request.itemUrl),
       configuration: request.configuration,
-      defaultReviewerExecution: request.defaultReviewerExecution,
       ...(request.sessionName === undefined ? {} : { sessionName: request.sessionName }),
       ...(request.resumeSessionFile === undefined
         ? {}
@@ -579,7 +576,6 @@ function observedActivity(event: TicketSessionEvent): TicketSessionObservedActiv
 export interface AutomodeTicketSessionHostOptions {
   readonly repository: string;
   readonly configuration: AutomationStageConfiguration;
-  readonly defaultReviewerExecution: PiExecutionProfile;
   readonly home?: string;
   readonly normalAgentDir?: string;
   readonly processHost?: TicketSessionHost;
@@ -589,7 +585,6 @@ export interface AutomodeTicketSessionHostOptions {
 export class AutomodeTicketSessionHost implements CoordinatorTicketSessionHost {
   readonly #repository: string;
   readonly #configuration: AutomationStageConfiguration;
-  readonly #defaultReviewerExecution: PiExecutionProfile;
   readonly #home: string | undefined;
   readonly #normalAgentDir: string | undefined;
   readonly #processHost: TicketSessionHost;
@@ -598,7 +593,6 @@ export class AutomodeTicketSessionHost implements CoordinatorTicketSessionHost {
   constructor(options: AutomodeTicketSessionHostOptions) {
     this.#repository = realpathSync(resolve(options.repository));
     this.#configuration = options.configuration;
-    this.#defaultReviewerExecution = options.defaultReviewerExecution;
     this.#home = options.home;
     this.#normalAgentDir = options.normalAgentDir;
     this.#processHost = options.processHost ?? new TicketSessionHost();
@@ -622,7 +616,6 @@ export class AutomodeTicketSessionHost implements CoordinatorTicketSessionHost {
       skillName: request.skillName,
       itemUrl: request.item.url,
       configuration: this.#configuration,
-      defaultReviewerExecution: this.#defaultReviewerExecution,
       sessionName: `Automode ${request.stage} #${request.item.number}`,
       resumeSessionFile: resumableSessionFile,
       home: this.#home,

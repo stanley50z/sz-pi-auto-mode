@@ -65,7 +65,7 @@ The durable, repository-scoped operating lifetime of Automode under one fixed Au
 _Avoid_: Single-ticket session, disposable process execution
 
 **Automode Run Record**:
-The Coordinator-bound durable record that identifies an Automode Run and stores its fixed Automation Stage Configuration, default Reviewer execution profile, and explicitly allowlisted project skill files. It lives beside the durable Coordinator identity under the Git common directory, so linked worktrees and different Pi homes cannot accept divergent run settings.
+The Coordinator-bound durable record that identifies an Automode Run and stores its fixed Automation Stage Configuration and explicitly allowlisted project skill files. Execution profiles belong to each Automode process and are not stored in this record. It lives beside the durable Coordinator identity under the Git common directory, so linked worktrees and different Pi homes cannot accept divergent run settings.
 _Avoid_: Automode Capability Profile, stage profile, `capability-profile.json`
 
 **Automode Coordinator**:
@@ -73,7 +73,7 @@ The repository-singleton orchestrator for an Automode Run. At most one live Coor
 _Avoid_: Ticket worker, subagent
 
 **Main Session**:
-The repository-scoped coordinator session that hosts the Automode Coordinator for an Automode Run. It supervises work but does not stand in for a stage-specific Ticket Session.
+The repository-scoped coordinator session that hosts the Automode Coordinator for an Automode Run. Each Main Session uses the Pi provider and model active when its `/automode` process launches. It supervises work but does not stand in for a stage-specific Ticket Session.
 _Avoid_: Grilling Session, Review Session, ticket worker
 
 **Automode Dashboard**:
@@ -93,7 +93,7 @@ The authoritative Ticket Session for one pull request processed by Auto-Review. 
 _Avoid_: Main Session, Automode Coordinator, Reviewer
 
 **Review Panel**:
-The configured set of independent Reviewer seats used by Auto-Review. It always includes a default Pi Reviewer using the provider and model active when `/automode` launches, plus zero or more additional configured seats. The seats retain the Deliberation Panel's execution profiles but receive review-specific prompts, context, and capabilities.
+The configured set of independent Reviewer seats used by Auto-Review. The default seats are Pi / `openai-codex/gpt-5.6-sol` and Pi / `github-copilot/claude-fable-5`, both with high reasoning. The seats retain the Deliberation Panel's execution profiles but receive review-specific prompts, context, and capabilities.
 _Avoid_: Deliberation Panel, Codex Cloud review
 
 **Reviewer**:
@@ -109,7 +109,7 @@ The launch label whose baseline enables all four Automation Stages. It remains f
 _Avoid_: Unattended mode, headless mode
 
 **Deliberation Panel**:
-A configurable set of independent Panel Members that produces candidate answers whenever Auto-Grilling is enabled, without members seeing one another's answers. It always includes the default Pi seat captured from the provider and model active when `/automode` launches, plus zero or more additional configured seats.
+A configurable set of independent Panel Members that produces candidate answers whenever Auto-Grilling is enabled, without members seeing one another's answers. The default seats are Pi / `openai-codex/gpt-5.6-sol` and Pi / `github-copilot/claude-fable-5`, both with high reasoning.
 _Avoid_: Agent swarm, voting committee
 
 **Panel Member**:

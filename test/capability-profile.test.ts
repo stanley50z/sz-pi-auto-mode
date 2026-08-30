@@ -1,15 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createAutomodeCapabilityProfile } from "../src/capability-profile.js";
-const defaultReviewerExecution = {
-  harness: "pi",
-  provider: "anthropic",
-  model: "claude-opus-4-8",
-  reasoning: "high",
-} as const;
 
 test("the capability profile preloads every Automode Stage Skill and fixed controlled surface", () => {
-  const profile = createAutomodeCapabilityProfile(defaultReviewerExecution);
+  const profile = createAutomodeCapabilityProfile();
 
   assert.deepEqual(
     profile.skills.filter((skill) => skill.kind === "stage").map(({ name, owner }) => [name, owner]),
@@ -37,14 +31,13 @@ test("the capability profile preloads every Automode Stage Skill and fixed contr
     reasoning: "high",
   });
   assert.deepEqual(profile.panelExecutions, [
-    { harness: "pi", provider: "anthropic", model: "claude-opus-4-8", reasoning: "high" },
-    { harness: "pi", provider: "github-copilot", model: "claude-fable-5", reasoning: "high" },
     { harness: "pi", provider: "openai-codex", model: "gpt-5.6-sol", reasoning: "high" },
+    { harness: "pi", provider: "github-copilot", model: "claude-fable-5", reasoning: "high" },
   ]);
 });
 
 test("the capability profile keeps shared and support skills native", () => {
-  const profile = createAutomodeCapabilityProfile(defaultReviewerExecution);
+  const profile = createAutomodeCapabilityProfile();
 
   assert.deepEqual(
     profile.skills.filter((skill) => skill.kind === "shared").map((skill) => skill.name),

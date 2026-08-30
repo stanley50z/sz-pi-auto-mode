@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import {
   createAgentSessionFromServices,
   createAgentSessionRuntime,
@@ -9,13 +10,16 @@ import {
   type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
+import type { PiExecutionProfile } from "./capability-profile.js";
 import { createControlledServices } from "./controlled-services.js";
+import { resolvePiExecutionModel } from "./model-execution.js";
 import { resolveAutomodePaths, type AutomodePaths } from "./paths.js";
 
 export interface MainSessionOptions {
   cwd: string;
   skillPaths: string[];
   systemPrompt: string;
+  execution?: PiExecutionProfile;
   model?: Model<any>;
   home?: string;
   normalAgentDir?: string;
@@ -37,6 +41,7 @@ async function createMainSessionServices(options: MainSessionOptions, cwd: strin
     cwd,
     paths,
     skillPaths: options.skillPaths,
+    modelsPath: join(paths.normalAgentDir, "models.json"),
     extensions: options.extensions,
     systemPrompt: options.systemPrompt,
   });
@@ -47,10 +52,14 @@ export async function createMainSession(
   options: MainSessionOptions,
 ): Promise<CreateAgentSessionResult> {
   const { paths, services } = await createMainSessionServices(options, options.cwd);
+  const model = options.execution
+    ? await resolvePiExecutionModel(services, options.execution, options.model)
+    : options.model;
   return createAgentSessionFromServices({
     services,
     sessionManager: SessionManager.create(options.cwd, paths.sessionDir),
-    model: options.model,
+    model,
+    thinkingLevel: options.execution?.reasoning,
     noTools: "all",
   });
 }
@@ -61,12 +70,16 @@ export async function createMainSessionRuntime(
   const initialPaths = prepareAutomodePaths(options, options.cwd);
   const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
     const { services } = await createMainSessionServices(options, cwd);
+    const model = options.execution
+      ? await resolvePiExecutionModel(services, options.execution, options.model)
+      : options.model;
     return {
       ...(await createAgentSessionFromServices({
         services,
         sessionManager,
         sessionStartEvent,
-        model: options.model,
+        model,
+        thinkingLevel: options.execution?.reasoning,
         noTools: "all",
       })),
       services,

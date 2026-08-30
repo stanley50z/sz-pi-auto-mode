@@ -21,18 +21,23 @@ import {
   serializeAutomationStageConfiguration,
 } from "../src/stage-configuration.js";
 
-const defaultReviewerExecution = {
-  harness: "pi",
-  provider: "anthropic",
-  model: "claude-opus-4-8",
-  reasoning: "high",
-} as const;
+type StartForTestOptions = Omit<StartAutomodeMainOptions, "mainExecution"> & {
+  mainExecution?: StartAutomodeMainOptions["mainExecution"];
+};
 
-function startForTest(options: Omit<StartAutomodeMainOptions, "defaultReviewerExecution">) {
+function startForTest(options: StartForTestOptions) {
   return startAutomodeMainSession({
     ...options,
-    defaultReviewerExecution,
-    model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
+    mainExecution: options.mainExecution ?? {
+      harness: "pi",
+      provider: "openai-codex",
+      model: "gpt-5.6-sol",
+      reasoning: "high",
+    },
+    model: options.mainExecution
+      ? options.model
+      : options.model ?? getBuiltinModel("openai-codex", "gpt-5.6-sol"),
+    capabilityModel: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
     startupValidation: {
       runner: {
         async run(command, args, cwd) {
@@ -138,7 +143,6 @@ test("a fresh Main Session separates process-local operating state from the dura
         mode: "half",
         stages: ["auto-triage", "auto-review"],
       },
-      defaultReviewerExecution,
       projectResources: { trusted: false, skillFiles: [] },
     });
   } finally {
@@ -323,7 +327,12 @@ test("failed startup validation does not persist an Automode Run Record", async 
       repository,
       home,
       ...configuration,
-      defaultReviewerExecution,
+      mainExecution: {
+        harness: "pi",
+        provider: "openai-codex",
+        model: "gpt-5.6-sol",
+        reasoning: "high",
+      },
       startupValidation: {
         runner: {
           async run() {
@@ -338,6 +347,86 @@ test("failed startup validation does not persist an Automode Run Record", async 
     existsSync(resolveAutomodePaths(repository, home).runRecordFile),
     false,
   );
+});
+
+test("Main Session model changes do not rewrite or block the durable Automode Run", async () => {
+  const fixture = mkdtempSync(join(tmpdir(), "automode-process-model-"));
+  const repository = join(fixture, "repository");
+  const home = join(fixture, "home");
+  mkdirSync(join(repository, ".git"), { recursive: true });
+  const configuration = confirmedConfiguration("half", ["auto-review"]);
+
+  const first = await startForTest({
+    repository,
+    home,
+    ...configuration,
+    mainExecution: {
+      harness: "pi",
+      provider: "openai-codex",
+      model: "gpt-5.6-sol",
+      reasoning: "high",
+    },
+    model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
+  });
+  const record = JSON.parse(readFileSync(first.runRecordFile, "utf8")) as Record<string, unknown>;
+  await first.dispose();
+  writeFileSync(first.runRecordFile, `${JSON.stringify({
+    ...record,
+    defaultReviewerExecution: {
+      harness: "pi",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      reasoning: "high",
+    },
+  })}\n`);
+
+  const restarted = await startForTest({
+    repository,
+    home,
+    ...configuration,
+    mainExecution: {
+      harness: "pi",
+      provider: "github-copilot",
+      model: "claude-fable-5",
+      reasoning: "high",
+    },
+    model: getBuiltinModel("github-copilot", "claude-fable-5"),
+  });
+  assert.deepEqual(JSON.parse(readFileSync(restarted.runRecordFile, "utf8")), record);
+  await restarted.dispose();
+});
+
+test("a Main Session resolves the launching Pi model from the normal models catalog", async () => {
+  const fixture = mkdtempSync(join(tmpdir(), "automode-custom-main-model-"));
+  const repository = join(fixture, "repository");
+  const home = join(fixture, "home");
+  const normalAgentDir = join(fixture, "normal-agent");
+  mkdirSync(join(repository, ".git"), { recursive: true });
+  mkdirSync(normalAgentDir, { recursive: true });
+  writeFileSync(join(normalAgentDir, "models.json"), JSON.stringify({
+    providers: {
+      "automode-custom": {
+        baseUrl: "http://127.0.0.1:12345/v1",
+        api: "openai-completions",
+        apiKey: "test-only",
+        models: [{ id: "main-custom", reasoning: true }],
+      },
+    },
+  }));
+
+  const main = await startForTest({
+    repository,
+    home,
+    normalAgentDir,
+    ...confirmedConfiguration("half", ["auto-review"]),
+    mainExecution: {
+      harness: "pi",
+      provider: "automode-custom",
+      model: "main-custom",
+      reasoning: "high",
+    },
+  });
+  await main.dispose();
 });
 
 test("an Automode Run rejects changed project executable additions on restart", async () => {

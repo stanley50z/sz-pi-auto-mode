@@ -96,13 +96,6 @@ class FakeTicketProcess extends EventEmitter implements TicketSessionProcess {
 }
 
 const configuration = createAutomationStageConfiguration("half", ["auto-triage"]);
-const defaultReviewerExecution = {
-  harness: "pi",
-  provider: "anthropic",
-  model: "claude-opus-4-8",
-  reasoning: "high",
-} as const;
-
 test("TicketSessionHost launches one child in the actual item cwd with deterministic canonical dispatch", async () => {
   const cwd = join(mkdtempSync(join(tmpdir(), "ticket-host-")), "worktree");
   mkdirSync(cwd);
@@ -122,7 +115,6 @@ test("TicketSessionHost launches one child in the actual item cwd with determini
     skillName: "triage",
     itemUrl: "https://github.com/owner/repository/issues/17",
     configuration,
-    defaultReviewerExecution,
     sessionName: "Auto-Triage #17",
   });
 
@@ -138,7 +130,6 @@ test("TicketSessionHost launches one child in the actual item cwd with determini
       itemUrl: "https://github.com/owner/repository/issues/17",
       prompt: "/skill:triage https://github.com/owner/repository/issues/17",
       configuration,
-      defaultReviewerExecution,
       sessionName: "Auto-Triage #17",
     },
   }]);
@@ -185,7 +176,6 @@ test("Coordinator recovery replaces mismatched in-root session history instead o
   const adapter = new AutomodeTicketSessionHost({
     repository: cwd,
     configuration,
-    defaultReviewerExecution,
     home,
     processHost,
   });
@@ -239,7 +229,6 @@ test("a fresh Ticket Session validates its persisted identity before reporting s
   const adapter = new AutomodeTicketSessionHost({
     repository: cwd,
     configuration,
-    defaultReviewerExecution,
     home,
     processHost: new TicketSessionHost({
       childEntrypoint: join(cwd, "ticket-session-main.js"),
@@ -305,7 +294,6 @@ test("the Coordinator host exposes persisted Pi history and future structured ac
   const adapter = new AutomodeTicketSessionHost({
     repository: cwd,
     configuration,
-    defaultReviewerExecution,
     home,
     processHost,
   });
@@ -379,7 +367,6 @@ test("the Coordinator host rejects cross-directory session history and force-sto
   const adapter = new AutomodeTicketSessionHost({
     repository: cwd,
     configuration,
-    defaultReviewerExecution,
     home: join(cwd, "home"),
     processHost: new TicketSessionHost({
       childEntrypoint: join(cwd, "ticket-session-main.js"),
@@ -443,7 +430,6 @@ test("the child reports persistent identity and structured activity around one c
     itemUrl: "https://github.com/owner/repository/issues/18",
     prompt: "/skill:triage https://github.com/owner/repository/issues/18",
     configuration,
-    defaultReviewerExecution,
   }, async () => session, (event) => events.push(event), { cwd });
 
   assert.deepEqual(prompts, ["/skill:triage https://github.com/owner/repository/issues/18"]);
@@ -495,7 +481,6 @@ test("terminate is idempotent and forces a child that does not stop gracefully",
     skillName: "triage",
     itemUrl: "https://github.com/owner/repository/issues/19",
     configuration,
-    defaultReviewerExecution,
   });
 
   const first = run.terminate();
@@ -524,7 +509,6 @@ test("graceful termination aborts and disposes the controlled child session", as
     itemUrl: "https://github.com/owner/repository/issues/20",
     prompt: "/skill:triage https://github.com/owner/repository/issues/20",
     configuration,
-    defaultReviewerExecution,
   }, async () => ({
     sessionId: "graceful-session",
     sessionFile: join(cwd, "graceful-session.jsonl"),
@@ -551,7 +535,6 @@ test("the child returns an explicit error terminal result when the controlled tu
     itemUrl: "https://github.com/owner/repository/issues/20",
     prompt: "/skill:triage https://github.com/owner/repository/issues/20",
     configuration,
-    defaultReviewerExecution,
   }, async () => ({
     sessionId: "failed-session",
     sessionFile: join(cwd, "failed-session.jsonl"),
@@ -579,7 +562,6 @@ test("an exact persisted session file can resume and settle waiting", async () =
     itemUrl: "https://github.com/owner/repository/issues/21",
     prompt: "/skill:prototype https://github.com/owner/repository/issues/21",
     configuration: createAutomationStageConfiguration("half", ["auto-implement"]),
-    defaultReviewerExecution,
     resumeSessionFile: sessionFile,
   }, async (request) => {
     receivedResume = request.resumeSessionFile;
@@ -608,7 +590,6 @@ test("the production child adapter can dispatch a pre-attested Stage outside the
     itemUrl: "https://github.com/owner/repository/issues/22",
     prompt: "/skill:triage https://github.com/owner/repository/issues/22",
     configuration: createAutomationStageConfiguration("half", ["auto-review"]),
-    defaultReviewerExecution,
   });
   try {
     assert.ok(session.sessionId);
@@ -632,7 +613,6 @@ writeFileSync(${JSON.stringify(preloadMarker)}, "loaded");
   const adapter = new AutomodeTicketSessionHost({
     repository: cwd,
     configuration,
-    defaultReviewerExecution,
     home,
     processHost: new TicketSessionHost({
       childEntrypoint: fileURLToPath(import.meta.url),
@@ -688,7 +668,6 @@ writeFileSync(${JSON.stringify(preloadMarker)}, "loaded");
     skillName: "triage",
     itemUrl: "https://github.com/owner/repository/issues/22",
     configuration,
-    defaultReviewerExecution,
   });
   run.subscribe((event) => events.push(event));
 

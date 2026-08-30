@@ -82,44 +82,174 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+interface TailscaleCommandResult {
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+type TailscaleCommandRunner = (args: readonly string[]) => Promise<TailscaleCommandResult>;
+
+const runTailscaleCommand: TailscaleCommandRunner = async (args) => {
+  const result = await execFileAsync(
+    "tailscale",
+    [...args],
+    { encoding: "utf8", timeout: 10_000, windowsHide: true },
+  );
+  return { stdout: result.stdout, stderr: result.stderr };
+};
+
+interface TailscaleWebRoute {
+  readonly host: string;
+  readonly port: number;
+  readonly path: string;
+  readonly proxy?: string;
+}
+
+function tailscaleWebRoutes(status: unknown): TailscaleWebRoute[] {
+  if (!status || typeof status !== "object" || Array.isArray(status)) {
+    throw new Error("tailscale serve returned an invalid status");
+  }
+  const web = (status as { Web?: unknown }).Web;
+  if (web === undefined) return [];
+  if (!web || typeof web !== "object" || Array.isArray(web)) {
+    throw new Error("tailscale serve returned an invalid Web status");
+  }
+
+  const routes: TailscaleWebRoute[] = [];
+  for (const [hostAndPort, value] of Object.entries(web)) {
+    const separator = hostAndPort.lastIndexOf(":");
+    const port = Number(hostAndPort.slice(separator + 1));
+    const host = hostAndPort.slice(0, separator);
+    if (!host || !Number.isInteger(port) || port < 1 || port > 65_535) {
+      throw new Error("tailscale serve returned an invalid HTTPS endpoint");
+    }
+    const handlers = value && typeof value === "object" && !Array.isArray(value)
+      ? (value as { Handlers?: unknown }).Handlers
+      : undefined;
+    if (!handlers || typeof handlers !== "object" || Array.isArray(handlers)) continue;
+    for (const [path, handler] of Object.entries(handlers)) {
+      const proxy = handler && typeof handler === "object" && !Array.isArray(handler)
+        ? (handler as { Proxy?: unknown }).Proxy
+        : undefined;
+      routes.push({
+        host,
+        port,
+        path,
+        ...(typeof proxy === "string" ? { proxy } : {}),
+      });
+    }
+  }
+  return routes;
+}
+
+function usedTailscalePorts(status: unknown, routes: readonly TailscaleWebRoute[]): Set<number> {
+  const used = new Set(routes.map(({ port }) => port));
+  if (!status || typeof status !== "object" || Array.isArray(status)) return used;
+  const tcp = (status as { TCP?: unknown }).TCP;
+  if (!tcp || typeof tcp !== "object" || Array.isArray(tcp)) return used;
+  for (const port of Object.keys(tcp).map(Number)) {
+    if (Number.isInteger(port) && port >= 1 && port <= 65_535) used.add(port);
+  }
+  return used;
+}
+
+function availableTailscalePort(preferred: number, used: ReadonlySet<number>): number {
+  for (let offset = 0; offset < 64_512; offset += 1) {
+    const port = 1_024 + ((preferred - 1_024 + offset) % 64_512);
+    if (!used.has(port)) return port;
+  }
+  throw new Error("No Tailscale HTTPS port is available for the Automode dashboard");
+}
+
+/** Owns one Tailscale Serve handler without replacing handlers owned by other processes. */
 export class CliDashboardTailscaleExposure implements DashboardTailscaleExposure {
-  private exposed = false;
+  private ownedRoute: { readonly httpsPort: number; readonly localUrl: string } | undefined;
+
+  constructor(private readonly run: TailscaleCommandRunner = runTailscaleCommand) {}
+
+  private async status(): Promise<{ readonly value: unknown; readonly routes: TailscaleWebRoute[] }> {
+    const { stdout } = await this.run(["serve", "status", "--json"]);
+    const value: unknown = JSON.parse(stdout);
+    return { value, routes: tailscaleWebRoutes(value) };
+  }
+
+  private matchingRoute(
+    routes: readonly TailscaleWebRoute[],
+    localUrl: string,
+    httpsPort?: number,
+  ): TailscaleWebRoute | undefined {
+    return routes.find((route) =>
+      route.path === "/"
+      && route.proxy === localUrl
+      && (httpsPort === undefined || route.port === httpsPort)
+    );
+  }
+
+  private remoteUrl(route: TailscaleWebRoute): string {
+    const remote = new URL(`https://${route.host}:${route.port}`);
+    if (!remote.hostname.endsWith(".ts.net")) {
+      throw new Error("tailscale serve returned an invalid private tailnet URL");
+    }
+    return remote.origin;
+  }
 
   async expose(localUrl: string): Promise<{ readonly remoteUrl: string }> {
-    const { stdout: serializedStatus } = await execFileAsync(
-      "tailscale",
-      ["serve", "status", "--json"],
-      { encoding: "utf8", timeout: 10_000, windowsHide: true },
-    );
-    const currentStatus: unknown = JSON.parse(serializedStatus);
-    if (
-      !currentStatus
-      || typeof currentStatus !== "object"
-      || Array.isArray(currentStatus)
-      || Object.keys(currentStatus).length > 0
-    ) {
-      throw new Error("an existing Tailscale Serve configuration prevents private dashboard exposure");
+    const local = new URL(localUrl);
+    const preferredPort = Number(local.port);
+    if (local.protocol !== "http:" || !Number.isInteger(preferredPort) || preferredPort < 1) {
+      throw new Error(`Automode dashboard has an invalid loopback URL: ${localUrl}`);
     }
-    const { stdout, stderr } = await execFileAsync(
-      "tailscale",
-      ["serve", "--bg", "--yes", localUrl],
-      { encoding: "utf8", timeout: 10_000, windowsHide: true },
+
+    const current = await this.status();
+    const existing = this.matchingRoute(current.routes, localUrl);
+    if (existing) {
+      const remoteUrl = this.remoteUrl(existing);
+      this.ownedRoute = { httpsPort: existing.port, localUrl };
+      return { remoteUrl };
+    }
+
+    const httpsPort = availableTailscalePort(
+      preferredPort,
+      usedTailscalePorts(current.value, current.routes),
     );
-    this.exposed = true;
-    const output = `${stdout}\n${stderr}`;
-    const match = output.match(/https:\/\/[a-z0-9.-]+\.ts\.net(?::\d+)?/i);
-    if (!match) throw new Error("tailscale serve did not report a private tailnet URL");
-    return { remoteUrl: match[0] };
+    this.ownedRoute = { httpsPort, localUrl };
+    let setupError: unknown;
+    try {
+      await this.run([
+        "serve",
+        "--bg",
+        "--yes",
+        `--https=${httpsPort}`,
+        localUrl,
+      ]);
+    } catch (error) {
+      setupError = error;
+    }
+
+    const installed = this.matchingRoute((await this.status()).routes, localUrl, httpsPort);
+    if (!installed) {
+      this.ownedRoute = undefined;
+      if (setupError) throw setupError;
+      throw new Error("tailscale serve did not install the Automode dashboard handler");
+    }
+    try {
+      return { remoteUrl: this.remoteUrl(installed) };
+    } catch (error) {
+      await this.stop();
+      throw error;
+    }
   }
 
   async stop(): Promise<void> {
-    if (!this.exposed) return;
-    await execFileAsync(
-      "tailscale",
-      ["serve", "reset"],
-      { encoding: "utf8", timeout: 10_000, windowsHide: true },
-    );
-    this.exposed = false;
+    if (!this.ownedRoute) return;
+    const owned = this.ownedRoute;
+    const current = await this.status();
+    if (!this.matchingRoute(current.routes, owned.localUrl, owned.httpsPort)) {
+      this.ownedRoute = undefined;
+      return;
+    }
+    await this.run(["serve", `--https=${owned.httpsPort}`, "--set-path=/", "off"]);
+    this.ownedRoute = undefined;
   }
 }
 
@@ -194,10 +324,7 @@ class HttpCoordinatorDashboard implements CoordinatorDashboard {
   private eventSequence = 0;
   private readonly eventStreams = new Set<ServerResponse>();
   private status: DashboardStatus = { localUrl: AUTOMODE_DASHBOARD_LOCAL_URL };
-  private readonly allowedOrigins = new Map([
-    [`127.0.0.1:${AUTOMODE_DASHBOARD_PORT}`, AUTOMODE_DASHBOARD_LOCAL_URL],
-    [`localhost:${AUTOMODE_DASHBOARD_PORT}`, `http://localhost:${AUTOMODE_DASHBOARD_PORT}`],
-  ]);
+  private readonly allowedOrigins = new Map<string, string>();
 
   constructor(private readonly options: CoordinatorDashboardOptions) {
     this.tailscale = options.tailscale ?? new CliDashboardTailscaleExposure();
@@ -229,7 +356,7 @@ class HttpCoordinatorDashboard implements CoordinatorDashboard {
       });
     });
     this.server = server;
-    await new Promise<void>((resolve, reject) => {
+    const listen = (port: number) => new Promise<void>((resolve, reject) => {
       const onError = (error: Error) => {
         server.off("listening", onListening);
         reject(error);
@@ -240,20 +367,32 @@ class HttpCoordinatorDashboard implements CoordinatorDashboard {
       };
       server.once("error", onError);
       server.once("listening", onListening);
-      server.listen(AUTOMODE_DASHBOARD_PORT, "127.0.0.1");
+      server.listen(port, "127.0.0.1");
     });
+    try {
+      await listen(AUTOMODE_DASHBOARD_PORT);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
+      await listen(0);
+    }
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Automode dashboard did not receive a TCP port");
+    const localUrl = `http://127.0.0.1:${address.port}`;
+    this.allowedOrigins.clear();
+    this.allowedOrigins.set(`127.0.0.1:${address.port}`, localUrl);
+    this.allowedOrigins.set(`localhost:${address.port}`, `http://localhost:${address.port}`);
     this.exposureNeedsStop = true;
     try {
-      const { remoteUrl } = await this.tailscale.expose(AUTOMODE_DASHBOARD_LOCAL_URL);
+      const { remoteUrl } = await this.tailscale.expose(localUrl);
       const parsedRemoteUrl = new URL(remoteUrl);
       if (parsedRemoteUrl.protocol !== "https:" || !parsedRemoteUrl.hostname.endsWith(".ts.net")) {
         throw new Error("tailscale serve returned an invalid private tailnet URL");
       }
       this.allowedOrigins.set(parsedRemoteUrl.host.toLowerCase(), parsedRemoteUrl.origin);
-      this.status = { localUrl: AUTOMODE_DASHBOARD_LOCAL_URL, remoteUrl: parsedRemoteUrl.origin };
+      this.status = { localUrl, remoteUrl: parsedRemoteUrl.origin };
     } catch (error) {
       this.status = {
-        localUrl: AUTOMODE_DASHBOARD_LOCAL_URL,
+        localUrl,
         exposureError: errorMessage(error),
       };
     }

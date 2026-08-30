@@ -12,9 +12,9 @@ import { attestCanonicalCommands, isPathInside } from "./attestation.js";
 import {
   createAutomodeCapabilityProfile,
   type AutomodeCapabilityProfile,
-  type PiExecutionProfile,
 } from "./capability-profile.js";
 import { createControlledServices } from "./controlled-services.js";
+import { resolvePiExecutionModel } from "./model-execution.js";
 import { repositoryRoot, resolveAutomodePaths } from "./paths.js";
 
 export interface ProjectResourceAllowlist {
@@ -24,7 +24,6 @@ export interface ProjectResourceAllowlist {
 
 export interface CapabilitySessionOptions {
   cwd: string;
-  defaultReviewerExecution: PiExecutionProfile;
   model?: Model<any>;
   home?: string;
   normalAgentDir?: string;
@@ -56,41 +55,11 @@ function resolveProjectSkillPaths(
   });
 }
 
-function assertFixedModel(model: Model<any>, profile: AutomodeCapabilityProfile): void {
-  const expected = profile.ordinaryTicketExecution;
-  if (model.provider !== expected.provider || model.id !== expected.model) {
-    throw new Error(
-      `Ordinary Ticket Sessions require ${expected.provider}/${expected.model}; received ${model.provider}/${model.id}`,
-    );
-  }
-}
-
-async function resolveFixedModel(
-  services: AgentSessionServices,
-  profile: AutomodeCapabilityProfile,
-  supplied: Model<any> | undefined,
-): Promise<Model<any>> {
-  if (supplied) {
-    assertFixedModel(supplied, profile);
-    return supplied;
-  }
-  const expected = profile.ordinaryTicketExecution;
-  const available = await services.modelRuntime.getAvailable(
-    expected.provider,
-    { signal: AbortSignal.timeout(30_000) },
-  );
-  const model = available.find((candidate) =>
-    candidate.provider === expected.provider && candidate.id === expected.model
-  );
-  if (!model) throw new Error(`Required execution profile is unavailable: ${expected.provider}/${expected.model}`);
-  return model;
-}
-
 export async function createCapabilitySession(
   options: CapabilitySessionOptions,
 ): Promise<CapabilitySession> {
   const repository = repositoryRoot(options.cwd);
-  const profile = createAutomodeCapabilityProfile(options.defaultReviewerExecution);
+  const profile = createAutomodeCapabilityProfile();
   const paths = resolveAutomodePaths(repository, options.home, options.normalAgentDir);
   mkdirSync(paths.automodeDir, { recursive: true });
   mkdirSync(paths.sessionDir, { recursive: true });
@@ -102,7 +71,11 @@ export async function createCapabilitySession(
     extensions: options.extensions,
     systemPrompt: "You are an Automode Capability Attestation Session. Inspect the controlled capability surface, then terminate without doing tracker work.",
   });
-  const model = await resolveFixedModel(services, profile, options.model);
+  const model = await resolvePiExecutionModel(
+    services,
+    profile.ordinaryTicketExecution,
+    options.model,
+  );
   const result = await createAgentSessionFromServices({
     services,
     sessionManager: SessionManager.create(repository, paths.sessionDir),

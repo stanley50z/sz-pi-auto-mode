@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Model } from "@earendil-works/pi-ai";
@@ -39,10 +39,11 @@ export interface StartAutomodeMainOptions {
   repository: string;
   serializedConfiguration: string;
   configurationConfirmation: string;
-  defaultReviewerExecution: PiExecutionProfile;
+  mainExecution: PiExecutionProfile;
   home?: string;
   normalAgentDir?: string;
   model?: Model<any>;
+  capabilityModel?: Model<any>;
   projectResources?: ProjectResourceAllowlist;
   startupValidation?: {
     runner?: StartupCommandRunner;
@@ -178,14 +179,12 @@ function persistAutomodeRunRecord(
   runRecordFile: string,
   coordinatorId: string,
   configuration: AutomationStageConfiguration,
-  defaultReviewerExecution: PiExecutionProfile,
   projectResources: ProjectResourceAllowlist | undefined,
 ): string {
   const serialized = JSON.stringify({
     version: 1,
     coordinatorId,
     stageConfiguration: configuration,
-    defaultReviewerExecution,
     projectResources: {
       trusted: projectResources?.trusted ?? false,
       skillFiles: [...(projectResources?.skillPaths ?? [])]
@@ -198,13 +197,30 @@ function persistAutomodeRunRecord(
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     let persisted: string;
+    let legacyReviewerField = false;
     try {
-      persisted = JSON.stringify(JSON.parse(readFileSync(runRecordFile, "utf8")));
+      const parsed: unknown = JSON.parse(readFileSync(runRecordFile, "utf8"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && "defaultReviewerExecution" in parsed) {
+        const { defaultReviewerExecution: _, ...durable } = parsed as Record<string, unknown>;
+        persisted = JSON.stringify(durable);
+        legacyReviewerField = true;
+      } else {
+        persisted = JSON.stringify(parsed);
+      }
     } catch (parseError) {
       throw new Error("The durable Automode Run Record is invalid", { cause: parseError });
     }
     if (persisted !== serialized) {
       throw new Error("The Automode Run Record is fixed for this Automode Run");
+    }
+    if (legacyReviewerField) {
+      const migrationFile = `${runRecordFile}.${process.pid}.tmp`;
+      try {
+        writeFileSync(migrationFile, `${serialized}\n`, { encoding: "utf8", flag: "wx" });
+        renameSync(migrationFile, runRecordFile);
+      } finally {
+        rmSync(migrationFile, { force: true });
+      }
     }
   }
   return runRecordFile;
@@ -220,7 +236,6 @@ export async function startAutomodeMainSession(
   const operatingState = restoreAutomationStageOperatingState(configuration);
   const validated = await validateAutomodeStartup({
     repository: options.repository,
-    defaultReviewerExecution: options.defaultReviewerExecution,
     home: options.home,
     normalAgentDir: options.normalAgentDir,
     runner: options.startupValidation?.runner,
@@ -244,7 +259,6 @@ export async function startAutomodeMainSession(
     sessions: new AutomodeTicketSessionHost({
       repository: validated.repository,
       configuration,
-      defaultReviewerExecution: options.defaultReviewerExecution,
       home: options.home,
       normalAgentDir: options.normalAgentDir,
     }),
@@ -283,8 +297,7 @@ export async function startAutomodeMainSession(
   try {
     const attestationSession = await createCapabilitySession({
       cwd: validated.repository,
-      defaultReviewerExecution: options.defaultReviewerExecution,
-      model: options.model,
+      model: options.capabilityModel,
       home: options.home,
       normalAgentDir: options.normalAgentDir,
       projectResources: options.projectResources,
@@ -296,6 +309,7 @@ export async function startAutomodeMainSession(
       cwd: validated.repository,
       skillPaths: [],
       systemPrompt: "You are the Automode Main Session. Host the repository Coordinator and never perform Ticket Session work.",
+      execution: options.mainExecution,
       model: options.model,
       home: options.home,
       normalAgentDir: options.normalAgentDir,
@@ -305,7 +319,6 @@ export async function startAutomodeMainSession(
       paths.runRecordFile,
       lease.coordinatorId,
       configuration,
-      options.defaultReviewerExecution,
       options.projectResources,
     );
   } catch (error) {
@@ -519,15 +532,15 @@ async function main(): Promise<void> {
   if (!serializedConfiguration) throw new Error("Missing launch-baseline Automation Stage Configuration");
   const configurationConfirmation = process.env.AUTOMODE_STAGE_CONFIGURATION_CONFIRMATION;
   if (!configurationConfirmation) throw new Error("Missing Automation Stage Configuration confirmation");
-  const serializedDefaultReviewer = process.env.AUTOMODE_DEFAULT_REVIEWER_EXECUTION;
-  if (!serializedDefaultReviewer) throw new Error("Missing default Reviewer execution profile");
-  const defaultReviewerExecution = parsePiExecutionProfile(serializedDefaultReviewer);
+  const serializedMainExecution = process.env.AUTOMODE_MAIN_EXECUTION;
+  if (!serializedMainExecution) throw new Error("Missing Main Session execution profile");
+  const mainExecution = parsePiExecutionProfile(serializedMainExecution);
   const normalAgentDir = process.argv[3] || undefined;
   const mainSession = await startAutomodeMainSession({
     repository,
     serializedConfiguration,
     configurationConfirmation,
-    defaultReviewerExecution,
+    mainExecution,
     normalAgentDir,
   });
   await mainSession.runInteractive();

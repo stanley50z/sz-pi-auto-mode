@@ -14,7 +14,7 @@ import { serializeAutomationStageConfiguration, type AutomationStageConfiguratio
 export interface AutomodeLaunchRequest {
   cwd: string;
   serializedConfiguration: string;
-  defaultReviewerExecution: PiExecutionProfile;
+  mainExecution: PiExecutionProfile;
   piPackageDir: string;
 }
 
@@ -83,11 +83,11 @@ export async function runAutomodeCommand(
   await ctx.waitForIdle();
   const configuration = await dependencies.selectConfiguration(ctx);
   if (configuration === null) return;
-  if (!ctx.model) throw new Error("/automode requires an active Pi model for the default Reviewer seat");
+  if (!ctx.model) throw new Error("/automode requires an active Pi model for the Main Session");
   await dependencies.launch({
     cwd: repositoryRoot(ctx.cwd),
     serializedConfiguration: serializeAutomationStageConfiguration(configuration),
-    defaultReviewerExecution: {
+    mainExecution: {
       harness: "pi",
       provider: ctx.model.provider,
       model: ctx.model.id,

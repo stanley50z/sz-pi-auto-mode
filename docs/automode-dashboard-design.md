@@ -33,10 +33,11 @@ It does not repeat Stage Lane cards, Ticket Session transcripts, or detailed his
 
 ## Network and lifecycle
 
-- The dashboard uses fixed port `41738`.
-- If port `41738` is occupied, Automode startup fails before discovery or claim.
+- The dashboard prefers loopback port `41738` and asks the operating system for a free port when it is occupied.
+- Dashboards from different repositories can run concurrently on distinct loopback ports.
 - The application binds to loopback for local access.
-- It also requests private tailnet exposure through `tailscale serve` with no application password.
+- It requests private tailnet exposure through one owned `tailscale serve` root handler with no application password.
+- Startup adopts a matching stale handler and leaves unrelated Serve handlers unchanged; shutdown removes only the owned root handler.
 - If Tailscale is unavailable or exposure fails, Automode continues localhost-only and shows an error in both the TUI and dashboard.
 - Tailnet identity and ACLs govern remote access. Mutation requests still enforce allowed hosts, same-origin checks, and CSRF protection without showing a login prompt.
 - The dashboard server starts and stops with the Coordinator process.
@@ -131,7 +132,7 @@ Force-stop, retry-budget reset, tracker mutation, ticket prompting, and per-sess
 
 Implementation should place one deep dashboard module behind a small Coordinator-facing interface:
 
-- start on fixed port with the initial dashboard projection
+- start on an available loopback port with the initial dashboard projection
 - publish a replacement dashboard projection after Coordinator/tracker changes
 - append structured Ticket Session activity
 - receive typed supervisory commands
@@ -150,8 +151,9 @@ The browser must not read GitHub, Pi session files, worktrees, or the Automode R
 
 ### Launch and TUI
 
-- [ ] `/automode` starts the dashboard before discovery on port `41738`.
-- [ ] Port collision fails startup before any claim or tracker mutation.
+- [ ] `/automode` starts the dashboard before discovery, preferring port `41738`.
+- [ ] A concurrent dashboard uses a different loopback port without blocking either process.
+- [ ] Tailscale exposure adopts an exact stale Automode route, preserves unrelated routes, and removes only its owned handler.
 - [ ] The Main Session TUI renders the compact status card and exact working links.
 - [ ] Dashboard shutdown is idempotent and follows Coordinator shutdown.
 - [ ] Tailscale exposure succeeds without an app password, or Automode continues localhost-only with a visible error.

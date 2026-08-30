@@ -18,13 +18,6 @@ function repositoryFixture(): string {
 }
 
 const half = createAutomationStageConfiguration("half", ["auto-triage"]);
-const defaultReviewerExecution = {
-  harness: "pi",
-  provider: "anthropic",
-  model: "claude-opus-4-8",
-  reasoning: "high",
-} as const;
-
 class RecordedRunner implements StartupCommandRunner {
   readonly calls: Array<{ command: string; args: readonly string[]; cwd: string }> = [];
 
@@ -52,7 +45,6 @@ test("startup verifies the GitHub repository and every required execution profil
 
   const result = await validateAutomodeStartup({
     repository,
-    defaultReviewerExecution,
     runner,
     attestExecutions: async (profiles) => {
       attested.push(...profiles);
@@ -78,7 +70,7 @@ test("startup verifies the GitHub repository and every required execution profil
   ]);
   assert.deepEqual(
     attested,
-    createAutomodeCapabilityProfile(defaultReviewerExecution).panelExecutions,
+    createAutomodeCapabilityProfile().panelExecutions,
   );
 });
 
@@ -94,7 +86,6 @@ test("startup does not depend on the intermittently unavailable REST user endpoi
 
   const result = await validateAutomodeStartup({
     repository,
-    defaultReviewerExecution,
     runner,
     attestExecutions: async () => undefined,
   });
@@ -176,7 +167,6 @@ test("startup binds gh access to local origin and requires mutation permission",
   await assert.rejects(
     () => validateAutomodeStartup({
       repository,
-      defaultReviewerExecution,
       runner: mismatch,
       attestExecutions: async () => undefined,
     }),
@@ -199,7 +189,6 @@ test("startup binds gh access to local origin and requires mutation permission",
   await assert.rejects(
     () => validateAutomodeStartup({
       repository,
-      defaultReviewerExecution,
       runner: readOnly,
       attestExecutions: async () => undefined,
     }),
@@ -225,7 +214,6 @@ test("startup polls through consecutive transient GitHub service failures instea
 
   const result = await validateAutomodeStartup({
     repository,
-    defaultReviewerExecution,
     runner,
     attestExecutions: async () => undefined,
   });
@@ -261,7 +249,6 @@ test("repository, GitHub authentication/access, and execution failures abort sta
     await assert.rejects(
       () => validateAutomodeStartup({
         repository,
-        defaultReviewerExecution,
         runner,
         attestExecutions: async () => undefined,
       }),
@@ -272,7 +259,6 @@ test("repository, GitHub authentication/access, and execution failures abort sta
   await assert.rejects(
     () => validateAutomodeStartup({
       repository: repositoryFixture(),
-      defaultReviewerExecution,
       runner: new RecordedRunner(),
       attestExecutions: async () => {
         throw new Error("missing model");

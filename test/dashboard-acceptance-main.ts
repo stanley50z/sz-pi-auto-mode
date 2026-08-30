@@ -36,9 +36,9 @@ async function main(): Promise<void> {
   if (!serializedConfiguration) throw new Error("Missing launch-baseline Automation Stage Configuration");
   const configurationConfirmation = process.env.AUTOMODE_STAGE_CONFIGURATION_CONFIRMATION;
   if (!configurationConfirmation) throw new Error("Missing Automation Stage Configuration confirmation");
-  const serializedDefaultReviewer = process.env.AUTOMODE_DEFAULT_REVIEWER_EXECUTION;
-  if (!serializedDefaultReviewer) throw new Error("Missing default Reviewer execution profile");
-  const defaultReviewerExecution = parsePiExecutionProfile(serializedDefaultReviewer);
+  const serializedMainExecution = process.env.AUTOMODE_MAIN_EXECUTION;
+  if (!serializedMainExecution) throw new Error("Missing Main Session execution profile");
+  const mainExecution = parsePiExecutionProfile(serializedMainExecution);
   const configuration = parseConfirmedAutomationStageConfiguration(
     serializedConfiguration,
     configurationConfirmation,
@@ -132,9 +132,10 @@ async function main(): Promise<void> {
     repository,
     serializedConfiguration,
     configurationConfirmation,
-    defaultReviewerExecution,
+    mainExecution,
     normalAgentDir: process.argv[3] || undefined,
     model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
+    capabilityModel: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
     coordinator,
     createDashboard(options) {
       return createCoordinatorDashboard({

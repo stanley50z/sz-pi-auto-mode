@@ -36,7 +36,7 @@ export interface AutomodeCapabilityProfile {
   readonly extensionCommands: readonly string[];
   readonly prompts: readonly string[];
   readonly settings: AutomodeSettings;
-  readonly ordinaryTicketExecution: ExecutionProfile;
+  readonly ordinaryTicketExecution: PiExecutionProfile;
   readonly panelExecutions: readonly ExecutionProfile[];
 }
 
@@ -84,9 +84,9 @@ export const ORDINARY_TICKET_EXECUTION: PiExecutionProfile = Object.freeze({
   reasoning: "high",
 });
 
-export const ADDITIONAL_PANEL_EXECUTIONS: readonly ExecutionProfile[] = Object.freeze([
-  Object.freeze({ harness: "pi", provider: "github-copilot", model: "claude-fable-5", reasoning: "high" }),
+export const PANEL_EXECUTIONS: readonly ExecutionProfile[] = Object.freeze([
   ORDINARY_TICKET_EXECUTION,
+  Object.freeze({ harness: "pi", provider: "github-copilot", model: "claude-fable-5", reasoning: "high" }),
 ]);
 
 export function parsePiExecutionProfile(serialized: string): PiExecutionProfile {
@@ -94,10 +94,10 @@ export function parsePiExecutionProfile(serialized: string): PiExecutionProfile 
   try {
     value = JSON.parse(serialized);
   } catch (error) {
-    throw new Error("The default Reviewer execution profile is not valid JSON", { cause: error });
+    throw new Error("The Pi execution profile is not valid JSON", { cause: error });
   }
   if (typeof value !== "object" || value === null) {
-    throw new Error("The default Reviewer execution profile must be an object");
+    throw new Error("The Pi execution profile must be an object");
   }
   const candidate = value as Record<string, unknown>;
   if (
@@ -108,7 +108,7 @@ export function parsePiExecutionProfile(serialized: string): PiExecutionProfile 
     || candidate.model.length === 0
     || candidate.reasoning !== "high"
   ) {
-    throw new Error("The default Reviewer execution profile is invalid");
+    throw new Error("The Pi execution profile is invalid");
   }
   return Object.freeze({
     harness: "pi",
@@ -123,10 +123,7 @@ function packageSkillRoot(owner: CapabilitySkillOwner, name: string): string {
   return resolve(sourceDirectory, "../../skills", owner, name);
 }
 
-export function createAutomodeCapabilityProfile(
-  defaultReviewerExecution: PiExecutionProfile,
-): AutomodeCapabilityProfile {
-  const defaultReviewer = Object.freeze({ ...defaultReviewerExecution });
+export function createAutomodeCapabilityProfile(): AutomodeCapabilityProfile {
   const skills: CapabilitySkill[] = SHARED_SKILLS.map((name) => Object.freeze({
     name,
     owner: "native" as const,
@@ -161,6 +158,6 @@ export function createAutomodeCapabilityProfile(
     prompts: Object.freeze([]),
     settings: AUTOMODE_SETTINGS,
     ordinaryTicketExecution: ORDINARY_TICKET_EXECUTION,
-    panelExecutions: Object.freeze([defaultReviewer, ...ADDITIONAL_PANEL_EXECUTIONS]),
+    panelExecutions: PANEL_EXECUTIONS,
   });
 }

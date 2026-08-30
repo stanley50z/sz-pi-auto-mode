@@ -133,9 +133,10 @@ test("a deterministic /automode journey advances triage, grilling, implementatio
         repository: request.cwd,
         serializedConfiguration: request.serializedConfiguration,
         configurationConfirmation: confirmSerializedAutomationStageConfiguration(request.serializedConfiguration),
-        defaultReviewerExecution: request.defaultReviewerExecution,
+        mainExecution: request.mainExecution,
         home,
         model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
+        capabilityModel: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
         coordinator,
         createDashboard() {
           return {

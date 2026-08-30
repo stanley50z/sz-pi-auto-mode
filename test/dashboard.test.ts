@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createServer, request } from "node:http";
 import test from "node:test";
 import {
+  CliDashboardTailscaleExposure,
   createCoordinatorDashboard,
   type DashboardProjection,
   type DashboardTailscaleExposure,
@@ -76,7 +77,7 @@ function projection(id = "run-1"): DashboardProjection {
   };
 }
 
-test("the Coordinator dashboard serves its initial projection on the fixed loopback URL", async () => {
+test("the Coordinator dashboard serves its initial projection on the preferred loopback URL", async () => {
   const dashboard = createCoordinatorDashboard({
     tailscale: unavailableTailscale,
     onCommand: async () => undefined,
@@ -126,6 +127,178 @@ test("the dashboard serves static assets and rejects untrusted Host headers", as
   } finally {
     await dashboard.stop();
   }
+});
+
+test("Tailscale exposure adopts an existing Automode route and removes only that route", async () => {
+  const calls: string[][] = [];
+  const tailscale = new CliDashboardTailscaleExposure(async (args) => {
+    calls.push([...args]);
+    if (args[1] === "status") {
+      return {
+        stdout: JSON.stringify({
+          TCP: { "443": { HTTPS: true } },
+          Web: {
+            "automode.example.ts.net:443": {
+              Handlers: { "/": { Proxy: "http://127.0.0.1:41738" } },
+            },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    return { stdout: "", stderr: "" };
+  });
+
+  assert.deepEqual(await tailscale.expose("http://127.0.0.1:41738"), {
+    remoteUrl: "https://automode.example.ts.net",
+  });
+  await tailscale.stop();
+  assert.deepEqual(calls, [
+    ["serve", "status", "--json"],
+    ["serve", "status", "--json"],
+    ["serve", "--https=443", "--set-path=/", "off"],
+  ]);
+});
+
+test("Tailscale exposure preserves unrelated routes and owns a separate HTTPS port", async () => {
+  const calls: string[][] = [];
+  let configured = false;
+  const tailscale = new CliDashboardTailscaleExposure(async (args) => {
+    calls.push([...args]);
+    if (args[1] === "status") {
+      return {
+        stdout: JSON.stringify({
+          TCP: {
+            "443": { HTTPS: true },
+            ...(configured ? { "41738": { HTTPS: true } } : {}),
+          },
+          Web: {
+            "other.example.ts.net:443": {
+              Handlers: { "/": { Proxy: "http://127.0.0.1:3000" } },
+            },
+            ...(configured
+              ? {
+                "automode.example.ts.net:41738": {
+                  Handlers: { "/": { Proxy: "http://127.0.0.1:41738" } },
+                },
+              }
+              : {}),
+          },
+        }),
+        stderr: "",
+      };
+    }
+    if (args.includes("--bg")) configured = true;
+    return { stdout: "Available at https://automode.example.ts.net:41738", stderr: "" };
+  });
+
+  assert.deepEqual(await tailscale.expose("http://127.0.0.1:41738"), {
+    remoteUrl: "https://automode.example.ts.net:41738",
+  });
+  await tailscale.stop();
+  assert.deepEqual(calls, [
+    ["serve", "status", "--json"],
+    ["serve", "--bg", "--yes", "--https=41738", "http://127.0.0.1:41738"],
+    ["serve", "status", "--json"],
+    ["serve", "status", "--json"],
+    ["serve", "--https=41738", "--set-path=/", "off"],
+  ]);
+});
+
+test("Tailscale cleanup leaves a root handler that no longer belongs to this dashboard", async () => {
+  const calls: string[][] = [];
+  let statusCalls = 0;
+  const tailscale = new CliDashboardTailscaleExposure(async (args) => {
+    calls.push([...args]);
+    if (args[1] !== "status") return { stdout: "", stderr: "" };
+    statusCalls += 1;
+    return {
+      stdout: JSON.stringify({
+        TCP: { "443": { HTTPS: true } },
+        Web: {
+          "automode.example.ts.net:443": {
+            Handlers: {
+              "/": {
+                Proxy: statusCalls === 1
+                  ? "http://127.0.0.1:41738"
+                  : "http://127.0.0.1:3000",
+              },
+            },
+          },
+        },
+      }),
+      stderr: "",
+    };
+  });
+
+  await tailscale.expose("http://127.0.0.1:41738");
+  await tailscale.stop();
+  assert.deepEqual(calls, [
+    ["serve", "status", "--json"],
+    ["serve", "status", "--json"],
+  ]);
+});
+
+test("Tailscale verifies an installed handler instead of depending on command output", async () => {
+  let configured = false;
+  const tailscale = new CliDashboardTailscaleExposure(async (args) => {
+    if (args[1] === "status") {
+      return {
+        stdout: JSON.stringify(configured
+          ? {
+            TCP: { "41738": { HTTPS: true } },
+            Web: {
+              "automode.example.ts.net:41738": {
+                Handlers: { "/": { Proxy: "http://127.0.0.1:41738" } },
+              },
+            },
+          }
+          : {}),
+        stderr: "",
+      };
+    }
+    configured = true;
+    return { stdout: "", stderr: "" };
+  });
+
+  assert.deepEqual(await tailscale.expose("http://127.0.0.1:41738"), {
+    remoteUrl: "https://automode.example.ts.net:41738",
+  });
+});
+
+test("Tailscale retains pending ownership when post-install verification fails", async () => {
+  const calls: string[][] = [];
+  let configured = false;
+  let statusCalls = 0;
+  const tailscale = new CliDashboardTailscaleExposure(async (args) => {
+    calls.push([...args]);
+    if (args[1] === "status") {
+      statusCalls += 1;
+      if (statusCalls === 2) throw new Error("status unavailable");
+      return {
+        stdout: JSON.stringify(configured
+          ? {
+            TCP: { "41738": { HTTPS: true } },
+            Web: {
+              "automode.example.ts.net:41738": {
+                Handlers: { "/": { Proxy: "http://127.0.0.1:41738" } },
+              },
+            },
+          }
+          : {}),
+        stderr: "",
+      };
+    }
+    if (args.includes("--bg")) configured = true;
+    return { stdout: "", stderr: "" };
+  });
+
+  await assert.rejects(
+    () => tailscale.expose("http://127.0.0.1:41738"),
+    /status unavailable/,
+  );
+  await tailscale.stop();
+  assert.deepEqual(calls.at(-1), ["serve", "--https=41738", "--set-path=/", "off"]);
 });
 
 test("successful Tailscale exposure allows only its private host and same-origin mutations", async () => {
@@ -430,35 +603,24 @@ test("shutdown waits for in-flight startup and removes the resulting exposure", 
   });
 });
 
-test("dashboard startup fails when the fixed port is occupied", async () => {
-  const occupant = createServer();
-  await new Promise<void>((resolve, reject) => {
-    occupant.once("error", reject);
-    occupant.listen(41_738, "127.0.0.1", resolve);
+test("another dashboard uses an independent loopback port instead of blocking startup", async () => {
+  const first = createCoordinatorDashboard({
+    tailscale: unavailableTailscale,
+    onCommand: async () => undefined,
   });
-  let exposureCalls = 0;
-  let commandCalls = 0;
-  const dashboard = createCoordinatorDashboard({
-    tailscale: {
-      async expose() {
-        exposureCalls += 1;
-        return { remoteUrl: "https://automode.example.ts.net" };
-      },
-      async stop() {},
-    },
-    onCommand: async () => { commandCalls += 1; },
+  const second = createCoordinatorDashboard({
+    tailscale: unavailableTailscale,
+    onCommand: async () => undefined,
   });
 
   try {
-    await assert.rejects(
-      () => dashboard.start(projection()),
-      (error: NodeJS.ErrnoException) => error.code === "EADDRINUSE",
-    );
-    assert.equal(exposureCalls, 0);
-    assert.equal(commandCalls, 0);
+    const firstStatus = await first.start(projection("first"));
+    const secondStatus = await second.start(projection("second"));
+    assert.notEqual(firstStatus.localUrl, secondStatus.localUrl);
+    assert.equal((await fetch(`${firstStatus.localUrl}/api/snapshot`)).status, 200);
+    assert.equal((await fetch(`${secondStatus.localUrl}/api/snapshot`)).status, 200);
   } finally {
-    await dashboard.stop();
-    await new Promise<void>((resolve, reject) => occupant.close((error) => error ? reject(error) : resolve()));
+    await Promise.all([first.stop(), second.stop()]);
   }
 });
 
