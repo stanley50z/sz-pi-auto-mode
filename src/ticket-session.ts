@@ -527,6 +527,45 @@ function readPersistedTicketSessionHistory(sessionFile: string): {
   };
 }
 
+function resolveControlledSessionDir(controlledSessionDir: string): string {
+  return existsSync(controlledSessionDir) ? realpathSync(controlledSessionDir) : resolve(controlledSessionDir);
+}
+
+function validateReservedTicketSessionPath(reportedSessionFile: string, controlledSessionDir: string): string {
+  const sessionFile = resolve(reportedSessionFile);
+  const resolvedSessionDir = resolveControlledSessionDir(controlledSessionDir);
+  const resolvedParent = realpathSync(dirname(sessionFile));
+  if (!isPathInside(resolvedParent, resolvedSessionDir)) {
+    throw new Error("Ticket Session reported history outside the controlled session directory");
+  }
+  return sessionFile;
+}
+
+function validatePersistedTicketSessionHistory(
+  reportedSessionFile: string,
+  controlledSessionDir: string,
+  readySessionId: string,
+  expectedSessionId?: string,
+): {
+  readonly sessionFile: string;
+  readonly persisted: ReturnType<typeof readPersistedTicketSessionHistory>;
+} {
+  const sessionFile = realpathSync(reportedSessionFile);
+  const resolvedSessionDir = resolveControlledSessionDir(controlledSessionDir);
+  if (!isPathInside(sessionFile, resolvedSessionDir)) {
+    throw new Error("Ticket Session reported history outside the controlled session directory");
+  }
+  const persisted = readPersistedTicketSessionHistory(sessionFile);
+  if (persisted.sessionId !== readySessionId || (expectedSessionId !== undefined && readySessionId !== expectedSessionId)) {
+    throw new Error("Ticket Session history identity does not match the ready event");
+  }
+  return { sessionFile, persisted };
+}
+
+function persistedHistoryValidationError(cause: unknown): Error {
+  return new Error(`Ticket Session persisted history could not be validated: ${errorText(cause)}`, { cause });
+}
+
 function observedActivity(event: TicketSessionEvent): TicketSessionObservedActivity | undefined {
   if (event.type !== "activity") return undefined;
   return {
@@ -608,24 +647,47 @@ export class AutomodeTicketSessionHost implements CoordinatorTicketSessionHost {
     }
     let persisted: ReturnType<typeof readPersistedTicketSessionHistory>;
     let sessionFile: string;
+    let validateHistoryAtCompletion = false;
     try {
-      sessionFile = realpathSync(ready.sessionFile);
-      if (!isPathInside(sessionFile, controlledSessionDir)) {
-        throw new Error("Ticket Session reported history outside the controlled session directory");
-      }
-      persisted = readPersistedTicketSessionHistory(sessionFile);
-      if (persisted.sessionId !== ready.sessionId || (expectedSessionId !== undefined && ready.sessionId !== expectedSessionId)) {
-        throw new Error("Ticket Session history identity does not match the ready event");
+      if (existsSync(ready.sessionFile)) {
+        const validated = validatePersistedTicketSessionHistory(
+          ready.sessionFile,
+          controlledSessionDir,
+          ready.sessionId,
+          expectedSessionId,
+        );
+        sessionFile = validated.sessionFile;
+        persisted = validated.persisted;
+      } else {
+        if (expectedSessionId !== undefined) {
+          throw new Error("Ticket Session resume history disappeared during startup");
+        }
+        sessionFile = validateReservedTicketSessionPath(ready.sessionFile, controlledSessionDir);
+        persisted = { sessionId: ready.sessionId, history: [] };
+        validateHistoryAtCompletion = true;
       }
     } catch (error) {
       this.#startingRuns.delete(key);
       void run.terminate(true).catch(() => undefined);
-      throw new Error("Ticket Session persisted history could not be validated", { cause: error });
+      throw persistedHistoryValidationError(error);
     }
-    const completion = run.completion.then((result) => ({
-      status: result.status,
-      ...(result.error === undefined ? {} : { error: result.error }),
-    })).finally(stopObserving);
+    const completion = run.completion.then((result) => {
+      if (validateHistoryAtCompletion) {
+        try {
+          validatePersistedTicketSessionHistory(sessionFile, controlledSessionDir, ready.sessionId);
+        } catch (error) {
+          const validationError = persistedHistoryValidationError(error).message;
+          return {
+            status: "error" as const,
+            error: result.error === undefined ? validationError : `${result.error}; ${validationError}`,
+          };
+        }
+      }
+      return {
+        status: result.status,
+        ...(result.error === undefined ? {} : { error: result.error }),
+      };
+    }).finally(stopObserving);
     this.#startingRuns.delete(key);
     return {
       processId: run.processId === undefined ? "unknown" : String(run.processId),

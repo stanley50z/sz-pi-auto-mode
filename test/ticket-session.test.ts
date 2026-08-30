@@ -38,8 +38,11 @@ async function runFixtureChild(): Promise<void> {
     throw new Error("Fixture child received invalid start request");
   }
   const sessionId = "fixture-persistent-session";
-  const sessionFile = join(process.cwd(), "fixture-ticket-session.jsonl");
-  writeFileSync(sessionFile, `${JSON.stringify({ type: "session", id: sessionId, cwd: process.cwd() })}\n`);
+  const sessionDir = start.request.home
+    ? resolveAutomodePaths(process.cwd(), start.request.home, start.request.normalAgentDir).sessionDir
+    : process.cwd();
+  mkdirSync(sessionDir, { recursive: true });
+  const sessionFile = join(sessionDir, "fixture-ticket-session.jsonl");
   let activity: ((event: { activity: string }) => void) | undefined;
   let sends = Promise.resolve();
   const result = await runTicketSessionChild(start.request, async () => ({
@@ -50,6 +53,11 @@ async function runFixtureChild(): Promise<void> {
       return () => { activity = undefined; };
     },
     async prompt(prompt) {
+      const promptRelease = process.env.AUTOMODE_TICKET_SESSION_PROMPT_RELEASE;
+      while (promptRelease && !existsSync(promptRelease)) {
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 5));
+      }
+      writeFileSync(sessionFile, `${JSON.stringify({ type: "session", version: 3, id: sessionId, cwd: process.cwd() })}\n`);
       appendFileSync(sessionFile, `${JSON.stringify({ type: "prompt", prompt })}\n`);
       activity?.({ activity: "agent_settled" });
       return "clean";
@@ -220,6 +228,61 @@ test("Coordinator recovery replaces mismatched in-root session history instead o
   await handle.completion;
 });
 
+test("a fresh Ticket Session validates its persisted identity before reporting success", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "ticket-fresh-identity-"));
+  mkdirSync(join(cwd, ".git"));
+  const home = join(cwd, "home");
+  const sessionDir = resolveAutomodePaths(cwd, home).sessionDir;
+  mkdirSync(sessionDir, { recursive: true });
+  const sessionFile = join(sessionDir, "fresh-session.jsonl");
+  const child = new FakeTicketProcess();
+  const adapter = new AutomodeTicketSessionHost({
+    repository: cwd,
+    configuration,
+    defaultReviewerExecution,
+    home,
+    processHost: new TicketSessionHost({
+      childEntrypoint: join(cwd, "ticket-session-main.js"),
+      launcher: () => child,
+    }),
+  });
+
+  const starting = adapter.start({
+    item: { kind: "issue", number: 45, url: "https://github.com/owner/repository/issues/45" },
+    stage: "auto-implement",
+    skillName: "implement",
+    attempt: 1,
+  });
+  child.emit("message", {
+    type: "ticket-session:event",
+    version: 1,
+    event: {
+      type: "lifecycle",
+      state: "ready",
+      timestamp: Date.now(),
+      sessionId: "fresh-session",
+      sessionFile,
+    },
+  });
+  const handle = await starting;
+
+  writeFileSync(sessionFile, `${JSON.stringify({
+    type: "session", version: 3, id: "different-session", timestamp: "2026-08-17T12:00:00.000Z", cwd,
+  })}\n`);
+  child.emit("message", {
+    type: "ticket-session:terminal",
+    version: 1,
+    result: { status: "clean", sessionId: "fresh-session", sessionFile },
+  });
+  child.exitCode = 0;
+  child.emit("exit", 0, null);
+
+  assert.deepEqual(await handle.completion, {
+    status: "error",
+    error: "Ticket Session persisted history could not be validated: Ticket Session history identity does not match the ready event",
+  });
+});
+
 test("the Coordinator host exposes persisted Pi history and future structured activity read-only", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "ticket-history-view-"));
   mkdirSync(join(cwd, ".git"));
@@ -342,7 +405,10 @@ test("the Coordinator host rejects cross-directory session history and force-sto
     },
   });
 
-  await assert.rejects(starting, /persisted history could not be validated/);
+  await assert.rejects(
+    starting,
+    /persisted history could not be validated: Ticket Session reported history outside the controlled session directory/,
+  );
   assert.deepEqual(child.killed, ["SIGKILL"]);
   child.signalCode = "SIGKILL";
   child.emit("exit", null, "SIGKILL");
@@ -550,6 +616,53 @@ test("the production child adapter can dispatch a pre-attested Stage outside the
   } finally {
     session.dispose();
   }
+});
+
+test("the Coordinator adapter completes a fresh child-process run whose history file appears after ready", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "ticket-adapter-e2e-"));
+  mkdirSync(join(cwd, ".git"));
+  const home = join(cwd, "home");
+  const preloadMarker = join(cwd, "launching-pi-runtime-loaded");
+  const promptRelease = join(cwd, "release-ticket-prompt");
+  const runtimeLoader = join(cwd, "launching-pi-runtime-loader.mjs");
+  writeFileSync(runtimeLoader, `
+import { writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(preloadMarker)}, "loaded");
+`);
+  const adapter = new AutomodeTicketSessionHost({
+    repository: cwd,
+    configuration,
+    defaultReviewerExecution,
+    home,
+    processHost: new TicketSessionHost({
+      childEntrypoint: fileURLToPath(import.meta.url),
+      env: {
+        ...process.env,
+        AUTOMODE_PI_RUNTIME_LOADER: pathToFileURL(runtimeLoader).href,
+        AUTOMODE_TICKET_SESSION_FIXTURE_CHILD: "1",
+        AUTOMODE_TICKET_SESSION_PROMPT_RELEASE: promptRelease,
+      },
+    }),
+  });
+
+  const handle = await adapter.start({
+    item: { kind: "issue", number: 22, url: "https://github.com/owner/repository/issues/22" },
+    stage: "auto-implement",
+    skillName: "implement",
+    attempt: 1,
+  });
+  assert.equal(handle.sessionId, "fixture-persistent-session");
+  assert.equal(handle.processId === String(process.pid), false);
+  assert.equal(existsSync(handle.sessionFile), false);
+  writeFileSync(promptRelease, "continue");
+
+  assert.deepEqual(await handle.completion, { status: "clean" });
+  assert.equal(existsSync(handle.sessionFile), true);
+  assert.match(
+    readFileSync(handle.sessionFile, "utf8"),
+    /\/skill:implement https:\/\/github\.com\/owner\/repository\/issues\/22/,
+  );
+  assert.equal(readFileSync(preloadMarker, "utf8"), "loaded");
 });
 
 test("the public host seam completes a full child-process run with persistent history", async () => {
