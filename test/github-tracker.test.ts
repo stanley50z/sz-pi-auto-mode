@@ -178,6 +178,70 @@ test("a complete tracker snapshot normalizes every paginated issue and pull requ
   assert.equal(runner.calls.every((call) => call.args.includes("--slurp")), true);
 });
 
+test("a transiently incomplete GitHub snapshot is retried before polling fails", async () => {
+  const pullIssue = issue(125, {
+    node_id: "PR_125",
+    html_url: "https://github.com/owner/repository/pull/125",
+    labels: [{ name: "review" }],
+    assignees: [],
+    pull_request: { url: "https://api.github.com/repos/owner/repository/pulls/125" },
+  });
+  const pull = {
+    number: 125,
+    node_id: "PR_125",
+    html_url: "https://github.com/owner/repository/pull/125",
+    body: "",
+    head: {
+      sha: "abc125",
+      ref: "automode/issue-124",
+      repo: { full_name: "owner/repository" },
+    },
+    draft: false,
+    merged_at: null,
+  };
+  let issuesRequest = 0;
+  const runner: GitHubCommandRunner = {
+    async run(command, args) {
+      const endpoint = args.find((argument) => argument.startsWith("repos/"));
+      if (endpoint === "repos/owner/repository/issues?state=open&per_page=100") {
+        issuesRequest += 1;
+        return JSON.stringify(issuesRequest === 1 ? [[]] : [[pullIssue]]);
+      }
+      if (endpoint === "repos/owner/repository/pulls?state=open&per_page=100") {
+        return JSON.stringify([[pull]]);
+      }
+      if (command === "gh" && args[0] === "api" && args[1] === "graphql") {
+        return JSON.stringify([{
+          data: {
+            repository: {
+              pullRequest: {
+                comments: {
+                  nodes: [],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+              },
+            },
+          },
+        }]);
+      }
+      throw new Error(`unexpected command: ${command} ${args.join(" ")}`);
+    },
+  };
+  const tracker = new GitHubTracker({
+    cwd: "C:\\repository",
+    repository: "owner/repository",
+    actor: "automode-bot",
+    runner,
+  });
+
+  const snapshot = await tracker.snapshot();
+
+  assert.equal(issuesRequest, 2);
+  assert.deepEqual(snapshot.items.map(({ kind, number }) => ({ kind, number })), [
+    { kind: "pull-request", number: 125 },
+  ]);
+});
+
 test("pull-request comments use GraphQL when GitHub's REST issue-comments route is unavailable", async () => {
   const pullIssue = issue(15, {
     node_id: "PR_15",

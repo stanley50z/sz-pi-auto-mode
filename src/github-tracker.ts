@@ -43,6 +43,9 @@ export const processGitHubCommandRunner: GitHubCommandRunner = {
 
 type UnknownRecord = Record<string, unknown>;
 
+/** Marks transient cross-endpoint skew while GitHub updates issue and pull-request indexes. */
+class IncompleteGitHubSnapshotError extends Error {}
+
 function record(value: unknown, context: string): UnknownRecord {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error(`Malformed GitHub ${context}: expected an object`);
@@ -511,7 +514,9 @@ export class GitHubTracker implements Tracker {
     let draft: boolean | undefined;
     let merged: boolean | undefined;
     if (kind === "pull-request") {
-      if (pullValue === undefined) throw new Error(`Incomplete GitHub snapshot: pull request #${number} is missing`);
+      if (pullValue === undefined) {
+        throw new IncompleteGitHubSnapshotError(`Incomplete GitHub snapshot: pull request #${number} is missing`);
+      }
       const pull = record(pullValue, `pull request #${number}`);
       if (positiveInteger(pull.number, `pull request #${number} number`) !== number) {
         throw new Error(`Ambiguous GitHub pull request identity for #${number}`);
@@ -643,7 +648,7 @@ export class GitHubTracker implements Tracker {
     }
   }
 
-  async #workflowSnapshot(state: "open" | "all"): Promise<TrackerSnapshot> {
+  async #workflowSnapshotAttempt(state: "open" | "all"): Promise<TrackerSnapshot> {
     const issuesEndpoint = `repos/${this.#repository}/issues?state=${state}&per_page=100`;
     const pullsEndpoint = `repos/${this.#repository}/pulls?state=${state}&per_page=100`;
     const [issues, pulls] = await Promise.all([
@@ -671,7 +676,7 @@ export class GitHubTracker implements Tracker {
       return this.#normalizeItem(value, pull, await this.#comments(number, kind));
     }));
     if (pullsByNumber.size > 0) {
-      throw new Error(
+      throw new IncompleteGitHubSnapshotError(
         `Incomplete GitHub snapshot: pull request(s) missing from issues response: ${[
           ...pullsByNumber.keys(),
         ].sort((left, right) => left - right).map((number) => `#${number}`).join(", ")}`,
@@ -689,6 +694,15 @@ export class GitHubTracker implements Tracker {
         : item.updatedAt,
     })));
     return { items, revision };
+  }
+
+  async #workflowSnapshot(state: "open" | "all"): Promise<TrackerSnapshot> {
+    try {
+      return await this.#workflowSnapshotAttempt(state);
+    } catch (error) {
+      if (!(error instanceof IncompleteGitHubSnapshotError)) throw error;
+      return this.#workflowSnapshotAttempt(state);
+    }
   }
 
   snapshot(): Promise<TrackerSnapshot> {
