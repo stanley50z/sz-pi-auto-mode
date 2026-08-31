@@ -254,8 +254,13 @@ test("review launches every configured seat concurrently on one immutable exact-
   assert.equal(launches[1]!.context, launches[2]!.context);
   assert.equal(Object.isFrozen(launches[0]!.context), true);
   assert.equal(launches.every((launch) => launch.prompt === launches[0]!.prompt), true);
-  assert.match(launches[0]!.prompt, /Markdown review/);
-  assert.doesNotMatch(launches[0]!.prompt, /Return JSON|no-actionable-findings|rootCause/);
+  const prompt = launches[0]!.prompt;
+  assert.match(prompt, /## Review round\n\n1/);
+  assert.match(prompt, /## Pinned head\n\n0123456789abcdef/);
+  assert.match(prompt, /## Review brief\n\nReview PR #40 against specification #21 and AGENTS\.md\./);
+  assert.match(prompt, /## Expected report/);
+  assert.match(prompt, /## Limits/);
+  assert.doesNotMatch(prompt, /\{"round"|"headSha"|"brief"/);
 
   completions.forEach((complete, index) => complete({
     markdown: index === 0

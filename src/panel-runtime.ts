@@ -399,12 +399,28 @@ function validateReviewContext(context: ReviewRoundContext): void {
 
 function reviewPrompt(context: ReviewRoundContext): string {
   return [
-    "Independently review this exact head for correctness, specification compliance, and repository standards.",
+    "Independently review this exact pull-request head for correctness, specification compliance, and repository standards.",
+    "## Review round",
+    String(context.round),
     "Round one must be exhaustive. A later round must verify prior root causes, fixes, and directly affected invariant paths.",
+    "## Pinned head",
+    context.headSha,
+    "## Review brief",
+    context.brief,
+    "## Expected report",
     "Write a concise Markdown review for another agent to interpret and publish as a GitHub pull-request review.",
-    "For each substantiated pull-request-introduced finding, give a [P0]-[P3] title, the exact changed path and line or range, the violated requirement, and concrete evidence. State 'No actionable findings.' when appropriate.",
+    [
+      "Report only substantiated findings introduced by this pull request. For each finding, include:",
+      "",
+      "- severity from P0 to P3",
+      "- title",
+      "- exact changed path and line or range",
+      "- violated requirement, rule, or invariant",
+      "- concrete evidence",
+    ].join("\n"),
+    "If there are none, write: No actionable findings.",
+    "## Limits",
     "Do not decide scope or prescribe workflow actions. Do not ask a human, progress queues, dispatch stages, launch subagents, merge, or mutate tracker state.",
-    JSON.stringify(context),
   ].join("\n\n");
 }
 
