@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { isAutomodeReturnToNormalMessage } from "./handoff-protocol.js";
 
 export interface HandoffOptions {
   command: string;
@@ -14,17 +15,17 @@ function exitCode(code: number | null, signal: NodeJS.Signals | null): number {
 }
 
 /**
- * Gives a fresh process the inherited terminal, supervises signals, and exits.
- * This function never returns control to the caller's interactive experience.
+ * Gives Automode the inherited terminal and resumes normal Pi only when the
+ * child explicitly requests a return before exiting successfully.
  */
-export async function handoffTerminal(options: HandoffOptions): Promise<never> {
+export async function handoffTerminal(options: HandoffOptions): Promise<void> {
   // Stop normal Pi's active TUI reader before the Automode child inherits the
   // same console. Otherwise both processes consume keystrokes on Windows.
   process.stdin.pause();
   const child = spawn(options.command, options.args, {
     cwd: options.cwd,
     env: options.env ?? process.env,
-    stdio: process.platform === "win32" ? ["inherit", "inherit", "inherit", "ipc"] : "inherit",
+    stdio: ["inherit", "inherit", "inherit", "ipc"],
     // A separate POSIX process group prevents terminal-generated signals from
     // reaching both processes. The waiting bridge receives them and forwards
     // each one to the Automode process. Windows detached mode opens a new console,
@@ -47,13 +48,24 @@ export async function handoffTerminal(options: HandoffOptions): Promise<never> {
   };
   const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
   for (const signal of signals) process.on(signal, forward);
+  let returnToNormal = false;
+  const receiveMessage = (message: unknown) => {
+    if (isAutomodeReturnToNormalMessage(message)) returnToNormal = true;
+  };
+  child.on("message", receiveMessage);
 
   let status: [number | null, NodeJS.Signals | null];
   try {
     status = (await once(child, "exit")) as [number | null, NodeJS.Signals | null];
   } finally {
     for (const signal of signals) process.off(signal, forward);
+    child.off("message", receiveMessage);
   }
-  process.exit(exitCode(...status));
-  throw new Error("Process exit unexpectedly returned");
+  const code = exitCode(...status);
+  if (returnToNormal) {
+    process.stdin.resume();
+    if (code !== 0) throw new Error(`Automode exited with code ${code} while returning to normal Pi`);
+    return;
+  }
+  process.exit(code);
 }

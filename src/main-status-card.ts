@@ -19,6 +19,7 @@ export interface AutomodeStatusCard {
 
 export interface CreateAutomodeStatusCardOptions {
   readonly initial: AutomodeStatusCardSnapshot;
+  readonly onReturnToNormal: () => Promise<void>;
   readonly onDrain: () => void;
   readonly onExit: () => void;
 }
@@ -60,6 +61,7 @@ function renderStatusCard(
     `${theme.fg("muted", "Stages")} ${stageSummary}`,
     `${theme.fg("muted", "Candidates")} ${totals.candidates} open  ·  ${totals.active} active  ·  ${totals.queued} queued  ·  ${totals.held} held  ·  ${totals.retrying} retrying  ·  ${totals.exhausted} exhausted`,
     `${theme.fg("muted", "Poll")} last ${pollTime(projection.run.lastSuccessfulPoll)}  ·  next ${pollTime(projection.run.nextPoll)}`,
+    theme.fg("warning", "/automode: graceful drain, then return to normal Pi"),
     theme.fg("warning", "/drain: graceful drain  ·  /exit: force-stop active Ticket Sessions, then exit"),
   ];
   if (dashboard.exposureError) {
@@ -89,6 +91,13 @@ export function createAutomodeStatusCard(
   const extension = {
     name: "automode-main-status-card",
     factory: (pi) => {
+      pi.registerCommand("automode", {
+        description: "Gracefully drain Automode, then return to normal Pi",
+        handler: async () => {
+          await options.onReturnToNormal();
+          options.onDrain();
+        },
+      });
       pi.registerCommand("drain", {
         description: "Gracefully drain Automode, then exit",
         handler: async () => { options.onDrain(); },

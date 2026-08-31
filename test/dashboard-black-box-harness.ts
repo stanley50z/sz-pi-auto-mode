@@ -102,14 +102,18 @@ import { createAutomodeLaunchPlan } from ${JSON.stringify(pathToFileURL(resolve(
 import { handoffTerminal } from ${JSON.stringify(pathToFileURL(resolve(projectRoot, "dist/src/handoff.js")).href)};
 const proofEntrypoint = ${JSON.stringify(resolve(projectRoot, "dist/test/dashboard-acceptance-main.js"))};
 export default function (pi) {
+  pi.registerCommand("normal-proof-exit", {
+    handler: async (_args, ctx) => { ctx.shutdown(); },
+  });
   automodeBridge(pi, {
     selectConfiguration: selectAutomationStageConfiguration,
     launch: async (request) => {
       const plan = createAutomodeLaunchPlan(request);
-      return handoffTerminal({
+      await handoffTerminal({
         ...plan,
         args: [...plan.args.slice(0, 2), proofEntrypoint, ...plan.args.slice(3)],
       });
+      process.stdout.write("NORMAL_PI_RESUMED\\n");
     },
   });
 }

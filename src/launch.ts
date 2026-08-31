@@ -33,6 +33,6 @@ export function createAutomodeLaunchPlan(
   };
 }
 
-export async function launchAutomode(request: AutomodeLaunchRequest): Promise<never> {
+export async function launchAutomode(request: AutomodeLaunchRequest): Promise<void> {
   return handoffTerminal(createAutomodeLaunchPlan(request));
 }

@@ -9,7 +9,7 @@ The separate Pi experience that coordinates the Matt Pocock workflow through con
 _Avoid_: Auto mode, autonomous Pi
 
 **Automode Bridge**:
-The minimal `/automode` entrypoint available in normal Pi that leaves the current Pi experience and starts a fresh Automode process for the repository's durable Automode Run at the Git repository root. It does not expose Automode's mode-specific capabilities to the normal session.
+The minimal `/automode` entrypoint available in normal Pi that pauses the current Pi experience and starts a fresh Automode process for the repository's durable Automode Run at the Git repository root. Invoking `/automode` from the Automode Main Session gracefully drains the Coordinator and returns terminal ownership to that original normal Pi session. It does not expose Automode's mode-specific capabilities to the normal session.
 _Avoid_: `pi automode`, in-place mode toggle, Automode runtime
 
 **Automode Capability Profile**:

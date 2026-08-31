@@ -15,7 +15,7 @@ openwiki:
 
 # Automode capability boundary
 
-Automode does not inherit the normal Pi resource surface. `createAutomodeCapabilityProfile` builds an immutable profile from shared native skills, support skills, and pre-attested Automode Stage Skills. Every Automode Stage Skill is preloaded so Automation Stage Operating State can change without widening the capability boundary; the profile exposes `read`, `bash`, `edit`, `write`, `grep`, `find`, and `ls`, the `fast` extension command, high reasoning, and `defaultProjectTrust: "never"`.
+Automode does not inherit the normal Pi resource surface. `createAutomodeCapabilityProfile` builds an immutable profile from shared native skills, support skills, and pre-attested Automode Stage Skills. Every Automode Stage Skill is preloaded so Automation Stage Operating State can change without widening the capability boundary; the profile exposes `read`, `bash`, `edit`, `write`, `grep`, `find`, and `ls`, the `fast` extension command, high reasoning, and `defaultProjectTrust: "never"`. The `/automode` command is a process handoff, not an in-place capability toggle: the Main Session can gracefully drain and return to the original normal Pi session, whose resource surface remains outside this profile. The handoff behavior is described in the [launch workflow](../workflows/launch-and-automation.md).
 
 ## Session construction
 

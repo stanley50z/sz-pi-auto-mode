@@ -49,6 +49,7 @@ test("the Main Session status card reacts to projection changes and exposes /dra
   let drains = 0;
   const card = createAutomodeStatusCard({
     initial: snapshot("loading"),
+    async onReturnToNormal() {},
     onDrain() { drains += 1; },
     onExit() {},
   });
@@ -95,6 +96,29 @@ test("the Main Session status card reacts to projection changes and exposes /dra
   assert.equal(shutdowns, 1);
 });
 
+test("/automode gracefully drains before returning to the original normal Pi session", async () => {
+  const commands = new Map<string, (args: string, ctx: ExtensionContext) => void | Promise<void>>();
+  const pi = {
+    on() {},
+    registerCommand(name: string, options: { handler(args: string, ctx: ExtensionContext): void | Promise<void> }) {
+      commands.set(name, options.handler);
+    },
+  } as unknown as ExtensionAPI;
+  const events: string[] = [];
+  const card = createAutomodeStatusCard({
+    initial: snapshot("active"),
+    async onReturnToNormal() { events.push("return"); },
+    onDrain() { events.push("drain"); },
+    onExit() {},
+  });
+  if (typeof card.extension === "function") throw new Error("Expected the named status-card extension");
+  await card.extension.factory(pi);
+
+  assert.ok(commands.has("automode"));
+  await commands.get("automode")!("", {} as ExtensionContext);
+  assert.deepEqual(events, ["return", "drain"]);
+});
+
 test("/exit force-stops active Ticket Sessions before exiting the Main Session", async () => {
   let sessionStart: ((event: unknown, ctx: ExtensionContext) => void) | undefined;
   const commands = new Map<string, (args: string, ctx: ExtensionContext) => void | Promise<void>>();
@@ -111,6 +135,7 @@ test("/exit force-stops active Ticket Sessions before exiting the Main Session",
   const coordinatorStopped = new Promise<void>((resolve) => { releaseCoordinator = resolve; });
   const card = createAutomodeStatusCard({
     initial: snapshot("active"),
+    async onReturnToNormal() {},
     onDrain() {},
     onExit() { forceStops += 1; },
   });

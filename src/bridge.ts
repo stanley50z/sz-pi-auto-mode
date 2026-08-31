@@ -20,7 +20,7 @@ export interface AutomodeLaunchRequest {
 
 export interface AutomodeBridgeDependencies {
   selectConfiguration(ctx: ExtensionCommandContext): Promise<AutomationStageConfiguration | null>;
-  launch(request: AutomodeLaunchRequest): Promise<never>;
+  launch(request: AutomodeLaunchRequest): Promise<void>;
 }
 
 export function launchingPiPackageDir(entrypoint = process.argv[1]): string {

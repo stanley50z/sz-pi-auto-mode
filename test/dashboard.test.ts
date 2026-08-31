@@ -613,6 +613,28 @@ test("another dashboard uses an independent loopback port instead of blocking st
   }
 });
 
+test("black-box /automode gracefully drains and resumes the original normal Pi session", { timeout: 20_000 }, async () => {
+  const launched = launchDashboardBlackBox({
+    completionDelayMilliseconds: 250,
+    timeoutMilliseconds: 15_000,
+  });
+  try {
+    await launched.ready;
+    launched.submitCommand("/automode");
+    const deadline = Date.now() + 8_000;
+    while (!launched.output().includes("NORMAL_PI_RESUMED") && Date.now() < deadline) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    }
+    assert.match(launched.output(), /NORMAL_PI_RESUMED/);
+    launched.submitCommand("/normal-proof-exit");
+    const result = await launched.exited;
+    assert.equal(result.exitCode, 0);
+    assert.match(result.visibleOutput, /\/automode: graceful drain, then return to normal Pi/);
+  } finally {
+    await launched.stop();
+  }
+});
+
 test("black-box /exit force-stops active Ticket Sessions and exits", { timeout: 20_000 }, async () => {
   const launched = launchDashboardBlackBox({
     completionDelayMilliseconds: 60_000,

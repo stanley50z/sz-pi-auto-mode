@@ -26,7 +26,7 @@ The TUI shows a compact status card containing:
 - `ON`, `DRAINING`, or `OFF` for all four Automation Stages
 - total open Stage Candidates and active, queued, held, retrying, and exhausted counts
 - last successful poll and next scheduled poll
-- `/drain` graceful-drain and `/exit` force-stop guidance, while `Ctrl-C` keeps Pi's default TUI behavior
+- `/automode` return-to-normal, `/drain` graceful-exit, and `/exit` force-stop guidance, while `Ctrl-C` keeps Pi's default TUI behavior
 - a prominent Tailscale exposure error when remote access is unavailable
 
 It does not repeat Stage Lane cards, Ticket Session transcripts, or detailed history.
@@ -121,7 +121,7 @@ The browser exposes only safe supervision:
 - begin graceful repository-wide drain
 - change one Automation Stage Operating State
 
-Force-stop, retry-budget reset, tracker mutation, ticket prompting, and per-session termination are not browser controls. Repository-wide force-stop remains terminal-only through `/exit` in the Main Session TUI; `/drain` is its graceful counterpart.
+Force-stop, retry-budget reset, tracker mutation, ticket prompting, and per-session termination are not browser controls. Repository-wide force-stop remains terminal-only through `/exit` in the Main Session TUI. `/drain` gracefully drains and exits, while `/automode` gracefully drains and resumes the original normal Pi session.
 
 ## Responsive and accessible behavior
 
@@ -223,4 +223,4 @@ The browser must not read GitHub, Pi session files, worktrees, or the Automode R
    - Responsive accessible browser UI, process-local Recent section, structured live events, persisted history reconstruction, and disconnected/error states.
 
 5. **Integrate the compact Main Session TUI and black-box acceptance**
-   - Status card, exact links, Tailscale errors, `/drain` and `/exit` guidance, default `Ctrl-C` preservation, visual walkthroughs, and `/automode` end-to-end coverage.
+   - Status card, exact links, Tailscale errors, `/automode`, `/drain`, and `/exit` guidance, default `Ctrl-C` preservation, visual walkthroughs, and round-trip `/automode` end-to-end coverage.

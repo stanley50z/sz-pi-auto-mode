@@ -17,6 +17,7 @@ import {
 } from "./dashboard.js";
 import { createDashboardProjection } from "./dashboard-ui.js";
 import { GitHubTracker } from "./github-tracker.js";
+import { requestReturnToNormalPi } from "./handoff-protocol.js";
 import { createAutomodeStatusCard } from "./main-status-card.js";
 import { resolveAutomodePaths } from "./paths.js";
 import { createMainSessionRuntime } from "./session.js";
@@ -52,6 +53,7 @@ export interface StartAutomodeMainOptions {
   coordinator?: AutomodeCoordinator;
   coordinatorClock?: CoordinatorClock;
   createDashboard?: (options: CoordinatorDashboardOptions) => CoordinatorDashboard;
+  returnToNormal?: () => Promise<void>;
 }
 
 export interface StartedAutomodeMainSession {
@@ -289,6 +291,7 @@ export async function startAutomodeMainSession(
       projection: initialDashboardProjection,
       dashboard: dashboardStatus,
     },
+    onReturnToNormal: options.returnToNormal ?? requestReturnToNormalPi,
     onDrain: () => requestDrain(),
     onExit: () => requestForceStop(),
   });

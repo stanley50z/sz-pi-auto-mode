@@ -15,7 +15,7 @@ async function waitForFile(path: string): Promise<void> {
   throw new Error(`Timed out waiting for ${path}`);
 }
 
-test("handoff forwards termination and cannot resume the bridge", async () => {
+test("handoff forwards termination and cannot resume the bridge without a return request", async () => {
   const fixture = mkdtempSync(join(tmpdir(), "automode-signal-"));
   const readyFile = join(fixture, "ready");
   const signalFile = join(fixture, "signal");
@@ -71,4 +71,34 @@ writeFileSync(${JSON.stringify(resumeFile)}, "resumed");
     assert.equal(readFileSync(signalFile, "utf8"), "SIGINT,SIGTERM");
   }
   assert.equal(existsSync(resumeFile), false);
+});
+
+test("handoff resumes the original normal Pi process after Automode requests it", async () => {
+  const fixture = mkdtempSync(join(tmpdir(), "automode-return-"));
+  const resumeFile = join(fixture, "resumed");
+  const childScript = join(fixture, "child.cjs");
+  const bridgeScript = join(fixture, "bridge.mjs");
+  const handoffModule = resolve(dirname(fileURLToPath(import.meta.url)), "../src/handoff.js");
+
+  writeFileSync(childScript, `
+if (!process.send) throw new Error("Automode return IPC is unavailable");
+process.send({ type: "automode:return-to-normal" }, (error) => process.exit(error ? 1 : 0));
+`);
+  writeFileSync(bridgeScript, `
+import { writeFileSync } from "node:fs";
+import { handoffTerminal } from ${JSON.stringify(pathToFileURL(handoffModule).href)};
+await handoffTerminal({ command: process.execPath, args: [${JSON.stringify(childScript)}], cwd: ${JSON.stringify(fixture)} });
+writeFileSync(${JSON.stringify(resumeFile)}, "resumed");
+`);
+
+  const bridge = spawn(process.execPath, [bridgeScript], { stdio: ["ignore", "ignore", "pipe"] });
+  let stderr = "";
+  bridge.stderr.on("data", (chunk) => { stderr += chunk; });
+  const code = await new Promise<number | null>((resolveExit, reject) => {
+    bridge.once("error", reject);
+    bridge.once("exit", resolveExit);
+  });
+
+  assert.equal(code, 0, stderr);
+  assert.equal(readFileSync(resumeFile, "utf8"), "resumed");
 });
