@@ -38,6 +38,7 @@ function startForTest(options: StartForTestOptions) {
       ? options.model
       : options.model ?? getBuiltinModel("openai-codex", "gpt-5.6-sol"),
     capabilityModel: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
+    openDashboardInBrowser: options.openDashboardInBrowser ?? (async () => undefined),
     startupValidation: {
       runner: {
         async run(command, args, cwd) {
@@ -190,6 +191,47 @@ test("a graceful drain during dashboard startup stops Coordinator discovery", as
   await disposing;
   assert.deepEqual(trackerCalls, ["list-bookkeeping"]);
   assert.equal(existsSync(main.coordinatorLockFile), false);
+});
+
+test("starting Automode opens the exact local dashboard before Coordinator discovery", async () => {
+  const fixture = mkdtempSync(join(tmpdir(), "automode-dashboard-open-"));
+  const repository = join(fixture, "repository");
+  const home = join(fixture, "home");
+  mkdirSync(join(repository, ".git"), { recursive: true });
+  const configuration = createAutomationStageConfiguration("half", ["auto-triage"]);
+  const events: string[] = [];
+  const coordinator = createIdleCoordinator(configuration, events);
+  const main = await startForTest({
+    repository,
+    home,
+    ...confirmedConfiguration("half", ["auto-triage"]),
+    coordinator,
+    createDashboard() {
+      return {
+        async start() {
+          events.push("dashboard-start");
+          return { localUrl: "http://127.0.0.1:42319" };
+        },
+        publish() {},
+        appendActivity() {},
+        async stop() {},
+      };
+    },
+    async openDashboardInBrowser(localUrl) {
+      events.push(`dashboard-open:${localUrl}`);
+    },
+  });
+
+  await main.startCoordinator();
+  assert.deepEqual(events.slice(0, 4), [
+    "dashboard-start",
+    "dashboard-open:http://127.0.0.1:42319",
+    "list-bookkeeping",
+    "snapshot",
+  ]);
+  main.interruptCoordinator();
+  await coordinator.whenStopped();
+  await main.dispose();
 });
 
 test("the dashboard starts before Coordinator discovery and stops after the drain", async () => {
