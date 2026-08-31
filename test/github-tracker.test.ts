@@ -242,6 +242,72 @@ test("a transiently incomplete GitHub snapshot is retried before polling fails",
   ]);
 });
 
+test("a just-merged pull request does not crash a snapshot while GitHub's open issues index is stale", async () => {
+  const stalePullIssue = issue(124, {
+    node_id: "PR_124",
+    html_url: "https://github.com/owner/repository/pull/124",
+    labels: [{ name: "review" }],
+    assignees: [],
+    pull_request: { url: "https://api.github.com/repos/owner/repository/pulls/124" },
+  });
+  const mergedPullIssue = {
+    ...stalePullIssue,
+    state: "closed",
+    updated_at: "2026-08-31T22:45:29Z",
+  };
+  const mergedPull = {
+    number: 124,
+    node_id: "PR_124",
+    html_url: "https://github.com/owner/repository/pull/124",
+    body: "",
+    head: {
+      sha: "abc124",
+      ref: "automode/issue-123",
+      repo: { full_name: "owner/repository" },
+    },
+    draft: false,
+    merged_at: "2026-08-31T22:45:29Z",
+  };
+  const runner: GitHubCommandRunner = {
+    async run(command, args) {
+      const endpoint = args.find((argument) => argument.startsWith("repos/"));
+      if (endpoint === "repos/owner/repository/issues?state=open&per_page=100") {
+        return JSON.stringify([[stalePullIssue]]);
+      }
+      if (endpoint === "repos/owner/repository/pulls?state=open&per_page=100") {
+        return JSON.stringify([[]]);
+      }
+      if (endpoint === "repos/owner/repository/issues/124") return JSON.stringify(mergedPullIssue);
+      if (endpoint === "repos/owner/repository/pulls/124") return JSON.stringify(mergedPull);
+      if (command === "gh" && args[0] === "api" && args[1] === "graphql") {
+        return JSON.stringify([{
+          data: {
+            repository: {
+              pullRequest: {
+                comments: {
+                  nodes: [],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+              },
+            },
+          },
+        }]);
+      }
+      throw new Error(`unexpected command: ${command} ${args.join(" ")}`);
+    },
+  };
+  const tracker = new GitHubTracker({
+    cwd: "C:\\repository",
+    repository: "owner/repository",
+    actor: "automode-bot",
+    runner,
+  });
+
+  const snapshot = await tracker.snapshot();
+
+  assert.deepEqual(snapshot.items, []);
+});
+
 test("pull-request comments use GraphQL when GitHub's REST issue-comments route is unavailable", async () => {
   const pullIssue = issue(15, {
     node_id: "PR_15",

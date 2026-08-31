@@ -648,15 +648,25 @@ export class GitHubTracker implements Tracker {
     }
   }
 
-  async #workflowSnapshotAttempt(state: "open" | "all"): Promise<TrackerSnapshot> {
+  async #workflowSnapshotAttempt(
+    state: "open" | "all",
+    reconcileIncomplete = false,
+  ): Promise<TrackerSnapshot> {
     const issuesEndpoint = `repos/${this.#repository}/issues?state=${state}&per_page=100`;
     const pullsEndpoint = `repos/${this.#repository}/pulls?state=${state}&per_page=100`;
-    const [issues, pulls] = await Promise.all([
+    const [listedIssues, listedPulls] = await Promise.all([
       this.#paginated(issuesEndpoint, "open issues"),
       this.#paginated(pullsEndpoint, "open pull requests"),
     ]);
+    const issuesByNumber = new Map<number, unknown>();
+    for (const value of listedIssues) {
+      const issue = record(value, "issue");
+      const number = positiveInteger(issue.number, "issue number");
+      if (issuesByNumber.has(number)) throw new Error(`Ambiguous GitHub issues: duplicate #${number}`);
+      issuesByNumber.set(number, value);
+    }
     const pullsByNumber = new Map<number, unknown>();
-    for (const value of pulls) {
+    for (const value of listedPulls) {
       const pull = record(value, "pull request");
       const number = positiveInteger(pull.number, "pull request number");
       if (pullsByNumber.has(number)) {
@@ -664,12 +674,54 @@ export class GitHubTracker implements Tracker {
       }
       pullsByNumber.set(number, value);
     }
-    const seen = new Set<number>();
-    const items = await Promise.all(issues.map(async (value) => {
-      const issue = record(value, "issue");
-      const number = positiveInteger(issue.number, "issue number");
-      if (seen.has(number)) throw new Error(`Ambiguous GitHub issues: duplicate #${number}`);
-      seen.add(number);
+    const missingPulls = [...issuesByNumber].flatMap(([number, value]) => {
+      const issue = record(value, `issue #${number}`);
+      return "pull_request" in issue && !pullsByNumber.has(number) ? [number] : [];
+    });
+    const missingIssues = [...pullsByNumber.keys()].filter((number) => !issuesByNumber.has(number));
+    const incompleteNumbers = [...new Set([...missingPulls, ...missingIssues])];
+    if (incompleteNumbers.length > 0 && !reconcileIncomplete) {
+      if (missingPulls.length > 0) {
+        const missing = missingPulls.sort((left, right) => left - right);
+        throw new IncompleteGitHubSnapshotError(missing.length === 1
+          ? `Incomplete GitHub snapshot: pull request #${missing[0]} is missing`
+          : `Incomplete GitHub snapshot: pull request(s) missing from pulls response: ${missing
+            .map((number) => `#${number}`)
+            .join(", ")}`);
+      }
+      throw new IncompleteGitHubSnapshotError(
+        `Incomplete GitHub snapshot: pull request(s) missing from issues response: ${missingIssues
+          .sort((left, right) => left - right)
+          .map((number) => `#${number}`)
+          .join(", ")}`,
+      );
+    }
+    await Promise.all(incompleteNumbers.map(async (number) => {
+      const [issueOutput, pullOutput] = await Promise.all([
+        this.#runner.run("gh", ["api", `repos/${this.#repository}/issues/${number}`], this.#cwd),
+        this.#runner.run("gh", ["api", `repos/${this.#repository}/pulls/${number}`], this.#cwd),
+      ]);
+      const issueValue = parseJson(issueOutput, `item #${number}`);
+      const issue = record(issueValue, `item #${number}`);
+      if (positiveInteger(issue.number, `item #${number} number`) !== number || !("pull_request" in issue)) {
+        throw new Error(`Ambiguous GitHub pull request identity for #${number}`);
+      }
+      const pullValue = parseJson(pullOutput, `pull request #${number}`);
+      const pull = record(pullValue, `pull request #${number}`);
+      if (positiveInteger(pull.number, `pull request #${number} number`) !== number) {
+        throw new Error(`Ambiguous GitHub pull request identity for #${number}`);
+      }
+      if (state === "open" && normalizeState(issue.state, `issue #${number}`) === "closed") {
+        issuesByNumber.delete(number);
+        pullsByNumber.delete(number);
+        return;
+      }
+      issuesByNumber.set(number, issueValue);
+      pullsByNumber.set(number, pullValue);
+    }));
+    const pullValues = [...pullsByNumber.values()];
+    const items = await Promise.all([...issuesByNumber].map(async ([number, value]) => {
+      const issue = record(value, `issue #${number}`);
       const pull = pullsByNumber.get(number);
       if ("pull_request" in issue) pullsByNumber.delete(number);
       const kind: TrackerItemKind = "pull_request" in issue ? "pull-request" : "issue";
@@ -683,7 +735,7 @@ export class GitHubTracker implements Tracker {
       );
     }
     items.sort((left, right) => left.number - right.number);
-    this.#decorateOutputPullRequests(items, pulls);
+    this.#decorateOutputPullRequests(items, pullValues);
     const revision = sha256(items.map((item) => ({
       id: item.id,
       materialVersion: item.materialVersion,
@@ -701,7 +753,7 @@ export class GitHubTracker implements Tracker {
       return await this.#workflowSnapshotAttempt(state);
     } catch (error) {
       if (!(error instanceof IncompleteGitHubSnapshotError)) throw error;
-      return this.#workflowSnapshotAttempt(state);
+      return this.#workflowSnapshotAttempt(state, true);
     }
   }
 
