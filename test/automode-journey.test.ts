@@ -138,6 +138,7 @@ test("a deterministic /automode journey advances triage, grilling, implementatio
         model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
         capabilityModel: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
         coordinator,
+        openDashboardInBrowser: async () => undefined,
         createDashboard() {
           return {
             async start() { return { localUrl: "http://127.0.0.1:41738" }; },

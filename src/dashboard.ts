@@ -61,6 +61,34 @@ export interface CoordinatorDashboardOptions {
 }
 
 const execFileAsync = promisify(execFile);
+
+export interface DashboardBrowserOpenOptions {
+  readonly platform?: NodeJS.Platform;
+  readonly run?: (command: string, args: readonly string[]) => Promise<void>;
+}
+
+const runDashboardBrowserCommand = async (command: string, args: readonly string[]): Promise<void> => {
+  await execFileAsync(command, [...args], { timeout: 10_000, windowsHide: true });
+};
+
+/** Opens the Coordinator's loopback URL with the operating system's default browser. */
+export async function openLocalDashboard(
+  localUrl: string,
+  options: DashboardBrowserOpenOptions = {},
+): Promise<void> {
+  const url = new URL(localUrl);
+  if (url.protocol !== "http:" || url.hostname !== "127.0.0.1") {
+    throw new Error(`Refusing to open a non-loopback Automode dashboard URL: ${localUrl}`);
+  }
+  const { platform = process.platform, run = runDashboardBrowserCommand } = options;
+  const [command, args] = platform === "win32"
+    ? ["rundll32.exe", ["url.dll,FileProtocolHandler", localUrl]] as const
+    : platform === "darwin"
+      ? ["open", [localUrl]] as const
+      : ["xdg-open", [localUrl]] as const;
+  await run(command, args);
+}
+
 const MAX_DASHBOARD_ACTIVITY_MESSAGE = 4_000;
 const MAX_DASHBOARD_ACTIVITY_BYTES = 16_384;
 const MAX_DASHBOARD_ACTIVITIES_PER_ITEM = 500;

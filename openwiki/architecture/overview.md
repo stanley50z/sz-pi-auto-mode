@@ -7,8 +7,8 @@ openwiki:
   roles: [architecture, runtime, testing]
   change_kinds: [lifecycle, public-api, security]
   source_paths: [src/bridge.ts, src/automode-main.ts, src/startup.ts, src/coordinator-lock.ts, src/handoff.ts, src/handoff-protocol.ts]
-  symbols: [startAutomodeMainSession, validateAutomodeStartup, acquireRepositoryCoordinator, handoffTerminal, requestReturnToNormalPi]
-  test_paths: [test/startup.test.ts, test/main-session.test.ts, test/coordinator-lock.test.ts]
+  symbols: [startAutomodeMainSession, validateAutomodeStartup, acquireRepositoryCoordinator, handoffTerminal, requestReturnToNormalPi, openLocalDashboard]
+  test_paths: [test/startup.test.ts, test/main-session.test.ts, test/coordinator-lock.test.ts, test/handoff.test.ts]
   invariants: [Startup validation and execution attestation complete before work discovery., One live repository Coordinator owns the durable run., Main Session replacement and forking are cancelled., The authenticated GitHub actor is bound before Coordinator claims., Coordinator shutdown drains before force and preserves the lock until stopped.]
   validation_commands: [npm run build, "node --test dist/test/startup.test.js dist/test/main-session.test.js dist/test/coordinator-lock.test.js"]
 ---
@@ -23,7 +23,7 @@ The current vocabulary in `CONTEXT.md` matches the implementation: Automode is a
 
 ### Bridge and child process boundary
 
-`src/automode-main.ts`, `src/startup.ts`, `src/capability-profile.ts`, `src/capability-session.ts`, `src/controlled-services.ts`, and `src/coordinator-lock.ts` implement the startup and session boundary. The bridge/launch seam serializes the selected Automation Stage Configuration, hands it to the child process, and the child rejects tampered payloads before Main Session startup. `createCapabilitySession` is specifically the startup-only Automode Capability Attestation Session; [Coordinator and Ticket Sessions](coordinator.md) owns the later work-dispatch boundary.
+`src/automode-main.ts`, `src/startup.ts`, `src/capability-profile.ts`, `src/capability-session.ts`, `src/controlled-services.ts`, and `src/coordinator-lock.ts` implement the startup and session boundary. The bridge/launch seam serializes the selected Automation Stage Configuration, hands it to the child process, and the child rejects tampered payloads before Main Session startup. After the dashboard binds, `startAutomodeMainSession` opens its exact validated loopback URL through `openLocalDashboard` before Coordinator discovery. `createCapabilitySession` is specifically the startup-only Automode Capability Attestation Session; [Coordinator and Ticket Sessions](coordinator.md) owns the later work-dispatch boundary.
 
 ### Immutable run configuration
 
@@ -58,6 +58,7 @@ sequenceDiagram
   M->>S: create guarded Main Session
   M->>M: persist Automode Run Record
   S-->>B: interactive Automode run
+  S-->>B: return IPC after /automode drain
 ```
 
 *The ordering is fail-closed: no run record or work discovery precedes validation and attestation.*

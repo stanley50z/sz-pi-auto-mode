@@ -10,6 +10,7 @@ import { acquireRepositoryCoordinator } from "./coordinator-lock.js";
 import {
   AUTOMODE_DASHBOARD_LOCAL_URL,
   createCoordinatorDashboard,
+  openLocalDashboard,
   type CoordinatorDashboard,
   type CoordinatorDashboardOptions,
   type DashboardProjection,
@@ -53,6 +54,7 @@ export interface StartAutomodeMainOptions {
   coordinator?: AutomodeCoordinator;
   coordinatorClock?: CoordinatorClock;
   createDashboard?: (options: CoordinatorDashboardOptions) => CoordinatorDashboard;
+  openDashboardInBrowser?: (localUrl: string) => Promise<void>;
   returnToNormal?: () => Promise<void>;
 }
 
@@ -388,6 +390,7 @@ export async function startAutomodeMainSession(
     coordinatorStartPromise = (async () => {
       lifecycle.beginDashboardStart();
       dashboardStatus = await dashboard.start(dashboardProjection());
+      await (options.openDashboardInBrowser ?? openLocalDashboard)(dashboardStatus.localUrl);
       unsubscribeDashboard = coordinator.subscribe((event) => {
         if (event.type === "projection") {
           if (runLifecycle !== "loading" && runLifecycle !== "draining") {

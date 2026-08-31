@@ -132,6 +132,7 @@ async function main(): Promise<void> {
     model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
     capabilityModel: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
     coordinator,
+    openDashboardInBrowser: async () => undefined,
     createDashboard(options) {
       return createCoordinatorDashboard({
         ...options,

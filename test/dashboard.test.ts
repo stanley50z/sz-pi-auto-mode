@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   CliDashboardTailscaleExposure,
   createCoordinatorDashboard,
+  openLocalDashboard,
   type DashboardProjection,
   type DashboardTailscaleExposure,
 } from "../src/dashboard.js";
@@ -78,6 +79,35 @@ function projection(id = "run-1"): DashboardProjection {
     recent: [],
   };
 }
+
+test("the local dashboard opener uses each operating system's URL launcher", async () => {
+  const cases = [
+    { platform: "win32", command: "rundll32.exe", args: ["url.dll,FileProtocolHandler", "http://127.0.0.1:42319"] },
+    { platform: "darwin", command: "open", args: ["http://127.0.0.1:42319"] },
+    { platform: "linux", command: "xdg-open", args: ["http://127.0.0.1:42319"] },
+  ] as const;
+
+  for (const expected of cases) {
+    const calls: Array<{ command: string; args: readonly string[] }> = [];
+    await openLocalDashboard("http://127.0.0.1:42319", {
+      platform: expected.platform,
+      async run(command, args) { calls.push({ command, args }); },
+    });
+    assert.deepEqual(calls, [{ command: expected.command, args: expected.args }]);
+  }
+});
+
+test("the local dashboard opener rejects non-loopback URLs without launching them", async () => {
+  let launched = false;
+  await assert.rejects(
+    () => openLocalDashboard("https://example.com/dashboard", {
+      platform: "linux",
+      async run() { launched = true; },
+    }),
+    /Refusing to open a non-loopback Automode dashboard URL/,
+  );
+  assert.equal(launched, false);
+});
 
 test("the Coordinator dashboard serves its initial projection on an available loopback URL", async () => {
   const dashboard = createCoordinatorDashboard({
