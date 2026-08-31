@@ -8,6 +8,7 @@ After `/automode` launches a fresh Main Session, the Automode Coordinator starts
 
 The Automode Dashboard:
 
+- shows a live elapsed timer for the current Automode process and each started Ticket Session
 - uses Stage Lanes as its default and only primary layout
 - shows every open Stage Candidate, not only active Ticket Sessions
 - exposes live read-only Ticket Session activity and process-local prior-attempt history
@@ -90,7 +91,7 @@ Selecting a card opens a read-only activity drawer.
 
 For a live or persisted Ticket Session it shows:
 
-- item, Stage, lifecycle state, attempt count, session identity, and workspace
+- item, Stage, lifecycle state, attempt count, live or settled elapsed time, session identity, and workspace
 - the canonical Ticket Session dispatch command pinned above the scrolling activity
 - a Pi-like parent transcript containing assistant messages and muted thinking summaries
 - ordinary tool activity collapsed to `+ N tool calls`, without names, arguments, commands, or result bodies
@@ -182,6 +183,8 @@ The browser must not read GitHub, Pi session files, worktrees, or the Automode R
 
 ### Session activity
 
+- [ ] The run summary timer advances from the current Automode process start.
+- [ ] Every started Ticket Session card and activity drawer show elapsed time, which advances while live and freezes when settled.
 - [ ] Selecting an active card opens a live Pi-like transcript without starting another Pi process.
 - [ ] The canonical Ticket Session dispatch command remains pinned above the scrolling activity.
 - [ ] Ordinary tools remain aggregated while `automode_panel` and native `subagent_*` launch rows stay visible.

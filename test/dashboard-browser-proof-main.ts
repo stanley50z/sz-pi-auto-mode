@@ -16,6 +16,10 @@ import {
 
 const now = "2026-08-18T16:00:00.000Z";
 const nextPollAt = "2026-08-18T16:00:30.000Z";
+const runStartedAt = new Date(Date.now() - 15 * 60_000).toISOString();
+const ticketSessionStartedAt = new Date(Date.now() - 5 * 60_000).toISOString();
+const settledSessionStartedAt = new Date(Date.now() - 10 * 60_000).toISOString();
+const settledSessionEndedAt = new Date(Date.now() - 5 * 60_000).toISOString();
 type BrowserProofControlCommand = "EMPTY" | "STOP";
 
 const proofCandidates: Readonly<Record<AutomationStage, readonly DashboardStageCandidate[]>> = {
@@ -60,6 +64,7 @@ const proofCandidates: Readonly<Record<AutomationStage, readonly DashboardStageC
       sessionId: "dashboard-proof-session",
       sessionFile: ".pi/agent/sessions/dashboard-proof-session.jsonl",
       workspace: "worktrees/issue-50",
+      startedAt: ticketSessionStartedAt,
       initialPrompt: "/skill:implement https://github.com/owner/repository/issues/50",
       attempts: [{
         attempt: 1,
@@ -84,6 +89,15 @@ const proofCandidates: Readonly<Record<AutomationStage, readonly DashboardStageC
     status: "exhausted",
     reason: "Five attempts were exhausted; evidence is preserved for diagnosis.",
     attempt: 5,
+    session: {
+      processId: "dashboard-proof-exhausted-process",
+      sessionId: "dashboard-proof-exhausted-session",
+      sessionFile: ".pi/agent/sessions/dashboard-proof-exhausted-session.jsonl",
+      startedAt: settledSessionStartedAt,
+      endedAt: settledSessionEndedAt,
+      initialPrompt: "/skill:code-review https://github.com/owner/repository/pull/103",
+      attempts: [],
+    },
   }],
 };
 
@@ -133,6 +147,7 @@ function proofProjection(
       id: "dashboard-browser-proof",
       mode: "full",
       lifecycle,
+      startedAt: runStartedAt,
       lastSuccessfulPoll,
       nextPoll: nextPollAt,
     },

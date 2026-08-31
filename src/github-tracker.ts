@@ -173,9 +173,11 @@ function normalizeBookkeeping(value: unknown, context: string): TrackerBookkeepi
   const optional = [
     "coordinatorId",
     "diagnostic",
+    "endedAt",
     "processId",
     "sessionFile",
     "sessionId",
+    "startedAt",
     "workspace",
   ];
   const keys = Object.keys(source);
@@ -234,6 +236,15 @@ function normalizeBookkeeping(value: unknown, context: string): TrackerBookkeepi
   }
   const optionalString = (field: "coordinatorId" | "diagnostic" | "processId" | "sessionFile" | "sessionId") =>
     source[field] === undefined ? undefined : stringField(source[field], `${context} ${field}`);
+  const startedAt = source.startedAt === undefined
+    ? undefined
+    : timestamp(source.startedAt, `${context} startedAt`);
+  const endedAt = source.endedAt === undefined
+    ? undefined
+    : timestamp(source.endedAt, `${context} endedAt`);
+  if (endedAt !== undefined && startedAt === undefined) {
+    throw new Error(`Malformed GitHub ${context}: endedAt requires startedAt`);
+  }
   return {
     version: 1,
     ...(optionalString("coordinatorId") === undefined
@@ -253,6 +264,8 @@ function normalizeBookkeeping(value: unknown, context: string): TrackerBookkeepi
     ...(optionalString("sessionId") === undefined ? {} : { sessionId: optionalString("sessionId") }),
     ...(optionalString("sessionFile") === undefined ? {} : { sessionFile: optionalString("sessionFile") }),
     ...(workspace === undefined ? {} : { workspace }),
+    ...(startedAt === undefined ? {} : { startedAt }),
+    ...(endedAt === undefined ? {} : { endedAt }),
     ...(optionalString("diagnostic") === undefined ? {} : { diagnostic: optionalString("diagnostic") }),
   };
 }

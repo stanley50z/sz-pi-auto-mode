@@ -16,6 +16,7 @@ function snapshot(lifecycle: AutomodeStatusCardSnapshot["projection"]["run"]["li
         id: "run-50",
         mode: "full",
         lifecycle,
+        startedAt: "2026-08-18T11:45:00.000Z",
         lastSuccessfulPoll: "2026-08-18T12:00:00.000Z",
         nextPoll: "2026-08-18T12:00:30.000Z",
       },

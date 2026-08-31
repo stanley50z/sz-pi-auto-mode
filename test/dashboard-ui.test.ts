@@ -24,7 +24,12 @@ test("dashboard UI assets expose a loading Stage Lanes shell without inline exec
 test("Coordinator Stage Candidates map to the browser projection without tracker or session reads", () => {
   const projection = createDashboardProjection({
     repository: { name: "sz-pi-auto-mode", url: "https://github.com/stanley50z/sz-pi-auto-mode" },
-    run: { id: "run-45", mode: "full", lifecycle: "active" },
+    run: {
+      id: "run-45",
+      mode: "full",
+      lifecycle: "active",
+      startedAt: "2026-08-17T11:45:00.000Z",
+    },
   }, {
     lanes: [{
       stage: "auto-triage",
@@ -41,6 +46,7 @@ test("Coordinator Stage Candidates map to the browser projection without tracker
           processId: "process-68",
           sessionId: "session-68",
           sessionFile: "/sessions/68.jsonl",
+          startedAt: "2026-08-17T11:50:00.000Z",
           workspace: "/worktrees/issue-68",
         },
       }],
@@ -106,6 +112,7 @@ test("Coordinator Stage Candidates map to the browser projection without tracker
     id: "run-45",
     mode: "full",
     lifecycle: "active",
+    startedAt: "2026-08-17T11:45:00.000Z",
     lastSuccessfulPoll: "2026-08-17T12:00:00.000Z",
     nextPoll: "2026-08-17T12:00:30.000Z",
   });
@@ -124,6 +131,7 @@ test("Coordinator Stage Candidates map to the browser projection without tracker
       sessionId: "session-68",
       sessionFile: "/sessions/68.jsonl",
       workspace: "/worktrees/issue-68",
+      startedAt: "2026-08-17T11:50:00.000Z",
       initialPrompt: "/skill:triage https://github.com/example/repository/issues/68",
       attempts: [],
     },

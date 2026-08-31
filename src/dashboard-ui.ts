@@ -71,6 +71,8 @@ export interface DashboardTicketSessionActivity {
   readonly sessionId: string;
   readonly sessionFile?: string;
   readonly workspace?: string;
+  readonly startedAt?: string;
+  readonly endedAt?: string;
   readonly initialPrompt: string;
   readonly attempts: readonly DashboardSessionAttempt[];
 }
@@ -110,6 +112,7 @@ export interface DashboardProjection {
     readonly id: string;
     readonly mode: AutomodeMode;
     readonly lifecycle: "loading" | "active" | "draining" | "degraded" | "empty";
+    readonly startedAt: string;
     readonly lastSuccessfulPoll?: string;
     readonly nextPoll?: string;
   };
@@ -180,6 +183,7 @@ const DASHBOARD_CSS = String.raw`:root {
   --warning: #ffd166;
   --danger: #ff8297;
   --held: #c7adff;
+  --info: #c5ddff;
   --focus: #b9d8ff;
   --shadow: 0 24px 80px rgb(0 0 0 / 45%);
   font-family: "Cascadia Code", "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
@@ -251,7 +255,7 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 
 .run-panel {
   display: grid;
-  grid-template-columns: minmax(260px, 1.5fr) repeat(4, minmax(115px, .55fr));
+  grid-template-columns: minmax(260px, 1.5fr) repeat(5, minmax(105px, .55fr));
   gap: 16px;
   align-items: center;
   border: 1px solid var(--line);
@@ -362,7 +366,8 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .status.exhausted { color: var(--danger); }
 .card-title { display: block; margin-top: 8px; font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
 .card-activity { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
-.card-reason { display: block; margin-top: 9px; border-top: 1px solid #263a56; padding-top: 8px; color: #c5ddff; font-size: 10px; overflow-wrap: anywhere; }
+.card-elapsed { display: block; margin-top: 5px; color: var(--info); font-size: 10px; font-variant-numeric: tabular-nums; }
+.card-reason { display: block; margin-top: 9px; border-top: 1px solid #263a56; padding-top: 8px; color: var(--info); font-size: 10px; overflow-wrap: anywhere; }
 .empty-lane { display: grid; min-height: 130px; place-items: center; color: var(--muted); font-size: 11px; text-align: center; }
 
 .recent { margin-top: 18px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
@@ -505,7 +510,8 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
     pendingCommand: false,
     eventSource: null,
     activityLog: new Map(),
-    activityRetentionTruncated: false
+    activityRetentionTruncated: false,
+    clockOffsetMilliseconds: 0
   };
 
   const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (character) => ({
@@ -517,6 +523,26 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
     if (!value) return "Not scheduled";
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  };
+  // Renders live run and Ticket Session durations from the Coordinator server's clock.
+  const formatElapsed = (startedAt, endedAt) => {
+    const start = new Date(startedAt).getTime();
+    const end = endedAt ? new Date(endedAt).getTime() : Date.now() + state.clockOffsetMilliseconds;
+    const totalSeconds = Math.max(0, Math.floor((end - start) / 1000));
+    const seconds = totalSeconds % 60;
+    const totalMinutes = Math.floor(totalSeconds / 60);
+    const minutes = totalMinutes % 60;
+    const totalHours = Math.floor(totalMinutes / 60);
+    const hours = totalHours % 24;
+    const days = Math.floor(totalHours / 24);
+    const clock = [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
+    return days ? days + "d " + clock : clock;
+  };
+  const elapsedMarkup = (startedAt, endedAt) => '<span class="elapsed-value" data-elapsed-start="' + escapeHtml(startedAt) + '"' + (endedAt ? ' data-elapsed-end="' + escapeHtml(endedAt) + '"' : "") + '>' + formatElapsed(startedAt, endedAt) + "</span>";
+  const updateElapsed = () => {
+    document.querySelectorAll("[data-elapsed-start]").forEach((element) => {
+      element.textContent = formatElapsed(element.dataset.elapsedStart, element.dataset.elapsedEnd);
+    });
   };
   const announce = (message) => {
     announcer.textContent = "";
@@ -531,6 +557,8 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
   const isRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
   const isCount = (value) => Number.isInteger(value) && value >= 0;
   const optionalString = (value) => value === undefined || typeof value === "string";
+  const isTimestamp = (value) => typeof value === "string" && !Number.isNaN(new Date(value).getTime());
+  const optionalTimestamp = (value) => value === undefined || isTimestamp(value);
   const isWebUrl = (value) => {
     if (typeof value !== "string") return false;
     try { return ["http:", "https:"].includes(new URL(value).protocol); } catch { return false; }
@@ -575,7 +603,7 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
   }
 
   function validateSession(value, path) {
-    if (!isRecord(value) || !optionalString(value.processId) || typeof value.sessionId !== "string" || !optionalString(value.sessionFile) || !optionalString(value.workspace) || typeof value.initialPrompt !== "string" || !Array.isArray(value.attempts)) contractError(path);
+    if (!isRecord(value) || !optionalString(value.processId) || typeof value.sessionId !== "string" || !optionalString(value.sessionFile) || !optionalString(value.workspace) || !optionalTimestamp(value.startedAt) || !optionalTimestamp(value.endedAt) || (value.endedAt !== undefined && value.startedAt === undefined) || typeof value.initialPrompt !== "string" || !Array.isArray(value.attempts)) contractError(path);
     value.attempts.forEach((attempt, index) => {
       const attemptPath = path + ".attempts[" + index + "]";
       if (!isRecord(attempt) || !isCount(attempt.attempt) || (attempt.state !== "current" && attempt.state !== "settled") || !Array.isArray(attempt.events) || !optionalString(attempt.terminalResult)) contractError(attemptPath);
@@ -589,7 +617,7 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
   }
 
   function validateProjection(value) {
-    if (!isRecord(value) || value.version !== 1 || !isRecord(value.repository) || typeof value.repository.name !== "string" || !isWebUrl(value.repository.url) || !isRecord(value.run) || typeof value.run.id !== "string" || !MODE_LABELS[value.run.mode] || !RUN_LIFECYCLES.has(value.run.lifecycle) || !optionalString(value.run.lastSuccessfulPoll) || !optionalString(value.run.nextPoll) || !Array.isArray(value.lanes) || !Array.isArray(value.recent) || (value.stale !== undefined && typeof value.stale !== "boolean") || !optionalString(value.tailscaleError)) contractError("root");
+    if (!isRecord(value) || value.version !== 1 || !isRecord(value.repository) || typeof value.repository.name !== "string" || !isWebUrl(value.repository.url) || !isRecord(value.run) || typeof value.run.id !== "string" || !MODE_LABELS[value.run.mode] || !RUN_LIFECYCLES.has(value.run.lifecycle) || !isTimestamp(value.run.startedAt) || !optionalString(value.run.lastSuccessfulPoll) || !optionalString(value.run.nextPoll) || !Array.isArray(value.lanes) || !Array.isArray(value.recent) || (value.stale !== undefined && typeof value.stale !== "boolean") || !optionalString(value.tailscaleError)) contractError("root");
     validateTotals(value.totals, "totals", true);
     const seenStages = new Set();
     const seenCandidates = new Set();
@@ -617,12 +645,12 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
   }
 
   function validateEnvelope(payload) {
-    if (!isRecord(payload) || !Number.isInteger(payload.revision) || payload.revision < 0 || !isRecord(payload.network) || !optionalString(payload.network.localUrl) || !optionalString(payload.network.remoteUrl) || !optionalString(payload.network.exposureError) || (payload.activities !== undefined && !Array.isArray(payload.activities)) || (payload.activitiesTruncated !== undefined && typeof payload.activitiesTruncated !== "boolean")) contractError("envelope");
+    if (!isRecord(payload) || !Number.isInteger(payload.revision) || payload.revision < 0 || !isRecord(payload.network) || !optionalString(payload.network.localUrl) || !optionalString(payload.network.remoteUrl) || !optionalString(payload.network.exposureError) || !isTimestamp(payload.serverTime) || (payload.activities !== undefined && !Array.isArray(payload.activities)) || (payload.activitiesTruncated !== undefined && typeof payload.activitiesTruncated !== "boolean")) contractError("envelope");
     const activities = payload.activities || [];
     activities.forEach((activity, index) => {
       if (!isRecord(activity) || typeof activity.id !== "string" || typeof activity.itemKey !== "string" || typeof activity.occurredAt !== "string" || typeof activity.kind !== "string" || !optionalString(activity.message)) contractError("envelope.activities[" + index + "]");
     });
-    return { revision: payload.revision, network: payload.network, projection: validateProjection(payload.projection), activities, activitiesTruncated: payload.activitiesTruncated === true };
+    return { revision: payload.revision, network: payload.network, projection: validateProjection(payload.projection), activities, activitiesTruncated: payload.activitiesTruncated === true, serverTime: payload.serverTime };
   }
 
   function allCandidates() {
@@ -652,10 +680,14 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
   function card(candidate, recent = false) {
     const selected = state.selectedKey === candidate.key;
     const activity = candidate.activity || (candidate.session ? "Ticket Session activity available" : "No Ticket Session exists yet");
+    const sessionElapsed = candidate.session?.startedAt
+      ? '<span class="card-elapsed">Elapsed ' + elapsedMarkup(candidate.session.startedAt, candidate.session.endedAt) + "</span>"
+      : "";
     return '<button class="card" type="button" data-candidate-key="' + escapeHtml(candidate.key) + '" data-focus-id="candidate:' + escapeHtml(candidate.key) + '" aria-current="' + selected + '" aria-label="Inspect ' + escapeHtml(candidate.item + " " + candidate.title) + '">' +
       status(candidate.status) +
       '<strong class="card-title">' + escapeHtml(candidate.item) + " · " + escapeHtml(candidate.title) + "</strong>" +
       '<span class="card-activity">' + escapeHtml(activity) + "</span>" +
+      sessionElapsed +
       '<span class="card-reason">' + escapeHtml(recent ? "Settled during this Coordinator process. " + candidate.reason : candidate.reason) + "</span>" +
       "</button>";
   }
@@ -808,7 +840,7 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
       : '<div class="no-session"><div><h3>No Ticket Session exists yet</h3><p>' + escapeHtml(candidate.reason) + "</p><p>Inspecting this candidate is read-only. Activity will appear only after the Coordinator dispatches it.</p></div></div>";
     return '<div class="drawer-backdrop"><section class="drawer" role="dialog" aria-modal="true" aria-labelledby="activity-title">' +
       '<header class="drawer-header"><div><p class="eyebrow">' + escapeHtml(STAGE_LABELS[candidate.stage]) + ' · READ-ONLY ACTIVITY</p><h2 id="activity-title">' + escapeHtml(candidate.item) + " · " + escapeHtml(candidate.title) + '</h2></div><button class="close" type="button" data-close-drawer data-focus-id="drawer-close">Close</button></header>' +
-      '<div class="drawer-meta"><div><span>Lifecycle</span><strong>' + status(candidate.status) + "</strong></div><div><span>Attempt</span><strong>" + candidate.attempt + "/5</strong></div><div><span>Process</span><strong>" + escapeHtml(session?.processId ?? "Not started") + "</strong></div><div><span>Session</span><strong>" + escapeHtml(session ? session.sessionId : "Not created") + "</strong></div><div><span>Workspace</span><strong>" + escapeHtml(workspace) + "</strong></div>" + (pinnedHead ? '<div><span>Pinned review head</span><strong>' + escapeHtml(pinnedHead.slice(0, 12)) + "</strong></div>" : "") + "</div>" +
+      '<div class="drawer-meta"><div><span>Lifecycle</span><strong>' + status(candidate.status) + "</strong></div><div><span>Attempt</span><strong>" + candidate.attempt + "/5</strong></div><div><span>Elapsed</span><strong>" + (session?.startedAt ? elapsedMarkup(session.startedAt, session.endedAt) : "Not available") + "</strong></div><div><span>Process</span><strong>" + escapeHtml(session?.processId ?? "Not started") + "</strong></div><div><span>Session</span><strong>" + escapeHtml(session ? session.sessionId : "Not created") + "</strong></div><div><span>Workspace</span><strong>" + escapeHtml(workspace) + "</strong></div>" + (pinnedHead ? '<div><span>Pinned review head</span><strong>' + escapeHtml(pinnedHead.slice(0, 12)) + "</strong></div>" : "") + "</div>" +
       (session ? '<div class="initial-prompt"><span>DISPATCH COMMAND</span><code>' + escapeHtml(session.initialPrompt) + "</code></div>" : "") + content + "</section></div>";
   }
 
@@ -841,6 +873,7 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
       '<div class="metric"><span class="metric-label">Run identity</span><strong class="metric-value">' + escapeHtml(projection.run.id) + "</strong></div>" +
       '<div class="metric"><span class="metric-label">Launch mode</span><strong class="metric-value">' + modeLabel(projection.run.mode) + "</strong></div>" +
       '<div class="metric"><span class="metric-label">Lifecycle</span><strong class="metric-value lifecycle ' + projection.run.lifecycle + '">' + projection.run.lifecycle.toUpperCase() + "</strong></div>" +
+      '<div class="metric"><span class="metric-label">Elapsed</span><strong class="metric-value">' + elapsedMarkup(projection.run.startedAt) + "</strong></div>" +
       '<div class="metric"><span class="metric-label">Stage Candidates</span><strong class="metric-value">' + projection.totals.candidates + " open · " + projection.totals.active + " active · " + projection.totals.queued + " queued · " + projection.totals.held + " held · " + projection.totals.retrying + " retrying · " + projection.totals.exhausted + " exhausted</strong></div></section>" + banners +
       '<nav class="supervision-bar" aria-label="Coordinator supervision"><button class="action" type="button" data-command="refresh" data-focus-id="command:refresh" ' + (disabled ? "disabled" : "") + '>Refresh snapshot</button><button class="action drain" type="button" data-command="drain" data-focus-id="command:drain" ' + (disabled ? "disabled" : "") + '>Graceful drain</button><span class="supervision-note">Last poll ' + escapeHtml(formatTime(projection.run.lastSuccessfulPoll)) + " · Next " + escapeHtml(formatTime(projection.run.nextPoll)) + "</span></nav>" +
       '<div class="board-heading"><h2 id="stage-lanes">OPEN STAGE CANDIDATES</h2><p>Every non-running card explains why Automode has not dispatched it.</p></div><div class="lanes">' + STAGES.map(lane).join("") + "</div>" +
@@ -879,6 +912,7 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
     const envelope = validateEnvelope(payload);
     state.projection = envelope.projection;
     state.revision = envelope.revision;
+    state.clockOffsetMilliseconds = new Date(envelope.serverTime).getTime() - Date.now();
     state.network = envelope.network;
     state.activityRetentionTruncated = state.activityRetentionTruncated || envelope.activitiesTruncated;
     for (const activity of envelope.activities) recordActivity(activity);
@@ -1099,6 +1133,7 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
   }
 
   document.addEventListener("keydown", trapDialogFocus);
+  window.setInterval(updateElapsed, 1000);
   start();
 })();`;
 
@@ -1141,6 +1176,8 @@ function mapDashboardCandidate(
         sessionId: candidate.session.sessionId,
         sessionFile: candidate.session.sessionFile,
         ...(candidate.session.workspace === undefined ? {} : { workspace: candidate.session.workspace }),
+        ...(candidate.session.startedAt === undefined ? {} : { startedAt: candidate.session.startedAt }),
+        ...(candidate.session.endedAt === undefined ? {} : { endedAt: candidate.session.endedAt }),
         initialPrompt: createCanonicalTicketSessionPrompt(candidate.skillName, candidate.item.url),
         attempts: [],
       },

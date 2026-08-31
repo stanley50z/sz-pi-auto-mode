@@ -68,7 +68,7 @@ function projection(id = "run-1"): DashboardProjection {
   return {
     version: 1,
     repository: { name: "repository", url: "https://github.com/owner/repository" },
-    run: { id, mode: "full", lifecycle: "active" },
+    run: { id, mode: "full", lifecycle: "active", startedAt: "2026-08-17T11:45:00.000Z" },
     totals,
     lanes: ["auto-triage", "auto-grilling", "auto-implement", "auto-review"].map((stage) => ({
       stage: stage as "auto-triage" | "auto-grilling" | "auto-implement" | "auto-review",
@@ -132,6 +132,7 @@ test("the Coordinator dashboard serves its initial projection on an available lo
       exposureError: "tailscale executable was not found",
     });
     assert.equal(typeof snapshot.csrfToken, "string");
+    assert.equal(Number.isNaN(Date.parse(snapshot.serverTime as string)), false);
   } finally {
     await dashboard.stop();
   }

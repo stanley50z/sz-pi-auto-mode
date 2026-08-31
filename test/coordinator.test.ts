@@ -218,6 +218,7 @@ test("projects queued, claimed, and running lifecycle from Coordinator state", a
     sessionId: "session-60",
     sessionFile: "/sessions/60.jsonl",
     workspace: "/worktrees/implement-60",
+    startedAt: "2026-08-17T11:59:00.000Z",
   });
   assert.equal(coordinator.getProjection().totals.active, 1);
   assert.equal(sessionStarts, 1);
@@ -273,6 +274,8 @@ test("retains candidates settled in this process as Recent and clears them on re
       processId: "process-61",
       sessionId: "session-61",
       sessionFile: "/sessions/61.jsonl",
+      startedAt: "2026-02-03T04:05:06.000Z",
+      endedAt: "2026-02-03T04:05:06.000Z",
     },
   }]);
   first.interrupt();
@@ -614,6 +617,47 @@ test("recovery resets attempts but preserves session continuity for a Stage rest
   await coordinator.waitForIdle();
   assert.equal(sessions.requests.length, 1);
   assert.equal(tracker.records.get("issue:62")?.lifecycle, "succeeded");
+  coordinator.interrupt();
+  await coordinator.whenStopped();
+});
+
+test("recovery retains elapsed timing for a waiting Ticket Session", async () => {
+  const waiting = issue({
+    number: 63,
+    labels: ["ready-for-agent"],
+    assignees: ["automation-user"],
+    materialVersion: "63-waiting",
+  });
+  const tracker = new FakeTracker([waiting]);
+  tracker.records.set("issue:63", {
+    version: 1,
+    item: { kind: "issue", number: 63, url: waiting.url },
+    stage: "auto-implement",
+    skillName: "implement",
+    attempt: 1,
+    lifecycle: "awaiting-feedback",
+    materialVersion: waiting.materialVersion,
+    sessionId: "session-63",
+    sessionFile: "/sessions/63.jsonl",
+    startedAt: "2026-02-03T03:55:00.000Z",
+    endedAt: "2026-02-03T04:05:00.000Z",
+  });
+  const coordinator = new AutomodeCoordinator({
+    configuration: createAutomationStageConfiguration("half", ["auto-implement"]),
+    actor: "automation-user",
+    tracker,
+    sessions: new FakeTicketSessions(() => undefined),
+    workspaces: fakeWorkspaces,
+    clock: new ManualClock(),
+  });
+
+  await coordinator.start();
+  assert.deepEqual(candidateFor(coordinator, 63)?.session, {
+    sessionId: "session-63",
+    sessionFile: "/sessions/63.jsonl",
+    startedAt: "2026-02-03T03:55:00.000Z",
+    endedAt: "2026-02-03T04:05:00.000Z",
+  });
   coordinator.interrupt();
   await coordinator.whenStopped();
 });

@@ -61,6 +61,8 @@ export interface BookkeepingRecord {
   readonly sessionId?: string;
   readonly sessionFile?: string;
   readonly workspace?: TicketWorkspaceIdentity;
+  readonly startedAt?: string;
+  readonly endedAt?: string;
   readonly diagnostic?: string;
 }
 
@@ -192,6 +194,8 @@ export interface TicketSessionProjection {
   readonly sessionId: string;
   readonly sessionFile: string;
   readonly workspace?: string;
+  readonly startedAt?: string;
+  readonly endedAt?: string;
 }
 
 export interface StageCandidateProjection {
@@ -268,6 +272,12 @@ export interface CoordinatorActivity {
 export type CoordinatorSupervisionEvent =
   | { readonly type: "projection"; readonly projection: CoordinatorProjection }
   | { readonly type: "activity"; readonly activity: CoordinatorActivity };
+
+interface TicketSessionTiming {
+  readonly sessionId: string;
+  readonly startedAt: string;
+  readonly endedAt?: string;
+}
 
 interface ActiveStageCandidate {
   promise: Promise<void>;
@@ -432,6 +442,7 @@ export class AutomodeCoordinator {
   private readonly stopped = deferred<void>();
   private readonly currentItems = new Map<string, WorkflowItem>();
   private readonly settledThisProcess = new Map<string, RecentStageCandidateProjection>();
+  private readonly sessionTimings = new Map<string, TicketSessionTiming>();
   private readonly operatingStates: Record<AutomationStage, AutomationStageOperatingState>;
   private readonly supervisionListeners = new Set<(event: CoordinatorSupervisionEvent) => void>();
   private projection: CoordinatorProjection;
@@ -466,6 +477,14 @@ export class AutomodeCoordinator {
 
   private emitSupervision(event: CoordinatorSupervisionEvent): void {
     for (const listener of this.supervisionListeners) listener(event);
+  }
+
+  /** Projects timing only when it belongs to the requested durable Ticket Session. */
+  private sessionTiming(key: string, sessionId: string): Omit<TicketSessionTiming, "sessionId"> | undefined {
+    const timing = this.sessionTimings.get(key);
+    if (timing?.sessionId !== sessionId) return undefined;
+    const { sessionId: _, ...projected } = timing;
+    return projected;
   }
 
   private emitActivity(
@@ -550,6 +569,7 @@ export class AutomodeCoordinator {
             sessionId: active.handle.sessionId,
             sessionFile: active.handle.sessionFile,
             ...(active.workspace === undefined ? {} : { workspace: active.workspace.worktree }),
+            ...this.sessionTiming(key, active.handle.sessionId),
           };
         }
       } else if (
@@ -565,10 +585,11 @@ export class AutomodeCoordinator {
         attempt = waiting.attempt;
         if (waiting.sessionId && waiting.sessionFile) {
           session = {
-            processId: waiting.processId,
+            ...(waiting.processId === undefined ? {} : { processId: waiting.processId }),
             sessionId: waiting.sessionId,
             sessionFile: waiting.sessionFile,
             ...(waiting.workspace === undefined ? {} : { workspace: waiting.workspace.worktree }),
+            ...this.sessionTiming(key, waiting.sessionId),
           };
         }
       } else if (
@@ -584,10 +605,11 @@ export class AutomodeCoordinator {
         attempt = exhausted.attempt;
         if (exhausted.sessionId && exhausted.sessionFile) {
           session = {
-            processId: exhausted.processId,
+            ...(exhausted.processId === undefined ? {} : { processId: exhausted.processId }),
             sessionId: exhausted.sessionId,
             sessionFile: exhausted.sessionFile,
             ...(exhausted.workspace === undefined ? {} : { workspace: exhausted.workspace.worktree }),
+            ...this.sessionTiming(key, exhausted.sessionId),
           };
         }
       } else if (item.blockedBy > 0 && item.kind === "issue") {
@@ -751,6 +773,13 @@ export class AutomodeCoordinator {
     const records = await this.options.tracker.listBookkeeping();
     for (const record of records) {
       const key = itemKey(record.item);
+      if (record.sessionId && record.startedAt) {
+        this.sessionTimings.set(key, {
+          sessionId: record.sessionId,
+          startedAt: record.startedAt,
+          ...(record.endedAt === undefined ? {} : { endedAt: record.endedAt }),
+        });
+      }
       if (record.lifecycle === "awaiting-feedback") {
         this.awaitingFeedback.set(key, record);
         continue;
@@ -873,17 +902,24 @@ export class AutomodeCoordinator {
     task = Promise.resolve()
       .then(() => this.runAttempts(item, choice, previousAttempts, resumeSessionFile, workspace, resumeSessionId))
       .catch(async (error) => {
+        const failed = this.active.get(key);
         await this.options.tracker.upsertBookkeeping({
           version: 1,
           coordinatorId: this.options.coordinatorId,
           item: itemReference(item),
           stage: choice.stage,
           skillName: choice.skillName,
-          attempt: Math.min(MAX_ATTEMPTS, previousAttempts + 1),
+          attempt: failed?.attempt ?? Math.min(MAX_ATTEMPTS, previousAttempts + 1),
           lifecycle: "failed",
           materialVersion: item.materialVersion,
           diagnostic: errorMessage(error),
-          workspace,
+          workspace: failed?.workspace ?? workspace,
+          ...(failed?.handle === undefined ? {} : {
+            processId: failed.handle.processId,
+            sessionId: failed.handle.sessionId,
+            sessionFile: failed.handle.sessionFile,
+            ...this.sessionTiming(key, failed.handle.sessionId),
+          }),
         });
       })
       .finally(() => {
@@ -997,7 +1033,18 @@ export class AutomodeCoordinator {
         await this.options.tracker.upsertBookkeeping(record);
         continue;
       }
-      const active = this.active.get(itemKey(item));
+      const key = itemKey(item);
+      const priorTiming = this.sessionTimings.get(key);
+      const historyStartedAt = handle.history
+        ?.map(({ occurredAt }) => occurredAt)
+        .sort()[0];
+      this.sessionTimings.set(key, {
+        sessionId: handle.sessionId,
+        startedAt: priorTiming?.sessionId === handle.sessionId
+          ? priorTiming.startedAt
+          : historyStartedAt ?? this.clock.now().toISOString(),
+      });
+      const active = this.active.get(key);
       if (active) {
         active.handle = handle;
         if (active.forceRequested || this.forcing) await handle.terminate(true);
@@ -1037,11 +1084,18 @@ export class AutomodeCoordinator {
         sessionId: handle.sessionId,
         sessionFile: handle.sessionFile,
         workspace: preparedWorkspace,
+        ...this.sessionTiming(itemKey(item), handle.sessionId),
       });
 
       const terminal = await handle.completion;
+      const endedAt = this.clock.now().toISOString();
+      const timing = this.sessionTimings.get(itemKey(item));
+      if (timing?.sessionId === handle.sessionId) {
+        this.sessionTimings.set(itemKey(item), { ...timing, endedAt });
+        this.refreshProjection();
+      }
       this.emitActivity(item, choice, attempt, handle, "terminal", {
-        occurredAt: this.clock.now().toISOString(),
+        occurredAt: endedAt,
         kind: terminal.status === "error" ? "error" : "terminal",
         message: terminal.error ?? terminal.summary ?? `Ticket Session settled with ${terminal.status}.`,
       });
@@ -1072,6 +1126,7 @@ export class AutomodeCoordinator {
             sessionId: handle.sessionId,
             sessionFile: handle.sessionFile,
             workspace: preparedWorkspace,
+            ...this.sessionTiming(itemKey(fresh), handle.sessionId),
             diagnostic: terminal.summary,
           });
           return;
@@ -1089,6 +1144,7 @@ export class AutomodeCoordinator {
           sessionId: handle.sessionId,
           sessionFile: handle.sessionFile,
           workspace: preparedWorkspace,
+          ...this.sessionTiming(itemKey(fresh), handle.sessionId),
           diagnostic: terminal.summary,
         };
         this.awaitingFeedback.set(itemKey(fresh), waiting);
@@ -1121,6 +1177,7 @@ export class AutomodeCoordinator {
           sessionId: handle.sessionId,
           sessionFile: handle.sessionFile,
           workspace: preparedWorkspace,
+          ...this.sessionTiming(itemKey(fresh), handle.sessionId),
           diagnostic: cleanupDiagnostic,
         });
         return;
@@ -1143,6 +1200,7 @@ export class AutomodeCoordinator {
           sessionId: handle.sessionId,
           sessionFile: handle.sessionFile,
           workspace: preparedWorkspace,
+          ...this.sessionTiming(itemKey(item), handle.sessionId),
           diagnostic: terminal.status === "error"
             ? terminal.error ?? "Ticket Session failed without diagnostics"
             : `Fresh tracker state remains eligible for ${choice.stage}`,
@@ -1174,6 +1232,7 @@ export class AutomodeCoordinator {
           sessionFile: handle.sessionFile,
           diagnostic,
           workspace: preparedWorkspace,
+          ...this.sessionTiming(itemKey(item), handle.sessionId),
         };
         this.exhausted.set(itemKey(item), record);
         await this.options.tracker.upsertBookkeeping(record);

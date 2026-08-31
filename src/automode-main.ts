@@ -5,7 +5,11 @@ import type { Model } from "@earendil-works/pi-ai";
 import { InteractiveMode, type InlineExtension } from "@earendil-works/pi-coding-agent";
 import { createCapabilitySession, type ProjectResourceAllowlist } from "./capability-session.js";
 import { parsePiExecutionProfile, type PiExecutionProfile } from "./capability-profile.js";
-import { AutomodeCoordinator, type CoordinatorClock } from "./coordinator.js";
+import {
+  AutomodeCoordinator,
+  processCoordinatorClock,
+  type CoordinatorClock,
+} from "./coordinator.js";
 import { acquireRepositoryCoordinator } from "./coordinator-lock.js";
 import {
   AUTOMODE_DASHBOARD_LOCAL_URL,
@@ -238,6 +242,7 @@ export async function startAutomodeMainSession(
     options.configurationConfirmation,
   );
   const operatingState = restoreAutomationStageOperatingState(configuration);
+  const automodeStartedAt = (options.coordinatorClock ?? processCoordinatorClock).now().toISOString();
   const validated = await validateAutomodeStartup({
     repository: options.repository,
     home: options.home,
@@ -286,6 +291,7 @@ export async function startAutomodeMainSession(
       id: lease.coordinatorId,
       mode: configuration.mode,
       lifecycle: "loading",
+      startedAt: automodeStartedAt,
     },
   }, coordinator.getProjection());
   const statusCard = createAutomodeStatusCard({
@@ -348,6 +354,7 @@ export async function startAutomodeMainSession(
         id: lease.coordinatorId,
         mode: configuration.mode,
         lifecycle: runLifecycle,
+        startedAt: automodeStartedAt,
       },
     }, coordinatorProjection);
     return dashboardStatus.exposureError === undefined

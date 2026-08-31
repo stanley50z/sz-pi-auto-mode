@@ -551,6 +551,7 @@ test("bookkeeping creates one marked comment, updates it in place, and does not 
     materialVersion: "external-a",
     sessionId: "session-9",
     sessionFile: "C:/sessions/session-9.jsonl",
+    startedAt: "2026-01-01T00:01:00.000Z",
     workspace: {
       branch: "automode/issue-9",
       worktree: "C:/repository/.worktree/issue-9",
@@ -562,6 +563,7 @@ test("bookkeeping creates one marked comment, updates it in place, and does not 
     attempt: 2,
     lifecycle: "retrying",
     materialVersion: "external-b",
+    endedAt: "2026-01-01T00:02:00.000Z",
     diagnostic: "Ticket Session child exited without a terminal result",
   };
 

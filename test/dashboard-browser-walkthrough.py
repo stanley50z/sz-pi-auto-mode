@@ -307,6 +307,23 @@ try:
     wait_until(lambda: "standards cross-check started" in body_text(), "live Ticket Session activity")
     if "Lifecycle\nACTIVE" not in body_text():
         raise AssertionError("Missing representative active lifecycle")
+    run_elapsed_before = js("""[...document.querySelectorAll('.run-panel .metric')]
+      .find((metric) => metric.innerText.startsWith('Elapsed'))?.innerText""")
+    card_elapsed_before = js("document.querySelector('.card-elapsed')?.innerText")
+    settled_elapsed_before = js("""[...document.querySelectorAll('.card')]
+      .find((card) => card.innerText.includes('EXHAUSTED'))?.querySelector('.card-elapsed')?.innerText""")
+    wait(1.1)
+    run_elapsed_after = js("""[...document.querySelectorAll('.run-panel .metric')]
+      .find((metric) => metric.innerText.startsWith('Elapsed'))?.innerText""")
+    card_elapsed_after = js("document.querySelector('.card-elapsed')?.innerText")
+    settled_elapsed_after = js("""[...document.querySelectorAll('.card')]
+      .find((card) => card.innerText.includes('EXHAUSTED'))?.querySelector('.card-elapsed')?.innerText""")
+    if not run_elapsed_before or run_elapsed_before == run_elapsed_after:
+        raise AssertionError(f"Automode elapsed timer did not advance: {run_elapsed_before!r} -> {run_elapsed_after!r}")
+    if not card_elapsed_before or card_elapsed_before == card_elapsed_after:
+        raise AssertionError(f"Ticket Session elapsed timer did not advance: {card_elapsed_before!r} -> {card_elapsed_after!r}")
+    if not settled_elapsed_before or settled_elapsed_before != settled_elapsed_after:
+        raise AssertionError(f"Settled Ticket Session elapsed timer changed: {settled_elapsed_before!r} -> {settled_elapsed_after!r}")
 
     populated_synthetic_states = (
         ("active", ".card", "RUNNING"),
@@ -331,6 +348,10 @@ try:
     press_key("Enter")
     wait_until(lambda: has_accessible("dialog", "#50"), "read-only activity drawer")
     wait_until(lambda: "The implementation now passes the full suite." in body_text(), "drawer assistant activity")
+    wait_until(
+        lambda: js("Boolean(document.querySelector('.drawer-meta [data-elapsed-start]')?.textContent)"),
+        "drawer Ticket Session elapsed time",
+    )
     wait_until(lambda: "+ 3 tool calls" in body_text(), "drawer collapsed tool count")
     wait_until(lambda: js("document.querySelectorAll('.tool-launch').length") >= 2, "visible panel and subagent tool launches")
     wait_until(lambda: js("document.querySelectorAll('[data-child-key]').length") == 3, "panel and native subagent sessions")

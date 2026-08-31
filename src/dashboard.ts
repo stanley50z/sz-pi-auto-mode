@@ -453,6 +453,7 @@ class HttpCoordinatorDashboard implements CoordinatorDashboard {
         network: this.status,
         activities: this.retainedActivities(),
         activitiesTruncated: this.activityRetentionTruncated,
+        serverTime: new Date().toISOString(),
       });
       return;
     }
@@ -464,6 +465,7 @@ class HttpCoordinatorDashboard implements CoordinatorDashboard {
         activities: this.retainedActivities(),
         activitiesTruncated: this.activityRetentionTruncated,
         csrfToken: this.csrfToken,
+        serverTime: new Date().toISOString(),
       });
       return;
     }
@@ -556,6 +558,7 @@ class HttpCoordinatorDashboard implements CoordinatorDashboard {
       network: this.status,
       activities: this.retainedActivities(),
       activitiesTruncated: this.activityRetentionTruncated,
+      serverTime: new Date().toISOString(),
     });
   }
 
