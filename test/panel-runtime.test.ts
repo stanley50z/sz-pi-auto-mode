@@ -35,6 +35,20 @@ function usableGrillingAnswer(proposedAnswer: string) {
   };
 }
 
+function reviewResult(markdown: string) {
+  return {
+    markdown,
+    usage: {
+      input: 1_000,
+      output: 100,
+      cacheRead: 800,
+      cacheWrite: 0,
+      totalTokens: 1_900,
+      cost: { input: 0.01, output: 0.02, cacheRead: 0.001, cacheWrite: 0, total: 0.031 },
+    },
+  };
+}
+
 test("panel attribution supports any positive configured seat count", () => {
   assert.deepEqual(createPanelSeats([{
     harness: "pi",
@@ -243,11 +257,19 @@ test("review launches every configured seat concurrently on one immutable exact-
   assert.match(launches[0]!.prompt, /Markdown review/);
   assert.doesNotMatch(launches[0]!.prompt, /Return JSON|no-actionable-findings|rootCause/);
 
-  completions.forEach((complete, index) => complete(
-    index === 0
+  completions.forEach((complete, index) => complete({
+    markdown: index === 0
       ? "No actionable findings."
       : `**[P1] Fix the parser**\n\n\`src/parser.ts:42\` accepts incomplete input.`,
-  ));
+    usage: {
+      input: 1_000 + index,
+      output: 100 + index,
+      cacheRead: 800 + index,
+      cacheWrite: 0,
+      totalTokens: 1_900 + (index * 3),
+      cost: { input: 0.01, output: 0.02, cacheRead: 0.001, cacheWrite: 0, total: 0.031 },
+    },
+  }));
   const result = await running;
   assert.deepEqual(result.reports, panelSeats.map((seat, index) => ({
     round: 1,
@@ -256,6 +278,15 @@ test("review launches every configured seat concurrently on one immutable exact-
     markdown: index === 0
       ? "No actionable findings."
       : "**[P1] Fix the parser**\n\n`src/parser.ts:42` accepts incomplete input.",
+    usage: {
+      input: 1_000 + index,
+      output: 100 + index,
+      cacheRead: 800 + index,
+      cacheWrite: 0,
+      totalTokens: 1_900 + (index * 3),
+      cost: { input: 0.01, output: 0.02, cacheRead: 0.001, cacheWrite: 0, total: 0.031 },
+    },
+    usageSummary: `Input: ${(1_800 + (index * 2)).toLocaleString("en-US")} tokens; output: ${100 + index} tokens; cached input: ${800 + index} tokens; calculated cost: $0.0310.`,
   })));
   assert.deepEqual(result.failures, []);
 });
@@ -273,7 +304,7 @@ test("review streams each panel seat prompt and transcript activity", async () =
       message: "+ 3 tool calls",
       toolCount: 3,
     });
-    return "No actionable findings.";
+    return reviewResult("No actionable findings.");
   };
 
   await runReviewPanel({
@@ -345,7 +376,7 @@ test("review returns every completed report alongside failed-seat diagnostics", 
   const launcher: PanelSeatLauncher = async ({ attribution }) => {
     calls.push(attribution.seat);
     if (attribution.seat === "seat-2") throw new Error("provider connection closed");
-    return "**[P1] Fix the parser**\n\n`src/parser.ts:42` accepts incomplete input.";
+    return reviewResult("**[P1] Fix the parser**\n\n`src/parser.ts:42` accepts incomplete input.");
   };
 
   const result = await runReviewPanel({

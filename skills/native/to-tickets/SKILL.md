@@ -1,6 +1,6 @@
 ---
 name: to-tickets
-description: Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tracker — edges as text in one file per ticket locally, or native blocking links on a real tracker.
+description: Break a plan, spec, or the current conversation into tracer-bullet tickets with blocking edges, published to the configured tracker.
 disable-model-invocation: true
 ---
 
@@ -61,14 +61,21 @@ Iterate until the user approves the breakdown.
 
 ### 5. Publish the tickets to the configured tracker
 
-Publish the approved tickets. **How** depends on the tracker `/setup-matt-pocock-skills` configured — the tickets are the same either way, only the shape of the blocking edges changes:
+Publish the approved tickets. **How** depends on the tracker `/setup-matt-pocock-skills` configured. The tickets stay the same; only the blocking representation changes.
 
-- **Local files** → write one file per ticket under the local tracker's per-ticket path (see `docs/agents/issue-tracker.md`), numbered from `01` in dependency order (blockers first). Each file's "Blocked by" lists the numbers/titles it depends on. Use the per-ticket file template below — one ticket per file, never a single combined file.
-- **A real issue tracker (GitHub, Linear, …)** → publish one issue per ticket in dependency order (blockers first) so each ticket's blocking edges can reference real identifiers. Use the platform's native blocking / sub-issue relationship where it has one; otherwise set each ticket's "Blocked by" to the blocking issues. Apply the `ready-for-agent` triage label unless instructed otherwise — the tickets are agent-grabbable by construction.
+- **Local files**: write one file per ticket under the local tracker's per-ticket path (see `docs/agents/issue-tracker.md`), numbered from `01` in dependency order (blockers first). Each file's "Blocked by" lists the numbers/titles it depends on. Use the per-ticket file template below. Write one ticket per file.
+- **A real issue tracker (GitHub, Linear, and similar)**: publish in the staged sequence below. The graph must become visible before any ticket enters an automated implementation queue.
 
-Work the **frontier**: any ticket whose blockers are all done. For a purely linear chain that means top to bottom.
+For a real issue tracker:
 
-Do NOT close or modify any parent issue.
+1. Create every implementation ticket without `ready-for-agent` and without an assignee. Create blockers first so later ticket bodies can reference real identifiers.
+2. Wire the complete graph. Link each implementation ticket to the spec parent with the platform's native parent/sub-issue relationship. Add every native blocking dependency. Use "Blocked by" text only when the tracker has no native dependency feature.
+3. Read the graph back from the tracker. Verify that every ticket has the intended parent and blocker set. If any relationship is missing or wrong, leave every new ticket outside the implementation queue and report the mismatch.
+4. Apply `ready-for-agent` to the implementation tickets only after the graph passes verification. Apply any category labels required by the tracker at the same time.
+
+The spec parent remains the central reference and progress tracker. Preserve its body and open/closed state. Remove `ready-for-agent` from the spec parent if a legacy `/to-spec` run added it, and apply the configured non-executable spec label when available.
+
+Work the **frontier**: any implementation ticket whose blockers are all done. For a purely linear chain, that means top to bottom. Blocked implementation tickets may carry `ready-for-agent`; native dependencies keep them out of the live frontier.
 
 <local-ticket-template>
 

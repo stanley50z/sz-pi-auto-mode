@@ -16,7 +16,7 @@ The issue tracker and triage label vocabulary should have been provided to you â
 
 Check with the user that these seams match their expectations.
 
-3. Write the spec using the template below, then publish it to the project issue tracker. Apply the `ready-for-agent` triage label - no need for additional triage.
+3. Write the spec using the template below, then publish it according to the project issue tracker's spec convention. On a real tracker, use the spec issue as the parent and progress tracker for its later implementation tickets. The spec parent is not an implementation ticket. Give it the configured non-executable type label, such as `spec`, when one exists, and leave it without a triage state label. `ready-for-agent` is reserved for the implementation tickets produced by `/to-tickets`.
 
 <spec-template>
 

@@ -38,3 +38,42 @@ test("the controlled result tool records one explicit terminal status and reject
     /already reported/,
   );
 });
+
+test("a completed Review Session must hand off its final disposition for exact post-settlement usage", async () => {
+  let tool: ToolDefinition | undefined;
+  const pi = {
+    registerTool(definition: ToolDefinition) {
+      tool = definition;
+    },
+  } as unknown as ExtensionAPI;
+  const result = createTicketSessionResultExtension({ requireFinalDisposition: true });
+  if (typeof result.extension === "function") await result.extension(pi);
+  else await result.extension.factory(pi);
+
+  await assert.rejects(
+    () => tool!.execute(
+      "call-1",
+      { status: "complete", summary: "Merged." },
+      undefined,
+      undefined,
+      {} as never,
+    ),
+    /final disposition/,
+  );
+  await tool!.execute(
+    "call-2",
+    {
+      status: "complete",
+      summary: "Merged.",
+      finalDisposition: "## Automode final validation\n\nValidated and merged.",
+    },
+    undefined,
+    undefined,
+    {} as never,
+  );
+  assert.deepEqual(result.read(), {
+    status: "complete",
+    summary: "Merged.",
+    finalDisposition: "## Automode final validation\n\nValidated and merged.",
+  });
+});

@@ -532,6 +532,57 @@ test("the child reports persistent identity and structured activity around one c
   assert.equal(disposed, true);
 });
 
+test("a completed Review Session publishes its final disposition with post-settlement whole-session usage", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "ticket-review-usage-"));
+  const sessionFile = join(cwd, "session.jsonl");
+  const usage = {
+    input: 1_200,
+    output: 300,
+    cacheRead: 800,
+    cacheWrite: 50,
+    totalTokens: 2_350,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.45678 },
+  };
+  const published: unknown[] = [];
+  const session: TicketSessionChildSession = {
+    sessionId: "review-session",
+    sessionFile,
+    subscribe() { return () => {}; },
+    async prompt() {
+      return {
+        status: "clean",
+        summary: "Merged pull request #42.",
+        finalDisposition: "## Automode final validation\n\nValidated and merged.",
+        usage,
+      };
+    },
+    async abort() {},
+    dispose() {},
+  };
+
+  const result = await runTicketSessionChild({
+    cwd,
+    skillName: "code-review",
+    itemUrl: "https://github.com/owner/repository/pull/42",
+    prompt: "/skill:code-review https://github.com/owner/repository/pull/42",
+    configuration,
+  }, async () => session, () => {}, {
+    cwd,
+    reviewDispositionPublisher: {
+      async publish(itemUrl, disposition, totalUsage) {
+        published.push({ itemUrl, disposition, usage: totalUsage });
+      },
+    },
+  });
+
+  assert.deepEqual(published, [{
+    itemUrl: "https://github.com/owner/repository/pull/42",
+    disposition: "## Automode final validation\n\nValidated and merged.",
+    usage,
+  }]);
+  assert.equal(result.status, "clean");
+});
+
 test("native Pi events become an ultra-collapsed transcript", () => {
   assert.deepEqual(ticketSessionActivityFromAgentEvent({
     type: "message_end",

@@ -304,6 +304,7 @@ export interface AutomodeCoordinatorOptions {
 }
 
 const STATE_LABELS = new Set(["needs-triage", "needs-info", "ready-for-agent", "ready-for-human", "wontfix"]);
+const NON_EXECUTABLE_ISSUE_LABELS = new Set(["spec", "wayfinder:map"]);
 const MAX_ATTEMPTS = 5;
 const POLL_INTERVAL_MS = 30_000;
 
@@ -333,7 +334,9 @@ function isEligibleForChoice(
         && item.labels.includes("wayfinder:prototype");
     case "implement":
       return item.kind === "issue" && unassignedOrOurs && item.blockedBy === 0
-        && item.labels.includes("ready-for-agent") && item.outputPullRequest === undefined;
+        && item.labels.includes("ready-for-agent")
+        && !item.labels.some((label) => NON_EXECUTABLE_ISSUE_LABELS.has(label))
+        && item.outputPullRequest === undefined;
     case "code-review":
       return item.kind === "pull-request" && item.draft === false;
   }
@@ -349,6 +352,7 @@ function recognizedChoice(item: WorkflowItem): DispatchChoice | undefined {
   }
   if (
     item.kind === "issue"
+    && !item.labels.some((label) => NON_EXECUTABLE_ISSUE_LABELS.has(label))
     && (item.labels.includes("wayfinder:prototype") || item.labels.includes("ready-for-agent"))
   ) {
     return {

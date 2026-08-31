@@ -23,6 +23,18 @@ test("bundled triage guidance routes human judgment and action to ready-for-huma
   assert.match(triage, /needs human implementation, judgment, or action/);
 });
 
+test("bundled planning skills keep spec parents out of Auto-Implement", () => {
+  const toSpec = bundled("skills/native/to-spec/SKILL.md");
+  const toTickets = bundled("skills/native/to-tickets/SKILL.md");
+
+  assert.match(toSpec, /spec parent is not an implementation ticket/);
+  assert.doesNotMatch(toSpec, /Apply the `ready-for-agent` triage label/);
+  assert.match(toTickets, /Create every implementation ticket without `ready-for-agent`/);
+  assert.match(toTickets, /Wire the complete graph/);
+  assert.match(toTickets, /Read the graph back/);
+  assert.match(toTickets, /Apply `ready-for-agent`/);
+});
+
 test("the Agent Brief is one verification contract shared by every delivery stage", () => {
   const contract = bundled("skills/native/triage/AGENT-BRIEF.md");
   const nativeTriage = bundled("skills/native/triage/SKILL.md");
@@ -61,4 +73,8 @@ test("Auto-Review publishes commit-pinned GitHub reviews with inline findings", 
   assert.match(review, /`path`, `line`, `side: "RIGHT"`, and `body`/);
   assert.match(review, /Post every completed Reviewer report even when another seat failed/);
   assert.match(review, /round, head SHA, and seat/);
+  assert.match(review, /`usageSummary`/);
+  assert.match(review, /end of the review body/);
+  assert.match(review, /`finalDisposition`/);
+  assert.match(review, /after the full Review Session settles/);
 });

@@ -387,6 +387,34 @@ test("projects every recognized open Stage Candidate once using workflow precede
   await coordinator.whenStopped();
 });
 
+test("spec parents stay out of Auto-Implement even when mislabeled ready-for-agent", async () => {
+  const tracker = new FakeTracker([
+    issue({ number: 110, labels: ["enhancement", "spec", "ready-for-agent"], materialVersion: "110-a" }),
+  ]);
+  const sessions = new FakeTicketSessions(() => {
+    throw new Error("spec parents must not dispatch");
+  });
+  const coordinator = new AutomodeCoordinator({
+    configuration: createAutomationStageConfiguration("half", ["auto-implement"]),
+    actor: "automation-user",
+    tracker,
+    sessions,
+    workspaces: fakeWorkspaces,
+    clock: new ManualClock(),
+  });
+
+  await coordinator.start();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.equal(sessions.requests.length, 0);
+  assert.deepEqual(
+    coordinator.getProjection().lanes.find((lane) => lane.stage === "auto-implement")?.candidates,
+    [],
+  );
+  coordinator.interrupt();
+  await coordinator.whenStopped();
+});
+
 test("Stage Operating State drains active work, suppresses dispatch, and scans immediately when re-enabled", async () => {
   const first = issue({ number: 11, labels: ["ready-for-agent"], materialVersion: "11-a" });
   const tracker = new FakeTracker([first]);

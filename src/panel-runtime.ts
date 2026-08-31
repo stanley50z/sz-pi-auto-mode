@@ -1,9 +1,11 @@
+import type { Usage } from "@earendil-works/pi-ai";
 import type { ExecutionProfile } from "./capability-profile.js";
 import type {
   NestedSessionEvent,
   NestedSessionIdentity,
   NestedSessionTranscriptActivity,
 } from "./nested-session.js";
+import { formatUsageSummary, parseUsage } from "./usage.js";
 
 export interface PanelSeatAttribution {
   readonly seat: `seat-${number}`;
@@ -76,6 +78,7 @@ export interface PanelProcessResult {
   readonly signal: NodeJS.Signals | null;
   readonly stdout: string;
   readonly stderr: string;
+  readonly usage?: Usage;
 }
 
 export interface ProductionPanelProcessLauncher {
@@ -98,7 +101,8 @@ export function createProductionPanelSeatLauncher(
     if (request.kind === "review") {
       const report = result.stdout.trim();
       if (!report) throw new Error("Reviewer returned an empty report");
-      return report;
+      if (!result.usage) throw new Error("Reviewer process did not report token usage and calculated cost");
+      return deepFreeze({ markdown: report, usage: result.usage });
     }
     try {
       const output: unknown = JSON.parse(result.stdout.trim());
@@ -138,10 +142,17 @@ export interface ReviewPanelRequest {
   readonly context: ReviewRoundContext;
 }
 
+export interface ReviewSeatResult {
+  readonly markdown: string;
+  readonly usage: Usage;
+}
+
 export interface AttributedReviewReport extends PanelSeatAttribution {
   readonly round: number;
   readonly headSha: string;
   readonly markdown: string;
+  readonly usage: Usage;
+  readonly usageSummary: string;
 }
 
 export interface ReviewPanelResult {
@@ -397,11 +408,16 @@ function reviewPrompt(context: ReviewRoundContext): string {
   ].join("\n\n");
 }
 
-function reviewMarkdown(value: unknown): string {
-  if (typeof value !== "string" || value.trim().length === 0) {
+function reviewSeatResult(value: unknown): ReviewSeatResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Reviewer result must contain Markdown and usage");
+  }
+  const result = value as Partial<ReviewSeatResult>;
+  if (typeof result.markdown !== "string" || result.markdown.trim().length === 0) {
     throw new Error("Reviewer report must contain Markdown text");
   }
-  return value.trim();
+  const usage = parseUsage(result.usage, "Reviewer result");
+  return deepFreeze({ markdown: result.markdown.trim(), usage });
 }
 
 export async function runReviewPanel(
@@ -438,11 +454,13 @@ export async function runReviewPanel(
       return;
     }
     try {
+      const review = reviewSeatResult(result.value);
       reports.push(deepFreeze({
         round: context.round,
         headSha: context.headSha,
         ...seat,
-        markdown: reviewMarkdown(result.value),
+        ...review,
+        usageSummary: formatUsageSummary(review.usage),
       }));
       onActivity?.({ ...identities[index]!, type: "settled", status: "completed" });
     } catch (error) {

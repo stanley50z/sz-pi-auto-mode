@@ -11,6 +11,7 @@ import {
   type PanelSeatLauncher,
   type ReviewRoundContext,
 } from "./panel-runtime.js";
+import { addUsage, emptyUsage } from "./usage.js";
 
 export interface TicketPanelNestedActivity {
   readonly toolName: "automode_panel";
@@ -41,12 +42,32 @@ export function createTicketPanelExtension(
             nestedSessions.push(child);
             onNestedActivity?.({ toolName: "automode_panel", toolCallId, child });
           };
-          const result = params.kind === "grilling"
-            ? await runGrillingPanel({ context: params.context as GrillingRoundContext }, launcher, seats, emit)
-            : await runReviewPanel({ context: params.context as ReviewRoundContext }, launcher, seats, emit);
+          if (params.kind === "grilling") {
+            const result = await runGrillingPanel(
+              { context: params.context as GrillingRoundContext },
+              launcher,
+              seats,
+              emit,
+            );
+            return {
+              content: [{ type: "text", text: JSON.stringify(result) }],
+              details: { ...result, nestedSessions } as unknown,
+            };
+          }
+          const result = await runReviewPanel(
+            { context: params.context as ReviewRoundContext },
+            launcher,
+            seats,
+            emit,
+          );
+          const usage = result.reports.reduce(
+            (total, report) => addUsage(total, report.usage),
+            emptyUsage(),
+          );
           return {
             content: [{ type: "text", text: JSON.stringify(result) }],
-            details: { ...result, nestedSessions },
+            details: { ...result, nestedSessions } as unknown,
+            usage,
           };
         },
       });

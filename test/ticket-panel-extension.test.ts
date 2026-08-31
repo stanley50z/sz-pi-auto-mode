@@ -17,6 +17,20 @@ function answer() {
   };
 }
 
+function reviewResult(markdown: string) {
+  return {
+    markdown,
+    usage: {
+      input: 1_000,
+      output: 100,
+      cacheRead: 800,
+      cacheWrite: 0,
+      totalTokens: 1_900,
+      cost: { input: 0.01, output: 0.02, cacheRead: 0.001, cacheWrite: 0, total: 0.031 },
+    },
+  };
+}
+
 test("the controlled panel tool returns a result from every configured grilling seat", async () => {
   const launcher: PanelSeatLauncher = async () => answer();
   let tool: ToolDefinition | undefined;
@@ -48,7 +62,7 @@ test("the controlled panel tool streams attributed nested-session activity", asy
   const nested: unknown[] = [];
   const launcher: PanelSeatLauncher = async (request) => {
     request.onActivity?.({ kind: "thinking", message: "Inspecting the diff" });
-    return "No actionable findings.";
+    return reviewResult("No actionable findings.");
   };
   let tool: ToolDefinition | undefined;
   const pi = { registerTool(value: ToolDefinition) { tool = value; } } as unknown as ExtensionAPI;
@@ -85,7 +99,7 @@ test("the controlled panel tool streams attributed nested-session activity", asy
 test("the controlled panel tool returns completed reviews with failed-seat diagnostics", async () => {
   const launcher: PanelSeatLauncher = async ({ attribution }) => {
     if (attribution.seat === "seat-2") throw new Error("provider unavailable");
-    return "**[P1] Validate the path**\n\n`src/app.ts:42` accepts traversal.";
+    return reviewResult("**[P1] Validate the path**\n\n`src/app.ts:42` accepts traversal.");
   };
   let tool: ToolDefinition | undefined;
   const pi = { registerTool(value: ToolDefinition) { tool = value; } } as unknown as ExtensionAPI;
@@ -127,4 +141,12 @@ test("the controlled panel tool returns completed reviews with failed-seat diagn
     "seat-2",
     "provider unavailable",
   ]]);
+  assert.deepEqual(result.usage, {
+    input: 1_000,
+    output: 100,
+    cacheRead: 800,
+    cacheWrite: 0,
+    totalTokens: 1_900,
+    cost: { input: 0.01, output: 0.02, cacheRead: 0.001, cacheWrite: 0, total: 0.031 },
+  });
 });

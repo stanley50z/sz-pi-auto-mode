@@ -1,6 +1,7 @@
 import { mkdirSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { Usage } from "@earendil-works/pi-ai";
 import {
   createAgentSessionFromServices,
   SessionManager,
@@ -15,6 +16,10 @@ import { nestedSessionEventMessage, type NestedSessionEvent } from "./nested-ses
 import { CliPanelProcessLauncher } from "./panel-process.js";
 import { createProductionPanelSeatLauncher } from "./panel-runtime.js";
 import { repositoryRoot, resolveAutomodePaths } from "./paths.js";
+import {
+  GitHubReviewDispositionPublisher,
+  type ReviewDispositionPublisher,
+} from "./review-disposition.js";
 import { createTicketPanelExtension } from "./ticket-panel-extension.js";
 import { createTicketSessionResultExtension } from "./ticket-session-result.js";
 import {
@@ -29,6 +34,7 @@ import {
 } from "./ticket-session.js";
 import { createAutomationStageConfiguration } from "./stage-configuration.js";
 import { createAssistantTranscript } from "./ticket-transcript.js";
+import { usageFromSessionStats } from "./usage.js";
 
 export type TicketSessionChildActivity =
   | { activity: string; kind: "assistant" | "thinking"; toolCount?: number }
@@ -47,6 +53,8 @@ export type TicketSessionChildActivity =
 export interface TicketSessionChildPromptResult {
   readonly status: Exclude<TicketSessionTerminalStatus, "error">;
   readonly summary: string;
+  readonly finalDisposition?: string;
+  readonly usage?: Usage;
 }
 
 export interface TicketSessionChildSession {
@@ -75,6 +83,7 @@ export type TicketSessionChildEvent = TicketSessionLifecycleEvent | TicketSessio
 export interface TicketSessionChildRuntime {
   cwd?: string;
   signal?: AbortSignal;
+  reviewDispositionPublisher?: ReviewDispositionPublisher;
 }
 
 function errorText(error: unknown): string {
@@ -168,6 +177,14 @@ export async function runTicketSessionChild(
     ) {
       throw new Error("Controlled Ticket Session returned an invalid terminal result");
     }
+    if (request.skillName === "code-review" && outcome.status === "clean") {
+      if (!outcome.finalDisposition?.trim() || !outcome.usage) {
+        throw new Error("Completed Review Session did not provide its final disposition and whole-session usage");
+      }
+      const publisher = runtime.reviewDispositionPublisher
+        ?? new GitHubReviewDispositionPublisher({ cwd: actualCwd });
+      await publisher.publish(request.itemUrl, outcome.finalDisposition, outcome.usage);
+    }
     return {
       status: outcome.status,
       sessionId: session.sessionId,
@@ -220,7 +237,9 @@ export const createControlledTicketSession: TicketSessionChildSessionFactory = a
   const paths = resolveAutomodePaths(cwd, request.home, request.normalAgentDir);
   mkdirSync(paths.automodeDir, { recursive: true });
   mkdirSync(paths.sessionDir, { recursive: true });
-  const resultReporter = createTicketSessionResultExtension();
+  const resultReporter = createTicketSessionResultExtension({
+    requireFinalDisposition: request.skillName === "code-review",
+  });
   const nestedActivityListeners = new Set<(activity: TicketSessionChildActivity) => void>();
   const extensions = [resultReporter.extension];
   const tools = [...profile.tools, "automode_ticket_result"];
@@ -349,6 +368,12 @@ export const createControlledTicketSession: TicketSessionChildSessionFactory = a
         return {
           status: reported.status === "waiting" ? "waiting" : "clean",
           summary: reported.summary,
+          ...(reported.finalDisposition === undefined
+            ? {}
+            : {
+                finalDisposition: reported.finalDisposition,
+                usage: usageFromSessionStats(result.session.getSessionStats()),
+              }),
         };
       },
       abort: () => result.session.abort(),

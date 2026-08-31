@@ -6,6 +6,7 @@ import type {
   ProductionPanelProcessLauncher,
 } from "./panel-runtime.js";
 import { createAssistantTranscript } from "./ticket-transcript.js";
+import { addUsage, emptyUsage, parseUsage } from "./usage.js";
 
 const MAX_PANEL_OUTPUT_BYTES = 10 * 1024 * 1024;
 const ALLOWED_PI_TOOLS = new Set(["read", "grep", "find", "ls"]);
@@ -81,8 +82,10 @@ function parseStructuredText(text: string, context: string): string {
   return JSON.stringify(value);
 }
 
-function normalizePiOutput(output: string, structured: boolean): string {
+function normalizePiOutput(output: string, structured: boolean): { stdout: string; usage: ReturnType<typeof emptyUsage> } {
   let finalText: string | undefined;
+  let usage = emptyUsage();
+  let assistantMessages = 0;
   for (const line of output.split("\n")) {
     if (line.trim().length === 0) continue;
     let event: unknown;
@@ -94,8 +97,10 @@ function normalizePiOutput(output: string, structured: boolean): string {
     if (!event || typeof event !== "object" || Array.isArray(event)) continue;
     const record = event as { type?: unknown; message?: unknown };
     if (record.type !== "message_end" || !record.message || typeof record.message !== "object") continue;
-    const message = record.message as { role?: unknown; content?: unknown };
+    const message = record.message as { role?: unknown; content?: unknown; usage?: unknown };
     if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
+    assistantMessages += 1;
+    usage = addUsage(usage, parseUsage(message.usage, "Pi Panel seat assistant message"));
     const text = message.content
       .filter((part): part is { type: "text"; text: string } => (
         !!part && typeof part === "object" && (part as { type?: unknown }).type === "text"
@@ -105,11 +110,19 @@ function normalizePiOutput(output: string, structured: boolean): string {
       .join("");
     if (text.length > 0) finalText = text;
   }
-  if (finalText === undefined) throw new Error("Pi Panel seat did not emit a final assistant answer");
-  return structured ? parseStructuredText(finalText, "Pi Panel seat") : finalText;
+  if (assistantMessages === 0 || finalText === undefined) {
+    throw new Error("Pi Panel seat did not emit a final assistant answer");
+  }
+  return {
+    stdout: structured ? parseStructuredText(finalText, "Pi Panel seat") : finalText,
+    usage,
+  };
 }
 
-function normalizeClaudeOutput(output: string, structured: boolean): string {
+function normalizeClaudeOutput(
+  output: string,
+  structured: boolean,
+): { stdout: string; usage?: ReturnType<typeof emptyUsage> } {
   let envelope: unknown;
   try {
     envelope = JSON.parse(output.trim()) as unknown;
@@ -119,10 +132,38 @@ function normalizeClaudeOutput(output: string, structured: boolean): string {
   const records = Array.isArray(envelope) ? envelope : [envelope];
   const result = [...records].reverse().find((entry) => (
     !!entry && typeof entry === "object" && typeof (entry as { result?: unknown }).result === "string"
-  )) as { result: string; is_error?: unknown } | undefined;
-  if (!result) throw new Error("Claude Code Panel seat did not emit a final assistant answer");
+  )) as Record<string, unknown> | undefined;
+  if (!result || typeof result.result !== "string") {
+    throw new Error("Claude Code Panel seat did not emit a final assistant answer");
+  }
   if (result.is_error === true) throw new Error("Claude Code Panel seat reported an error");
-  return structured ? parseStructuredText(result.result, "Claude Code Panel seat") : result.result;
+  let usage: ReturnType<typeof emptyUsage> | undefined;
+  if (result.usage && typeof result.usage === "object" && !Array.isArray(result.usage)) {
+    const raw = result.usage as Record<string, unknown>;
+    const number = (value: unknown, field: string): number => {
+      if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+        throw new Error(`Claude Code Panel seat ${field} must be a non-negative number`);
+      }
+      return value;
+    };
+    const input = number(raw.input_tokens, "input_tokens");
+    const outputTokens = number(raw.output_tokens, "output_tokens");
+    const cacheRead = number(raw.cache_read_input_tokens ?? 0, "cache_read_input_tokens");
+    const cacheWrite = number(raw.cache_creation_input_tokens ?? 0, "cache_creation_input_tokens");
+    const totalCost = number(result.total_cost_usd, "total_cost_usd");
+    usage = {
+      input,
+      output: outputTokens,
+      cacheRead,
+      cacheWrite,
+      totalTokens: input + outputTokens + cacheRead + cacheWrite,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: totalCost },
+    };
+  }
+  return {
+    stdout: structured ? parseStructuredText(result.result, "Claude Code Panel seat") : result.result,
+    ...(usage === undefined ? {} : { usage }),
+  };
 }
 
 function createPiActivityStream(request: PanelSeatLaunchRequest): {
@@ -214,7 +255,7 @@ export class CliPanelProcessLauncher implements ProductionPanelProcessLauncher {
       ], this.#cwd, this.#env, (chunk) => activityStream.push(chunk));
       activityStream.finish();
       if (result.exitCode !== 0 || result.signal !== null) return result;
-      return { ...result, stdout: normalizePiOutput(result.stdout, request.kind === "grilling") };
+      return { ...result, ...normalizePiOutput(result.stdout, request.kind === "grilling") };
     }
 
     const claudeTools = [...new Set(request.tools.map((tool) => {
@@ -234,12 +275,17 @@ export class CliPanelProcessLauncher implements ProductionPanelProcessLauncher {
     ], this.#cwd, this.#env);
     if (result.exitCode !== 0 || result.signal !== null) return result;
     const normalized = normalizeClaudeOutput(result.stdout, request.kind === "grilling");
+    if (request.kind === "review" && !normalized.usage) {
+      throw new Error("Claude Code Panel seat did not report token usage and calculated cost");
+    }
     if (request.onActivity) {
       request.onActivity({
         kind: "assistant",
-        message: normalized.length > 2_000 ? `${normalized.slice(0, 2_000)}… [truncated]` : normalized,
+        message: normalized.stdout.length > 2_000
+          ? `${normalized.stdout.slice(0, 2_000)}… [truncated]`
+          : normalized.stdout,
       });
     }
-    return { ...result, stdout: normalized };
+    return { ...result, ...normalized };
   }
 }
