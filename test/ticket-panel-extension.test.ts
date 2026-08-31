@@ -44,6 +44,44 @@ test("the controlled panel tool returns a result from every configured grilling 
   assert.equal((result.details as { answers: unknown[] }).answers.length, 1);
 });
 
+test("the controlled panel tool streams attributed nested-session activity", async () => {
+  const nested: unknown[] = [];
+  const launcher: PanelSeatLauncher = async (request) => {
+    request.onActivity?.({ kind: "thinking", message: "Inspecting the diff" });
+    return "No actionable findings.";
+  };
+  let tool: ToolDefinition | undefined;
+  const pi = { registerTool(value: ToolDefinition) { tool = value; } } as unknown as ExtensionAPI;
+  const extension = createTicketPanelExtension(launcher, [{
+    harness: "pi",
+    provider: "openai-codex",
+    model: "gpt-5.6-sol",
+    reasoning: "high",
+  }], (activity) => nested.push(activity));
+  if (typeof extension === "function") await extension(pi);
+  else await extension.factory(pi);
+
+  await tool!.execute("panel-call-1", {
+    kind: "review",
+    context: {
+      round: 1,
+      headSha: "abcdef1234567890",
+      brief: "Review the exact diff.",
+    },
+  }, undefined, undefined, {} as never);
+
+  assert.equal(nested.length, 3);
+  assert.deepEqual(nested.map((entry) => ({
+    toolCallId: (entry as { toolCallId: string }).toolCallId,
+    toolName: (entry as { toolName: string }).toolName,
+    type: (entry as { child: { type: string } }).child.type,
+  })), [
+    { toolCallId: "panel-call-1", toolName: "automode_panel", type: "started" },
+    { toolCallId: "panel-call-1", toolName: "automode_panel", type: "activity" },
+    { toolCallId: "panel-call-1", toolName: "automode_panel", type: "settled" },
+  ]);
+});
+
 test("the controlled panel tool returns completed reviews with failed-seat diagnostics", async () => {
   const launcher: PanelSeatLauncher = async ({ attribution }) => {
     if (attribution.seat === "seat-2") throw new Error("provider unavailable");

@@ -6,8 +6,8 @@ tags: [automode, dashboard, coordinator, stage-lanes, supervision]
 openwiki:
   roles: [architecture, workflow, operations, testing]
   change_kinds: [public-api, lifecycle, security]
-  source_paths: [src/dashboard.ts, src/dashboard-ui.ts, src/automode-main.ts, src/main-status-card.ts, src/coordinator.ts, src/ticket-session-main.ts, src/ticket-session.ts, src/ticket-session-prompt.ts, src/ticket-transcript.ts]
-  symbols: [CoordinatorDashboard, DashboardProjection, DashboardCommand, HttpCoordinatorDashboard, createDashboardProjection, createCanonicalTicketSessionPrompt, createAssistantTranscript, createAutomodeStatusCard]
+  source_paths: [src/dashboard.ts, src/dashboard-ui.ts, src/automode-main.ts, src/main-status-card.ts, src/coordinator.ts, src/ticket-session-main.ts, src/ticket-session.ts, src/ticket-session-prompt.ts, src/ticket-transcript.ts, src/nested-session.ts]
+  symbols: [CoordinatorDashboard, DashboardProjection, DashboardCommand, HttpCoordinatorDashboard, createDashboardProjection, createCanonicalTicketSessionPrompt, createAssistantTranscript, createAutomodeStatusCard, NestedSessionEvent]
   test_paths: [test/dashboard.test.ts, test/dashboard-ui.test.ts, test/coordinator.test.ts, test/main-session.test.ts, test/main-status-card.test.ts, test/ticket-session.test.ts]
   invariants: [The dashboard prefers loopback port 41738 and falls back to an operating-system-selected free loopback port., Tailscale exposure is optional and failures leave localhost access available., Only the exact owned Tailscale handler is removed., Waiting summaries remain visible in candidate reasons and latest structured activity., Browser mutations require an allowed host same-origin checks CSRF and revision matching., Dashboard commands delegate to the Coordinator and never perform ticket work.]
   validation_commands: [npm run build, "node --test dist/test/dashboard.test.js dist/test/dashboard-ui.test.js dist/test/main-status-card.test.js dist/test/ticket-session.test.js"]
@@ -29,16 +29,20 @@ sequenceDiagram
   participant D as Dashboard server
   participant C as Coordinator
   participant T as Ticket Session
+  participant P as Panel seat
   M->>D: start initial projection
   M->>C: start discovery
   C-->>M: projection and activity events
   M->>D: publish projection or append activity
+  T->>P: controlled advisory request
+  P-->>T: nested prompt/activity/lifecycle events
+  T-->>C: bounded structured activity
   D-->>M: refresh drain or stage command
   M->>C: delegate typed command
-  T-->>C: bounded structured activity
+  D-->>operator: read-only parent and child inspector
 ```
 
-*The Main Session bridges Coordinator state to the browser while commands remain Coordinator-owned.*
+*The Main Session bridges Coordinator state to the browser while commands remain Coordinator-owned; nested Panel activity is observed through the Ticket Session.*
 
 ## Network and browser contract
 
@@ -54,7 +58,7 @@ Requests are constrained by an allowlist of loopback and validated private tailn
 
 ## Activity and lifecycle boundaries
 
-`ticket-session-main.ts` converts completed native Pi assistant messages into bounded structured activity: assistant text and thinking summaries are retained, while tool calls are represented only by aggregate counts. The `message_end` projection deliberately ignores lifecycle, streaming, and tool-execution events, so the browser never receives tool names, arguments, commands, or result bodies. Persisted Pi history is reconstructed through the same `createAssistantTranscript` seam in `src/ticket-transcript.ts`, keeping retry/recovery views consistent with live activity. The dashboard renders these rows as a read-only Pi-like transcript; attempts retain explicit message, byte, per-item, and total limits and mark truncation instead of allowing unbounded browser state. The activity drawer also displays the canonical initial `/skill:<name> <item-url>` prompt for an existing Ticket Session, so operators can compare the requested skill/item identity with later activity without exposing hidden tool payloads. Waiting summaries update both the candidate's activity text and its latest structured activity entry. Recent candidates and activity are process-local and disappear when the Coordinator process exits. Ticket Session conversation history remains in native Pi session storage and is not imported into the Main Session. The activity drawer can close via its close control, Escape, or the dimmed backdrop and restores focus to the selected Stage Candidate.
+`ticket-session-main.ts` converts completed native Pi assistant messages into bounded structured activity: assistant text and thinking summaries are retained, ordinary tools are represented only by aggregate counts, and `automode_panel` plus native `subagent_*` launches remain visible. The `message_end` projection deliberately ignores lifecycle, streaming, and ordinary tool-execution details, so the browser never receives ordinary tool names, arguments, commands, or result bodies. Panel seats and native subagent launches emit a read-only nested-session stream with bounded prompt/identity, profile or pinned review head when available, lifecycle, assistant/thinking activity, and aggregate tool counts; this observation path does not grant Automode native subagent capabilities. Persisted Pi history is reconstructed through the same `createAssistantTranscript` seam in `src/ticket-transcript.ts`, keeping retry/recovery views consistent with live activity. The dashboard renders these rows as a read-only Pi-like transcript; attempts retain explicit message, byte, per-item, and total limits and mark truncation instead of allowing unbounded browser state. The activity drawer also displays the canonical initial `/skill:<name> <item-url>` prompt for an existing Ticket Session, so operators can compare the requested skill/item identity with later activity without exposing hidden tool payloads. Waiting summaries update both the candidate's activity text and its latest structured activity entry. Recent candidates and activity are process-local and disappear when the Coordinator process exits. Ticket Session conversation history remains in native Pi session storage and is not imported into the Main Session. The activity drawer can close via its close control, Escape, or the dimmed backdrop and restores focus to the selected Stage Candidate.
 
 The dashboard starts before discovery, follows Coordinator lifecycle, and stops during final disposal. A port collision therefore fails startup before tracker reconciliation, snapshots, claims, or other workflow mutations. The Main Session's async disposal waits for Coordinator stop, then stops the dashboard and releases the repository lock; this ordering prevents a live Coordinator from outliving its supervision surface. Browser drain and `/drain` request only graceful drain; `/exit` is terminal-only and force-stops active Ticket Sessions before cleanup and exit. Automode does not intercept `Ctrl-C`, so Pi retains its default TUI behavior. During drain, enabled lanes transition to `DRAINING` when they have active work or directly to `OFF` when idle; re-enabling is a Coordinator operation that triggers a fresh scan.
 
@@ -65,7 +69,7 @@ The dashboard starts before discovery, follows Coordinator lifecycle, and stops 
 - Startup wiring, status-card publication, command delegation, or async shutdown ordering: `src/automode-main.ts` and `src/main-status-card.ts`; pair with `test/main-session.test.ts` and `test/main-status-card.test.ts`.
 - Main Session TUI rendering or terminal interrupt behavior: `src/main-status-card.ts`; use `test/main-status-card.test.ts`.
 - Candidate precedence, lane state, totals, or Stage Operating State transitions: `src/coordinator.ts`; use the relevant suites in `test/coordinator.test.ts`.
-- Structured child-process activity and transcript projection: `src/ticket-session-main.ts`, `src/ticket-session.ts`, and `src/ticket-transcript.ts`; use `test/ticket-session.test.ts`.
+- Structured child-process activity and transcript projection: `src/ticket-session-main.ts`, `src/ticket-session.ts`, `src/ticket-transcript.ts`, and `src/nested-session.ts`; use `test/ticket-session.test.ts`. Preserve ordinary-tool aggregation while keeping `automode_panel` and native `subagent_*` launches visible in the read-only split inspector; the browser proof is `test/dashboard-browser-walkthrough.py`.
 
 Minimal dashboard validation is `npm run build && node --test dist/test/dashboard.test.js dist/test/dashboard-ui.test.js dist/test/main-status-card.test.js dist/test/ticket-session.test.js`. The black-box `/automode` acceptance in `test/dashboard.test.ts` additionally requires the configured Windows PTY/real-Pi environment; run it when changing launch wiring or the shipped browser boundary. Run the broader Coordinator or package suite only when changing cross-boundary lifecycle, projection contracts, or shipped extension registration. Do not add a scheduled OpenWiki CI workflow; repository documentation refresh remains local-only via [`operations.md`](../operations.md).
 

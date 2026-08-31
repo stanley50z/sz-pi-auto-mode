@@ -347,6 +347,12 @@ test("the Coordinator host exposes persisted Pi history and future structured ac
     JSON.stringify({ type: "message", id: "entry002", parentId: "entry001", timestamp: "2026-08-17T11:59:02.000Z", message: { role: "assistant", content: [{ type: "thinking", thinking: "**Reading the repository**" }, { type: "toolCall", id: "read-1", name: "read", arguments: { path: "CONTEXT.md" } }], timestamp: 2 } }),
     JSON.stringify({ type: "message", id: "entry003", parentId: "entry002", timestamp: "2026-08-17T11:59:03.000Z", message: { role: "user", content: "/skill:implement https://github.com/owner/repository/issues/45", timestamp: 3 } }),
     JSON.stringify({ type: "message", id: "entry004", parentId: "entry003", timestamp: "2026-08-17T11:59:04.000Z", message: { role: "assistant", content: [{ type: "text", text: "Resuming the retry." }, { type: "toolCall", id: "read-2", name: "read", arguments: { path: "src/app.ts" } }, { type: "toolCall", id: "bash-1", name: "bash", arguments: { command: "npm test" } }], timestamp: 4 } }),
+    JSON.stringify({ type: "message", id: "entry005", parentId: "entry004", timestamp: "2026-08-17T11:59:05.000Z", message: { role: "assistant", content: [{ type: "toolCall", id: "panel-1", name: "automode_panel", arguments: { kind: "review", context: { round: 1 } } }], timestamp: 5 } }),
+    JSON.stringify({ type: "message", id: "entry006", parentId: "entry005", timestamp: "2026-08-17T11:59:06.000Z", message: { role: "toolResult", toolCallId: "panel-1", toolName: "automode_panel", content: [{ type: "text", text: "completed" }], details: { nestedSessions: [
+      { type: "started", id: "seat-1", source: "panel", label: "seat-1 · gpt-5.6-sol", harness: "pi", provider: "openai-codex", model: "gpt-5.6-sol", reasoning: "high", headSha: "abcdef1234567890", initialPrompt: "Review exact head abcdef1234567890." },
+      { type: "activity", id: "seat-1", source: "panel", label: "seat-1 · gpt-5.6-sol", harness: "pi", provider: "openai-codex", model: "gpt-5.6-sol", reasoning: "high", headSha: "abcdef1234567890", activity: { kind: "thinking", message: "Inspecting the diff", toolCount: 2 } },
+      { type: "settled", id: "seat-1", source: "panel", label: "seat-1 · gpt-5.6-sol", harness: "pi", provider: "openai-codex", model: "gpt-5.6-sol", reasoning: "high", headSha: "abcdef1234567890", status: "completed" }
+    ] }, timestamp: 6 } }),
   ].join("\n") + "\n");
   const child = new FakeTicketProcess();
   const processHost = new TicketSessionHost({
@@ -381,9 +387,19 @@ test("the Coordinator host exposes persisted Pi history and future structured ac
   });
   const handle = await starting;
   assert.equal((child.sent[0] as TicketSessionStartMessage).request.resumeSessionFile, realpathSync(sessionFile));
-  assert.deepEqual(handle.history?.map(({ attempt, kind, message, toolCount }) => ({ attempt, kind, message, toolCount })), [
-    { attempt: 1, kind: "thinking", message: "**Reading the repository**", toolCount: 1 },
-    { attempt: 2, kind: "assistant", message: "Resuming the retry.", toolCount: 2 },
+  assert.deepEqual(handle.history?.map((activity) => ({
+    attempt: activity.attempt,
+    kind: activity.kind,
+    message: activity.message,
+    toolCount: activity.toolCount,
+    childType: activity.kind === "child" ? activity.child.type : undefined,
+  })), [
+    { attempt: 1, kind: "thinking", message: "**Reading the repository**", toolCount: 1, childType: undefined },
+    { attempt: 2, kind: "assistant", message: "Resuming the retry.", toolCount: 2, childType: undefined },
+    { attempt: 2, kind: "tool", message: "automode_panel · review · round 1", toolCount: undefined, childType: undefined },
+    { attempt: 2, kind: "child", message: "seat-1 · gpt-5.6-sol started", toolCount: undefined, childType: "started" },
+    { attempt: 2, kind: "child", message: "Inspecting the diff", toolCount: undefined, childType: "activity" },
+    { attempt: 2, kind: "child", message: "seat-1 · gpt-5.6-sol completed", toolCount: undefined, childType: "settled" },
   ]);
 
   const observed: unknown[] = [];
@@ -549,6 +565,65 @@ test("native Pi events become an ultra-collapsed transcript", () => {
   assert.deepEqual(ticketSessionActivityFromAgentEvent({ type: "message_update" } as never), []);
   assert.deepEqual(ticketSessionActivityFromAgentEvent({ type: "tool_execution_start" } as never), []);
   assert.deepEqual(ticketSessionActivityFromAgentEvent({ type: "tool_execution_end" } as never), []);
+});
+
+test("panel and native subagent launches stay visible while ordinary tools remain collapsed", () => {
+  assert.deepEqual(ticketSessionActivityFromAgentEvent({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "Dispatching independent review work" },
+        { type: "toolCall", id: "read-1", name: "read", arguments: { path: "src/app.ts" } },
+        { type: "toolCall", id: "panel-1", name: "automode_panel", arguments: { kind: "review", context: { round: 1 } } },
+        {
+          type: "toolCall",
+          id: "subagent-1",
+          name: "subagent_spawn",
+          arguments: {
+            name: "standards cross-check",
+            harness: "codex",
+            model: "gpt-5.6-sol",
+            prompt: "Review the change against repository standards.",
+          },
+        },
+      ],
+      stopReason: "toolUse",
+    },
+  } as never), [
+    {
+      activity: "Dispatching independent review work",
+      kind: "thinking",
+      toolCount: 1,
+    },
+    {
+      activity: "automode_panel · review · round 1",
+      kind: "tool",
+      toolCallId: "panel-1",
+      toolName: "automode_panel",
+    },
+    {
+      activity: "subagent_spawn · standards cross-check",
+      kind: "tool",
+      toolCallId: "subagent-1",
+      toolName: "subagent_spawn",
+    },
+    {
+      activity: "standards cross-check started",
+      kind: "child",
+      toolCallId: "subagent-1",
+      toolName: "subagent_spawn",
+      child: {
+        type: "started",
+        id: "subagent-1",
+        source: "subagent",
+        label: "standards cross-check",
+        harness: "codex",
+        model: "gpt-5.6-sol",
+        initialPrompt: "Review the change against repository standards.",
+      },
+    },
+  ]);
 });
 
 test("terminate is idempotent and forces a child that does not stop gracefully", async () => {

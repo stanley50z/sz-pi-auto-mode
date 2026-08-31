@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 PROJECT_ROOT = Path.cwd()
@@ -118,14 +119,21 @@ def wait_until(predicate, description, timeout=10.0):
     raise AssertionError(f"Timed out waiting for {description}; last value: {last_value!r}")
 
 
-def port_is_open():
+def port_is_open(port):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
         connection.settimeout(0.2)
-        return connection.connect_ex(("127.0.0.1", 41738)) == 0
+        return connection.connect_ex(("127.0.0.1", port)) == 0
 
 
-def wait_for_port_closed(timeout=10.0):
-    wait_until(lambda: not port_is_open(), "port 41738 to close", timeout=timeout)
+def dashboard_port(url):
+    parsed = urlparse(url)
+    if parsed.hostname != "127.0.0.1" or parsed.port is None:
+        raise AssertionError(f"Dashboard proof returned an invalid loopback URL: {url}")
+    return parsed.port
+
+
+def wait_for_port_closed(port, timeout=10.0):
+    wait_until(lambda: not port_is_open(port), f"port {port} to close", timeout=timeout)
 
 
 def body_text():
@@ -273,14 +281,12 @@ def capture_state_at_all_viewports(state_name, selector, text_fragment):
     ]
 
 
-if port_is_open():
-    raise RuntimeError("Port 41738 is occupied before the dashboard proof starts")
-
 recording = start_recording(
     "automode-dashboard-pr56-" + time.strftime("%Y%m%d-%H%M%S"),
     title="PR 56 Automode Dashboard black-box chain and visual matrix",
 )
 proof_processes = []
+proof_ports = set()
 task_tab_open = False
 proof_result = None
 try:
@@ -290,13 +296,15 @@ try:
     visual_proof = ProofProcess(VISUAL_PROOF_MAIN)
     proof_processes.append(visual_proof)
     visual_ready = visual_proof.wait_for_json("AUTOMODE_DASHBOARD_BROWSER_PROOF", timeout=15.0)
+    visual_port = dashboard_port(visual_ready["dashboardUrl"])
+    proof_ports.add(visual_port)
     new_tab(visual_ready["dashboardUrl"])
     task_tab_open = True
     wait_for_load()
     wait_for_element("#stage-lanes", timeout=10.0, visible=True)
     wait_until(lambda: has_accessible("heading", "Stage Lanes"), "Stage Lanes heading")
     wait_until(lambda: "Live Coordinator connection" in body_text(), "live Coordinator connection")
-    wait_until(lambda: "The implementation now passes the full suite." in body_text(), "live Ticket Session activity")
+    wait_until(lambda: "standards cross-check started" in body_text(), "live Ticket Session activity")
     if "Lifecycle\nACTIVE" not in body_text():
         raise AssertionError("Missing representative active lifecycle")
 
@@ -324,17 +332,23 @@ try:
     wait_until(lambda: has_accessible("dialog", "#50"), "read-only activity drawer")
     wait_until(lambda: "The implementation now passes the full suite." in body_text(), "drawer assistant activity")
     wait_until(lambda: "+ 3 tool calls" in body_text(), "drawer collapsed tool count")
+    wait_until(lambda: js("document.querySelectorAll('.tool-launch').length") >= 2, "visible panel and subagent tool launches")
+    wait_until(lambda: js("document.querySelectorAll('[data-child-key]').length") == 3, "panel and native subagent sessions")
+    wait_until(lambda: "e4be2804793d" in body_text(), "pinned review head")
     wait_until(
         lambda: "/skill:implement https://github.com/owner/repository/issues/50" in body_text(),
-        "pinned initial Ticket Session prompt",
+        "pinned Ticket Session dispatch command",
     )
+    tab_to("claude-fable-5", limit=60)
+    press_key("Enter")
+    wait_until(lambda: "Checking the work contract against the changed routes." in body_text(), "selected Fable child activity")
     prompt_position = json.loads(js("""JSON.stringify((() => {
       const prompt = document.querySelector('.initial-prompt').getBoundingClientRect();
       const feed = document.querySelector('.feed').getBoundingClientRect();
       return {promptTop: prompt.top, promptBottom: prompt.bottom, feedTop: feed.top};
     })())"""))
     if prompt_position["promptBottom"] > prompt_position["feedTop"] + 1:
-        raise AssertionError(f"Initial prompt is not pinned above the scrolling transcript: {prompt_position!r}")
+        raise AssertionError(f"Dispatch command is not pinned above the scrolling transcript: {prompt_position!r}")
     capture_screenshot(str(artifact_dir / "activity-drawer-1440x900.png"))
     set_exact_viewport(390, 500)
     prompt_before_scroll = json.loads(js("""JSON.stringify((() => {
@@ -410,13 +424,15 @@ try:
     visual_proof.stop()
     if visual_proof.process.returncode != 0:
         raise AssertionError(f"Synthetic visual proof exited {visual_proof.process.returncode}: {visual_proof.output()}")
-    wait_for_port_closed()
+    wait_for_port_closed(visual_port)
 
     # This is the required unsplit product chain: Pi -> TUI OSC-8 URL -> browser -> drain -> exit.
     black_box = ProofProcess(BLACK_BOX_PROOF_MAIN)
     proof_processes.append(black_box)
     black_box_ready = black_box.wait_for_json("AUTOMODE_DASHBOARD_BLACK_BOX_READY", timeout=35.0)
     emitted_dashboard_url = black_box_ready["dashboardUrl"]
+    black_box_port = dashboard_port(emitted_dashboard_url)
+    proof_ports.add(black_box_port)
     new_tab(emitted_dashboard_url)
     task_tab_open = True
     wait_for_load()
@@ -459,7 +475,7 @@ try:
         raise AssertionError(f"Unexpected black-box exit evidence: {black_box_exit!r}")
     if black_box_process_exit != 0:
         raise AssertionError(f"Black-box proof launcher exited {black_box_process_exit}: {black_box.output()}")
-    wait_for_port_closed()
+    wait_for_port_closed(black_box_port)
 
     proof_result = {
         "result": "passed",
@@ -481,7 +497,8 @@ finally:
         close_tab()
     for proof_process in reversed(proof_processes):
         proof_process.stop()
-    wait_for_port_closed()
+    for proof_port in proof_ports:
+        wait_for_port_closed(proof_port)
     stopped_recording = stop_recording()
     print(json.dumps({
         "recordingStopped": str(stopped_recording),

@@ -11,6 +11,7 @@ import type {
   TicketSessionRequest as CoordinatorTicketSessionRequest,
   TicketSessionObservedActivity,
 } from "./coordinator.js";
+import { nestedSessionEventMessage, type NestedSessionEvent } from "./nested-session.js";
 import { resolveAutomodePaths } from "./paths.js";
 import { AutomodeRestartRequiredError } from "./restart-required.js";
 import type { AutomationStageConfiguration } from "./stage-configuration.js";
@@ -19,7 +20,7 @@ import { createAssistantTranscript } from "./ticket-transcript.js";
 
 export { createCanonicalTicketSessionPrompt } from "./ticket-session-prompt.js";
 
-export const TICKET_SESSION_PROTOCOL_VERSION = 2 as const;
+export const TICKET_SESSION_PROTOCOL_VERSION = 3 as const;
 
 export interface TicketSessionLaunchRequest {
   cwd: string;
@@ -101,6 +102,19 @@ export type TicketSessionActivityEvent =
   | (TicketSessionActivityEventBase & {
       kind: "tools";
       toolCount: number;
+    })
+  | (TicketSessionActivityEventBase & {
+      kind: "tool";
+      toolName: string;
+      toolCallId: string;
+      toolCount?: never;
+    })
+  | (TicketSessionActivityEventBase & {
+      kind: "child";
+      toolName: string;
+      toolCallId: string;
+      child: NestedSessionEvent;
+      toolCount?: never;
     })
   | (TicketSessionActivityEventBase & {
       kind: "error";
@@ -194,6 +208,35 @@ const defaultLauncher: TicketSessionProcessLauncher = ({ entrypoint, cwd, env })
   }) as TicketSessionProcess;
 };
 
+function isNestedSessionEvent(value: unknown): value is NestedSessionEvent {
+  if (!value || typeof value !== "object") return false;
+  const event = value as Partial<NestedSessionEvent> & Record<string, unknown>;
+  if (
+    typeof event.id !== "string"
+    || (event.source !== "panel" && event.source !== "subagent")
+    || typeof event.label !== "string"
+    || [event.harness, event.provider, event.model, event.reasoning, event.headSha]
+      .some((field) => field !== undefined && typeof field !== "string")
+  ) return false;
+  if (event.type === "started") return typeof event.initialPrompt === "string";
+  if (event.type === "settled") {
+    return (event.status === "completed" || event.status === "failed")
+      && (event.message === undefined || typeof event.message === "string");
+  }
+  if (event.type !== "activity" || !event.activity || typeof event.activity !== "object") return false;
+  const activity = event.activity as { kind?: unknown; message?: unknown; toolCount?: unknown };
+  if (
+    !["assistant", "thinking", "tools", "error"].includes(String(activity.kind))
+    || typeof activity.message !== "string"
+  ) return false;
+  const validToolCount = typeof activity.toolCount === "number"
+    && Number.isSafeInteger(activity.toolCount)
+    && activity.toolCount > 0;
+  if (activity.kind === "tools") return validToolCount;
+  if (activity.kind === "error") return activity.toolCount === undefined;
+  return activity.toolCount === undefined || validToolCount;
+}
+
 function isChildEvent(message: unknown): message is ChildEventMessage {
   if (!message || typeof message !== "object") return false;
   const candidate = message as Partial<ChildEventMessage>;
@@ -221,11 +264,22 @@ function isChildEvent(message: unknown): message is ChildEventMessage {
     candidate.event.type !== "activity"
     || typeof candidate.event.activity !== "string"
     || typeof candidate.event.timestamp !== "number"
-    || !["assistant", "thinking", "tools", "error"].includes(candidate.event.kind)
+    || !["assistant", "thinking", "tools", "tool", "child", "error"].includes(candidate.event.kind)
   ) return false;
   const toolCount = candidate.event.toolCount;
   const validToolCount = typeof toolCount === "number" && Number.isSafeInteger(toolCount) && toolCount > 0;
   if (candidate.event.kind === "tools") return validToolCount;
+  if (candidate.event.kind === "tool") {
+    return typeof candidate.event.toolName === "string"
+      && typeof candidate.event.toolCallId === "string"
+      && candidate.event.toolCount === undefined;
+  }
+  if (candidate.event.kind === "child") {
+    return typeof candidate.event.toolName === "string"
+      && typeof candidate.event.toolCallId === "string"
+      && isNestedSessionEvent(candidate.event.child)
+      && candidate.event.toolCount === undefined;
+  }
   if (candidate.event.kind === "error") return candidate.event.toolCount === undefined;
   return candidate.event.toolCount === undefined || validToolCount;
 }
@@ -513,6 +567,30 @@ function readPersistedTicketSessionHistory(sessionFile: string): {
       if (/^\/skill:[^\s]+\s+https?:\/\//.test(text.trim())) historyAttempt += 1;
       return [];
     }
+    if (message.role === "toolResult") {
+      const result = message as unknown as {
+        toolName?: unknown;
+        toolCallId?: unknown;
+        details?: { nestedSessions?: unknown };
+      };
+      if (
+        result.toolName !== "automode_panel"
+        || typeof result.toolCallId !== "string"
+        || !Array.isArray(result.details?.nestedSessions)
+      ) return [];
+      return result.details.nestedSessions.flatMap((child): TicketSessionObservedActivity[] => {
+        if (!isNestedSessionEvent(child)) return [];
+        return [{
+          attempt: Math.max(1, historyAttempt),
+          occurredAt: entry.timestamp,
+          kind: "child",
+          message: boundedTicketActivityText(nestedSessionEventMessage(child)),
+          toolName: "automode_panel",
+          toolCallId: result.toolCallId as string,
+          child,
+        }];
+      });
+    }
     if (message.role !== "assistant") return [];
     const attempt = Math.max(1, historyAttempt);
     return createAssistantTranscript(message.content, {
@@ -581,6 +659,23 @@ function observedActivity(event: TicketSessionEvent): TicketSessionObservedActiv
     message: boundedTicketActivityText(event.activity),
   };
   if (event.kind === "tools") return { ...base, kind: event.kind, toolCount: event.toolCount };
+  if (event.kind === "tool") {
+    return {
+      ...base,
+      kind: event.kind,
+      toolName: event.toolName,
+      toolCallId: event.toolCallId,
+    };
+  }
+  if (event.kind === "child") {
+    return {
+      ...base,
+      kind: event.kind,
+      toolName: event.toolName,
+      toolCallId: event.toolCallId,
+      child: event.child,
+    };
+  }
   if (event.kind === "assistant" || event.kind === "thinking") {
     return {
       ...base,

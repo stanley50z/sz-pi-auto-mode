@@ -11,6 +11,7 @@ import { attestCanonicalCommands, isPathInside } from "./attestation.js";
 import { createAutomodeCapabilityProfile } from "./capability-profile.js";
 import { createControlledServices } from "./controlled-services.js";
 import { resolvePiExecutionModel } from "./model-execution.js";
+import { nestedSessionEventMessage, type NestedSessionEvent } from "./nested-session.js";
 import { CliPanelProcessLauncher } from "./panel-process.js";
 import { createProductionPanelSeatLauncher } from "./panel-runtime.js";
 import { repositoryRoot, resolveAutomodePaths } from "./paths.js";
@@ -32,6 +33,15 @@ import { createAssistantTranscript } from "./ticket-transcript.js";
 export type TicketSessionChildActivity =
   | { activity: string; kind: "assistant" | "thinking"; toolCount?: number }
   | { activity: string; kind: "tools"; toolCount: number }
+  | { activity: string; kind: "tool"; toolName: string; toolCallId: string; toolCount?: never }
+  | {
+      activity: string;
+      kind: "child";
+      toolName: string;
+      toolCallId: string;
+      child: NestedSessionEvent;
+      toolCount?: never;
+    }
   | { activity: string; kind: "error"; toolCount?: never };
 
 export interface TicketSessionChildPromptResult {
@@ -211,6 +221,7 @@ export const createControlledTicketSession: TicketSessionChildSessionFactory = a
   mkdirSync(paths.automodeDir, { recursive: true });
   mkdirSync(paths.sessionDir, { recursive: true });
   const resultReporter = createTicketSessionResultExtension();
+  const nestedActivityListeners = new Set<(activity: TicketSessionChildActivity) => void>();
   const extensions = [resultReporter.extension];
   const tools = [...profile.tools, "automode_ticket_result"];
   if (request.skillName === "grilling" || request.skillName === "code-review") {
@@ -221,7 +232,19 @@ export const createControlledTicketSession: TicketSessionChildSessionFactory = a
       normalAgentDir: paths.normalAgentDir,
       piPackageDir,
     }));
-    extensions.push(createTicketPanelExtension(panelLauncher, profile.panelExecutions));
+    extensions.push(createTicketPanelExtension(panelLauncher, profile.panelExecutions, ({
+      toolName,
+      toolCallId,
+      child,
+    }) => {
+      for (const listener of nestedActivityListeners) listener({
+        kind: "child",
+        activity: nestedSessionEventMessage(child),
+        toolName,
+        toolCallId,
+        child,
+      });
+    }));
     tools.push("automode_panel");
   }
   const services = await createControlledServices({
@@ -308,9 +331,14 @@ export const createControlledTicketSession: TicketSessionChildSessionFactory = a
       sessionId: result.session.sessionId,
       sessionFile,
       subscribe(listener) {
-        return result.session.subscribe((event) => {
+        nestedActivityListeners.add(listener);
+        const unsubscribeSession = result.session.subscribe((event) => {
           for (const activity of ticketSessionActivityFromAgentEvent(event)) listener(activity);
         });
+        return () => {
+          nestedActivityListeners.delete(listener);
+          unsubscribeSession();
+        };
       },
       async prompt(prompt) {
         await result.session.prompt(prompt);

@@ -1,4 +1,9 @@
 import type { ExecutionProfile } from "./capability-profile.js";
+import type {
+  NestedSessionEvent,
+  NestedSessionIdentity,
+  NestedSessionTranscriptActivity,
+} from "./nested-session.js";
 
 export interface PanelSeatAttribution {
   readonly seat: `seat-${number}`;
@@ -43,6 +48,7 @@ interface PanelSeatLaunchBase {
   readonly attribution: PanelSeatAttribution;
   readonly prompt: string;
   readonly tools: readonly string[];
+  readonly onActivity?: (activity: NestedSessionTranscriptActivity) => void;
 }
 
 export interface GrillingSeatLaunchRequest extends PanelSeatLaunchBase {
@@ -63,6 +69,7 @@ export interface ReviewSeatLaunchRequest extends PanelSeatLaunchBase {
 
 export type PanelSeatLaunchRequest = GrillingSeatLaunchRequest | ReviewSeatLaunchRequest;
 export type PanelSeatLauncher = (request: PanelSeatLaunchRequest) => Promise<unknown>;
+export type PanelActivityListener = (event: NestedSessionEvent) => void;
 
 export interface PanelProcessResult {
   readonly exitCode: number | null;
@@ -161,6 +168,31 @@ export class PanelRuntimeError extends Error {
     this.name = "PanelRuntimeError";
     this.failures = immutableClone(failures);
   }
+}
+
+function nestedPanelIdentity(seat: PanelSeatAttribution, headSha?: string): NestedSessionIdentity {
+  return {
+    id: seat.seat,
+    source: "panel",
+    label: `${seat.seat} · ${seat.modelSlug}`,
+    harness: seat.harness,
+    provider: seat.providerSlug,
+    model: seat.modelSlug,
+    reasoning: seat.reasoningLevel,
+    ...(headSha === undefined ? {} : { headSha }),
+  };
+}
+
+function boundedPanelPrompt(prompt: string): string {
+  return prompt.length > 8_000 ? `${prompt.slice(0, 8_000)}… [truncated]` : prompt;
+}
+
+function panelSeatRequestActivity(
+  identity: NestedSessionIdentity,
+  listener: PanelActivityListener | undefined,
+): ((activity: NestedSessionTranscriptActivity) => void) | undefined {
+  if (!listener) return undefined;
+  return (activity) => listener({ ...identity, type: "activity", activity });
 }
 
 export function createPanelSeats(
@@ -299,18 +331,25 @@ export async function runGrillingPanel(
   request: GrillingPanelRequest,
   launcher: PanelSeatLauncher,
   seats: readonly PanelSeatAttribution[],
+  onActivity?: PanelActivityListener,
 ): Promise<GrillingPanelResult> {
   const context = deepFreeze(withoutRecommendations(structuredClone(request.context)));
   const questionNumbers = validateGrillingContext(context);
   const prompt = grillingPrompt(context);
   const tools = Object.freeze(["read", "grep", "find", "ls"]);
-  const settled = await Promise.allSettled(seats.map((seat) => launcher({
-    kind: "grilling",
-    attribution: seat,
-    context,
-    prompt,
-    tools,
-  })));
+  const identities = seats.map((seat) => nestedPanelIdentity(seat));
+  const settled = await Promise.allSettled(seats.map((seat, index) => {
+    const identity = identities[index]!;
+    onActivity?.({ ...identity, type: "started", initialPrompt: boundedPanelPrompt(prompt) });
+    return launcher({
+      kind: "grilling",
+      attribution: seat,
+      context,
+      prompt,
+      tools,
+      onActivity: panelSeatRequestActivity(identity, onActivity),
+    });
+  }));
   const answers: AttributedPanelAnswer[] = [];
   const failures: PanelSeatFailure[] = [];
   settled.forEach((result, index) => {
@@ -321,17 +360,16 @@ export async function runGrillingPanel(
           attribution: seat,
           answers: validatePanelAnswer(result.value, questionNumbers),
         }));
+        onActivity?.({ ...identities[index]!, type: "settled", status: "completed" });
       } catch (error) {
-        failures.push(Object.freeze({
-          attribution: seat,
-          error: error instanceof Error ? error.message : String(error),
-        }));
+        const message = error instanceof Error ? error.message : String(error);
+        failures.push(Object.freeze({ attribution: seat, error: message }));
+        onActivity?.({ ...identities[index]!, type: "settled", status: "failed", message });
       }
     } else {
-      failures.push(Object.freeze({
-        attribution: seat,
-        error: result.reason instanceof Error ? result.reason.message : String(result.reason),
-      }));
+      const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
+      failures.push(Object.freeze({ attribution: seat, error: message }));
+      onActivity?.({ ...identities[index]!, type: "settled", status: "failed", message });
     }
   });
   if (answers.length === 0) {
@@ -370,27 +408,33 @@ export async function runReviewPanel(
   request: ReviewPanelRequest,
   launcher: PanelSeatLauncher,
   seats: readonly PanelSeatAttribution[],
+  onActivity?: PanelActivityListener,
 ): Promise<ReviewPanelResult> {
   const context = immutableClone(request.context);
   validateReviewContext(context);
   const prompt = reviewPrompt(context);
   const tools = Object.freeze(["read", "grep", "find", "ls"]);
-  const settled = await Promise.allSettled(seats.map((seat) => launcher({
-    kind: "review",
-    attribution: seat,
-    context,
-    prompt,
-    tools,
-  })));
+  const identities = seats.map((seat) => nestedPanelIdentity(seat, context.headSha));
+  const settled = await Promise.allSettled(seats.map((seat, index) => {
+    const identity = identities[index]!;
+    onActivity?.({ ...identity, type: "started", initialPrompt: boundedPanelPrompt(prompt) });
+    return launcher({
+      kind: "review",
+      attribution: seat,
+      context,
+      prompt,
+      tools,
+      onActivity: panelSeatRequestActivity(identity, onActivity),
+    });
+  }));
   const reports: AttributedReviewReport[] = [];
   const failures: PanelSeatFailure[] = [];
   settled.forEach((result, index) => {
     const seat = seats[index]!;
     if (result.status === "rejected") {
-      failures.push(Object.freeze({
-        attribution: seat,
-        error: result.reason instanceof Error ? result.reason.message : String(result.reason),
-      }));
+      const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
+      failures.push(Object.freeze({ attribution: seat, error: message }));
+      onActivity?.({ ...identities[index]!, type: "settled", status: "failed", message });
       return;
     }
     try {
@@ -400,11 +444,11 @@ export async function runReviewPanel(
         ...seat,
         markdown: reviewMarkdown(result.value),
       }));
+      onActivity?.({ ...identities[index]!, type: "settled", status: "completed" });
     } catch (error) {
-      failures.push(Object.freeze({
-        attribution: seat,
-        error: error instanceof Error ? error.message : String(error),
-      }));
+      const message = error instanceof Error ? error.message : String(error);
+      failures.push(Object.freeze({ attribution: seat, error: message }));
+      onActivity?.({ ...identities[index]!, type: "settled", status: "failed", message });
     }
   });
   return deepFreeze({ reports, failures });

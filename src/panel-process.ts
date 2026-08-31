@@ -5,6 +5,7 @@ import type {
   PanelSeatLaunchRequest,
   ProductionPanelProcessLauncher,
 } from "./panel-runtime.js";
+import { createAssistantTranscript } from "./ticket-transcript.js";
 
 const MAX_PANEL_OUTPUT_BYTES = 10 * 1024 * 1024;
 const ALLOWED_PI_TOOLS = new Set(["read", "grep", "find", "ls"]);
@@ -15,11 +16,12 @@ export interface PanelCommandRunner {
     args: readonly string[],
     cwd: string,
     env: NodeJS.ProcessEnv,
+    onStdout?: (chunk: string) => void,
   ): Promise<PanelProcessResult>;
 }
 
 export const processPanelCommandRunner: PanelCommandRunner = {
-  run(command, args, cwd, env) {
+  run(command, args, cwd, env, onStdout) {
     return new Promise((resolveResult, rejectResult) => {
       const child = spawn(command, [...args], {
         cwd,
@@ -40,7 +42,10 @@ export const processPanelCommandRunner: PanelCommandRunner = {
         }
         target.push(chunk);
       };
-      child.stdout.on("data", (chunk: Buffer) => collect(stdout, chunk));
+      child.stdout.on("data", (chunk: Buffer) => {
+        collect(stdout, chunk);
+        onStdout?.(chunk.toString("utf8"));
+      });
       child.stderr.on("data", (chunk: Buffer) => collect(stderr, chunk));
       child.on("error", rejectResult);
       child.on("exit", (exitCode, signal) => resolveResult({
@@ -120,6 +125,52 @@ function normalizeClaudeOutput(output: string, structured: boolean): string {
   return structured ? parseStructuredText(result.result, "Claude Code Panel seat") : result.result;
 }
 
+function createPiActivityStream(request: PanelSeatLaunchRequest): {
+  push(chunk: string): void;
+  finish(): void;
+} {
+  let buffered = "";
+  const emitLine = (line: string): void => {
+    if (!line.trim() || !request.onActivity) return;
+    let event: unknown;
+    try {
+      event = JSON.parse(line) as unknown;
+    } catch {
+      return;
+    }
+    if (!event || typeof event !== "object" || Array.isArray(event)) return;
+    const record = event as { type?: unknown; message?: unknown };
+    if (record.type !== "message_end" || !record.message || typeof record.message !== "object") return;
+    const message = record.message as { role?: unknown; content?: unknown; stopReason?: unknown };
+    if (message.role !== "assistant") return;
+    for (const activity of createAssistantTranscript(message.content, {
+      isError: message.stopReason === "error",
+    })) {
+      if (
+        activity.kind === "assistant"
+        || activity.kind === "thinking"
+        || activity.kind === "tools"
+        || activity.kind === "error"
+      ) request.onActivity(activity);
+    }
+  };
+  return {
+    push(chunk) {
+      buffered += chunk;
+      for (;;) {
+        const newline = buffered.indexOf("\n");
+        if (newline < 0) return;
+        emitLine(buffered.slice(0, newline));
+        buffered = buffered.slice(newline + 1);
+      }
+    },
+    finish() {
+      if (buffered.trim()) emitLine(buffered);
+      buffered = "";
+    },
+  };
+}
+
 function assertTools(tools: readonly string[]): void {
   if (tools.length === 0 || tools.some((tool) => !ALLOWED_PI_TOOLS.has(tool))) {
     throw new Error("Panel seat requested capabilities outside the controlled advisory tool set");
@@ -144,6 +195,7 @@ export class CliPanelProcessLauncher implements ProductionPanelProcessLauncher {
   async launch(request: PanelSeatLaunchRequest): Promise<PanelProcessResult> {
     assertTools(request.tools);
     if (request.attribution.harness === "pi") {
+      const activityStream = createPiActivityStream(request);
       const result = await this.#runner.run(process.execPath, [
         this.#piCliEntrypoint,
         "--mode", "json",
@@ -159,7 +211,8 @@ export class CliPanelProcessLauncher implements ProductionPanelProcessLauncher {
         "--thinking", request.attribution.reasoningLevel,
         "--tools", request.tools.join(","),
         request.prompt,
-      ], this.#cwd, this.#env);
+      ], this.#cwd, this.#env, (chunk) => activityStream.push(chunk));
+      activityStream.finish();
       if (result.exitCode !== 0 || result.signal !== null) return result;
       return { ...result, stdout: normalizePiOutput(result.stdout, request.kind === "grilling") };
     }
@@ -180,6 +233,13 @@ export class CliPanelProcessLauncher implements ProductionPanelProcessLauncher {
       request.prompt,
     ], this.#cwd, this.#env);
     if (result.exitCode !== 0 || result.signal !== null) return result;
-    return { ...result, stdout: normalizeClaudeOutput(result.stdout, request.kind === "grilling") };
+    const normalized = normalizeClaudeOutput(result.stdout, request.kind === "grilling");
+    if (request.onActivity) {
+      request.onActivity({
+        kind: "assistant",
+        message: normalized.length > 2_000 ? `${normalized.slice(0, 2_000)}… [truncated]` : normalized,
+      });
+    }
+    return { ...result, stdout: normalized };
   }
 }

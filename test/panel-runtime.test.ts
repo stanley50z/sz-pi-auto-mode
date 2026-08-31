@@ -260,6 +260,86 @@ test("review launches every configured seat concurrently on one immutable exact-
   assert.deepEqual(result.failures, []);
 });
 
+test("review streams each panel seat prompt and transcript activity", async () => {
+  const activity: unknown[] = [];
+  const seat = createPanelSeats([panelExecutions[0]!]);
+  const launcher: PanelSeatLauncher = async (request) => {
+    request.onActivity?.({
+      kind: "thinking",
+      message: "Inspecting the exact diff",
+    });
+    request.onActivity?.({
+      kind: "tools",
+      message: "+ 3 tool calls",
+      toolCount: 3,
+    });
+    return "No actionable findings.";
+  };
+
+  await runReviewPanel({
+    context: {
+      round: 1,
+      headSha: "0123456789abcdef",
+      brief: "Review the exact pull-request head against its work contract.",
+    },
+  }, launcher, seat, (event) => activity.push(event));
+
+  assert.deepEqual(activity, [
+    {
+      type: "started",
+      id: "seat-1",
+      source: "panel",
+      label: "seat-1 · claude-opus-4-8",
+      harness: "pi",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      reasoning: "high",
+      headSha: "0123456789abcdef",
+      initialPrompt: activity.length > 0
+        ? (activity[0] as { initialPrompt: string }).initialPrompt
+        : "",
+    },
+    {
+      type: "activity",
+      id: "seat-1",
+      source: "panel",
+      label: "seat-1 · claude-opus-4-8",
+      harness: "pi",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      reasoning: "high",
+      headSha: "0123456789abcdef",
+      activity: { kind: "thinking", message: "Inspecting the exact diff" },
+    },
+    {
+      type: "activity",
+      id: "seat-1",
+      source: "panel",
+      label: "seat-1 · claude-opus-4-8",
+      harness: "pi",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      reasoning: "high",
+      headSha: "0123456789abcdef",
+      activity: { kind: "tools", message: "+ 3 tool calls", toolCount: 3 },
+    },
+    {
+      type: "settled",
+      id: "seat-1",
+      source: "panel",
+      label: "seat-1 · claude-opus-4-8",
+      harness: "pi",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      reasoning: "high",
+      headSha: "0123456789abcdef",
+      status: "completed",
+    },
+  ]);
+  assert.match((activity[0] as { initialPrompt: string }).initialPrompt, /0123456789abcdef/);
+  assert.match((activity[0] as { initialPrompt: string }).initialPrompt, /Review the exact pull-request head/);
+});
+
 test("review returns every completed report alongside failed-seat diagnostics", async () => {
   const calls: string[] = [];
   const launcher: PanelSeatLauncher = async ({ attribution }) => {

@@ -220,6 +220,125 @@ async function main(): Promise<void> {
       sessionId: "dashboard-proof-session",
     },
   });
+  dashboard.appendActivity({
+    id: "proof-panel-launch",
+    itemKey: "issue:50",
+    occurredAt: new Date().toISOString(),
+    kind: "tool",
+    message: "automode_panel · review · round 1",
+    data: {
+      source: "live",
+      attempt: 2,
+      sessionId: "dashboard-proof-session",
+      toolName: "automode_panel",
+      toolCallId: "panel-call-1",
+    },
+  });
+  const panelChildren = [
+    {
+      id: "seat-1",
+      label: "seat-1 · gpt-5.6-sol",
+      provider: "openai-codex",
+      model: "gpt-5.6-sol",
+      activity: "Inspecting the exact diff and containment paths.",
+      toolCount: 7,
+    },
+    {
+      id: "seat-2",
+      label: "seat-2 · claude-fable-5",
+      provider: "github-copilot",
+      model: "claude-fable-5",
+      activity: "Checking the work contract against the changed routes.",
+      toolCount: 5,
+    },
+  ] as const;
+  for (const child of panelChildren) {
+    const identity = {
+      id: child.id,
+      source: "panel" as const,
+      label: child.label,
+      harness: "pi",
+      provider: child.provider,
+      model: child.model,
+      reasoning: "high",
+      headSha: "e4be2804793d56b81e9ec0c98c5c6a3499f35f0c",
+    };
+    dashboard.appendActivity({
+      id: `proof-${child.id}-started`,
+      itemKey: "issue:50",
+      occurredAt: new Date().toISOString(),
+      kind: "child",
+      message: `${child.label} started`,
+      data: {
+        source: "live",
+        attempt: 2,
+        sessionId: "dashboard-proof-session",
+        toolName: "automode_panel",
+        toolCallId: "panel-call-1",
+        child: {
+          ...identity,
+          type: "started",
+          initialPrompt: "Independently review exact head e4be280 for correctness, specification compliance, and repository standards.",
+        },
+      },
+    });
+    dashboard.appendActivity({
+      id: `proof-${child.id}-activity`,
+      itemKey: "issue:50",
+      occurredAt: new Date().toISOString(),
+      kind: "child",
+      message: child.activity,
+      data: {
+        source: "live",
+        attempt: 2,
+        sessionId: "dashboard-proof-session",
+        toolName: "automode_panel",
+        toolCallId: "panel-call-1",
+        child: {
+          ...identity,
+          type: "activity",
+          activity: { kind: "thinking", message: child.activity, toolCount: child.toolCount },
+        },
+      },
+    });
+  }
+  dashboard.appendActivity({
+    id: "proof-subagent-launch",
+    itemKey: "issue:50",
+    occurredAt: new Date().toISOString(),
+    kind: "tool",
+    message: "subagent_spawn · standards cross-check",
+    data: {
+      source: "live",
+      attempt: 2,
+      sessionId: "dashboard-proof-session",
+      toolName: "subagent_spawn",
+      toolCallId: "subagent-call-1",
+    },
+  });
+  dashboard.appendActivity({
+    id: "proof-subagent-started",
+    itemKey: "issue:50",
+    occurredAt: new Date().toISOString(),
+    kind: "child",
+    message: "standards cross-check started",
+    data: {
+      source: "live",
+      attempt: 2,
+      sessionId: "dashboard-proof-session",
+      toolName: "subagent_spawn",
+      toolCallId: "subagent-call-1",
+      child: {
+        type: "started",
+        id: "subagent-call-1",
+        source: "subagent",
+        label: "standards cross-check",
+        harness: "codex",
+        model: "gpt-5.6-sol",
+        initialPrompt: "Review the change against repository standards.",
+      },
+    },
+  });
 
   function stop() {
     if (stopTimer) clearTimeout(stopTimer);

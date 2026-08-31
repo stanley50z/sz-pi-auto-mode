@@ -1,3 +1,4 @@
+import type { NestedSessionEvent } from "./nested-session.js";
 import type {
   CoordinatorProjection,
   RecentStageCandidateProjection,
@@ -39,6 +40,19 @@ export type DashboardActivityEntry =
   | (DashboardActivityEntryBase & {
       readonly kind: "tools";
       readonly toolCount: number;
+    })
+  | (DashboardActivityEntryBase & {
+      readonly kind: "tool";
+      readonly toolName: string;
+      readonly toolCallId: string;
+      readonly toolCount?: never;
+    })
+  | (DashboardActivityEntryBase & {
+      readonly kind: "child";
+      readonly toolName: string;
+      readonly toolCallId: string;
+      readonly child: NestedSessionEvent;
+      readonly toolCount?: never;
     })
   | (DashboardActivityEntryBase & {
       readonly kind: "error" | "terminal" | "coordinator";
@@ -361,7 +375,7 @@ button:disabled { cursor: not-allowed; opacity: .58; }
   position: absolute;
   inset: 12px 12px 12px auto;
   display: flex;
-  width: min(720px, calc(100% - 24px));
+  width: min(1220px, calc(100% - 24px));
   flex-direction: column;
   overflow: hidden;
   border: 1px solid #58749a;
@@ -378,7 +392,28 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .initial-prompt { flex: 0 0 auto; border-bottom: 1px solid var(--line); background: #0f1a2d; padding: 10px 18px 12px; }
 .initial-prompt span { display: block; margin-bottom: 4px; color: var(--accent); font-size: 10px; font-weight: 800; letter-spacing: .08em; }
 .initial-prompt code { display: block; overflow-wrap: anywhere; color: #d9e8ff; font: inherit; font-size: 12px; white-space: pre-wrap; }
-.feed { flex: 1; min-height: 0; overflow: auto; padding: 16px 18px 30px; }
+.activity-split { display: grid; min-height: 0; flex: 1; grid-template-columns: minmax(0, 1.45fr) minmax(340px, .8fr); }
+.feed { min-height: 0; overflow: auto; padding: 16px 18px 30px; }
+.activity-split > .feed { border-right: 1px solid var(--line); }
+.child-inspector { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
+.child-inspector-header { flex: 0 0 auto; border-bottom: 1px solid var(--line); padding: 11px 14px; color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .08em; }
+.child-list { display: grid; flex: 0 0 auto; gap: 4px; border-bottom: 1px solid var(--line); padding: 8px; }
+.child-select { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 9px; align-items: center; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--text); padding: 9px 10px; text-align: left; }
+.child-select:hover { border-color: var(--line); background: var(--surface-hover); }
+.child-select.active { border-color: #486f9e; background: #11243d; }
+.child-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+.child-dot.failed { background: var(--danger); }
+.child-select strong, .child-select small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.child-select small { margin-top: 2px; color: var(--muted); font-size: 10px; }
+.child-status { color: var(--muted); font-size: 10px; }
+.child-detail { min-height: 0; flex: 1; overflow: auto; padding: 12px; }
+.child-prompt { border: 1px solid var(--line); border-radius: 7px; background: #0f1a2d; padding: 10px 11px; }
+.child-prompt span { display: block; margin-bottom: 5px; color: var(--accent); font-size: 10px; font-weight: 800; letter-spacing: .08em; }
+.child-prompt code { display: block; overflow-wrap: anywhere; color: #d9e8ff; font: inherit; font-size: 11px; white-space: pre-wrap; }
+.child-transcript { margin-top: 10px; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; }
+.tool-launch { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px; align-items: center; border: 1px solid #3b6089; border-radius: 6px; background: #0d2038; padding: 9px 10px; color: #d7e9ff; }
+.tool-source { border-radius: 4px; background: #1d4e7e; padding: 3px 6px; color: #dceeff; font-size: 9px; font-weight: 900; letter-spacing: .06em; }
+.tool-source.subagent { background: #4b3770; color: #eadcff; }
 .attempt { margin-bottom: 18px; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; }
 .attempt-header { display: flex; justify-content: space-between; gap: 12px; background: var(--surface-raised); color: var(--muted); padding: 9px 11px; font-size: 11px; }
 .transcript { padding: 16px 14px 18px; }
@@ -432,6 +467,9 @@ button:disabled { cursor: not-allowed; opacity: .58; }
   .lane { min-height: 0; }
   .drawer { inset: 0; width: 100%; border: 0; border-radius: 0; }
   .drawer-meta { grid-template-columns: 1fr 1fr; }
+  .activity-split { display: block; overflow: auto; }
+  .activity-split > .feed { max-height: 48%; border-right: 0; border-bottom: 1px solid var(--line); }
+  .child-inspector { min-height: 52%; }
   .event { grid-template-columns: 70px 68px minmax(0, 1fr); gap: 7px; }
 }
 
@@ -461,6 +499,7 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
     revision: null,
     network: {},
     selectedKey: null,
+    selectedChildKey: null,
     returnFocusKey: null,
     recentOpen: false,
     pendingCommand: false,
@@ -484,7 +523,7 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
     window.setTimeout(() => { announcer.textContent = message; }, 20);
   };
   const CANDIDATE_STATUSES = new Set(["queued", "claimed", "running", "waiting", "retrying", "blocked", "human-owned", "exhausted", "settled"]);
-  const ACTIVITY_KINDS = new Set(["assistant", "thinking", "tools", "error", "terminal", "coordinator"]);
+  const ACTIVITY_KINDS = new Set(["assistant", "thinking", "tools", "tool", "child", "error", "terminal", "coordinator"]);
   const RUN_LIFECYCLES = new Set(["loading", "active", "draining", "degraded", "empty"]);
   const STAGE_STATES = new Set(["ON", "DRAINING", "OFF"]);
   const MAX_ACTIVITY_EVENTS_PER_ATTEMPT = 500;
@@ -506,12 +545,33 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
     if (!fields.every((field) => isCount(value[field]))) contractError(path);
   }
 
+  function validateNestedSession(value, path) {
+    if (!isRecord(value) || typeof value.type !== "string" || typeof value.id !== "string" || !["panel", "subagent"].includes(value.source) || typeof value.label !== "string") contractError(path);
+    if (![value.harness, value.provider, value.model, value.reasoning, value.headSha].every(optionalString)) contractError(path);
+    if (value.type === "started") {
+      if (typeof value.initialPrompt !== "string") contractError(path + ".initialPrompt");
+      return;
+    }
+    if (value.type === "settled") {
+      if (!["completed", "failed"].includes(value.status) || !optionalString(value.message)) contractError(path + ".status");
+      return;
+    }
+    if (value.type !== "activity" || !isRecord(value.activity) || !["assistant", "thinking", "tools", "error"].includes(value.activity.kind) || typeof value.activity.message !== "string") contractError(path + ".activity");
+    const validToolCount = Number.isInteger(value.activity.toolCount) && value.activity.toolCount > 0;
+    if (value.activity.kind === "tools" && !validToolCount) contractError(path + ".activity.toolCount");
+    if (value.activity.kind === "error" && value.activity.toolCount !== undefined) contractError(path + ".activity.toolCount");
+  }
+
   function validateActivityEntry(value, path) {
     if (!isRecord(value) || typeof value.id !== "string" || typeof value.timestamp !== "string" || !ACTIVITY_KINDS.has(value.kind) || typeof value.message !== "string") contractError(path);
     const validToolCount = Number.isInteger(value.toolCount) && value.toolCount > 0;
     if (value.kind === "tools" && !validToolCount) contractError(path + ".toolCount");
-    if ((value.kind === "error" || value.kind === "terminal" || value.kind === "coordinator") && value.toolCount !== undefined) contractError(path + ".toolCount");
+    if ((value.kind === "error" || value.kind === "terminal" || value.kind === "coordinator" || value.kind === "tool" || value.kind === "child") && value.toolCount !== undefined) contractError(path + ".toolCount");
     if ((value.kind === "assistant" || value.kind === "thinking") && value.toolCount !== undefined && !validToolCount) contractError(path + ".toolCount");
+    if (value.kind === "tool" || value.kind === "child") {
+      if (typeof value.toolName !== "string" || typeof value.toolCallId !== "string") contractError(path + ".tool");
+    }
+    if (value.kind === "child") validateNestedSession(value.child, path + ".child");
   }
 
   function validateSession(value, path) {
@@ -648,6 +708,12 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
     if (event.kind === "tools") {
       return '<div class="transcript-row transcript-tools">' + toolCountText(event.toolCount || 1) + "</div>";
     }
+    if (event.kind === "tool") {
+      const source = event.toolName === "automode_panel" ? "PANEL" : "SUBAGENT";
+      const sourceClass = source === "SUBAGENT" ? " subagent" : "";
+      return '<div class="transcript-row"><div class="tool-launch"><span class="tool-source' + sourceClass + '">' + source + '</span><strong>' + escapeHtml(event.message) + "</strong></div></div>";
+    }
+    if (event.kind === "child") return "";
     return '<div class="transcript-row transcript-system ' + escapeHtml(event.kind) + '"><span class="transcript-system-label">' + escapeHtml(event.kind) + "</span>" + transcriptMessage(event.message) + "</div>";
   }
 
@@ -655,21 +721,95 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
     return '<div class="transcript">' + events.map(eventRow).join("") + "</div>";
   }
 
+  function nestedSessions(session) {
+    const sessions = new Map();
+    for (const attempt of session.attempts) {
+      for (const event of attempt.events) {
+        if (event.kind !== "child") continue;
+        const child = event.child;
+        const key = attempt.attempt + ":" + event.toolCallId + ":" + child.id;
+        let nested = sessions.get(key);
+        if (!nested) {
+          nested = {
+            key,
+            attempt: attempt.attempt,
+            toolCallId: event.toolCallId,
+            id: child.id,
+            source: child.source,
+            label: child.label,
+            harness: child.harness,
+            provider: child.provider,
+            model: child.model,
+            reasoning: child.reasoning,
+            headSha: child.headSha,
+            initialPrompt: "Prompt unavailable",
+            status: "running",
+            events: []
+          };
+          sessions.set(key, nested);
+        }
+        Object.assign(nested, {
+          label: child.label,
+          harness: child.harness,
+          provider: child.provider,
+          model: child.model,
+          reasoning: child.reasoning,
+          headSha: child.headSha
+        });
+        if (child.type === "started") nested.initialPrompt = child.initialPrompt;
+        else if (child.type === "activity") nested.events.push({
+          id: event.id + ":nested",
+          timestamp: event.timestamp,
+          ...child.activity
+        });
+        else {
+          nested.status = child.status;
+          nested.terminalMessage = child.message;
+        }
+      }
+    }
+    return [...sessions.values()];
+  }
+
+  function childSessionButton(child) {
+    const selected = state.selectedChildKey === child.key;
+    const identity = [child.source.toUpperCase(), child.harness, child.provider, child.model, child.reasoning].filter(Boolean).join(" · ");
+    const count = child.events.reduce((total, event) => total + (event.toolCount || 0), 0);
+    return '<button class="child-select ' + (selected ? "active" : "") + '" type="button" data-child-key="' + escapeHtml(child.key) + '" aria-pressed="' + selected + '"><span class="child-dot ' + (child.status === "failed" ? "failed" : "") + '"></span><span><strong>' + escapeHtml(child.label) + '</strong><small>' + escapeHtml(identity) + '</small></span><span class="child-status">' + (child.status === "running" && count ? count + " calls" : escapeHtml(child.status.toUpperCase())) + "</span></button>";
+  }
+
+  function childInspector(children) {
+    if (!children.length) return "";
+    if (!children.some((child) => child.key === state.selectedChildKey)) state.selectedChildKey = children[0].key;
+    const selected = children.find((child) => child.key === state.selectedChildKey) || children[0];
+    const detail = selected
+      ? '<div class="child-detail"><div class="child-prompt"><span>INITIAL PROMPT</span><code>' + escapeHtml(selected.initialPrompt) + '</code></div><div class="child-transcript">' + (selected.events.length ? transcript(selected.events) : '<p class="terminal-result">No nested transcript activity received yet.</p>') + (selected.terminalMessage ? '<div class="terminal-result"><strong>Terminal result:</strong> ' + escapeHtml(selected.terminalMessage) + "</div>" : "") + "</div></div>"
+      : "";
+    return '<aside class="child-inspector" aria-label="Child sessions"><div class="child-inspector-header">CHILD SESSIONS · ' + children.length + '</div><div class="child-list">' + children.map(childSessionButton).join("") + "</div>" + detail + "</aside>";
+  }
+
+  function parentFeed(session) {
+    return '<div class="feed">' + session.attempts.map((attempt) =>
+      '<section class="attempt" aria-label="Attempt ' + attempt.attempt + '"><header class="attempt-header"><span>Attempt ' + attempt.attempt + " · " + (attempt.state === "current" ? "current" : "prior history") + "</span><span>" + (attempt.state === "current" ? "● LIVE" : "SETTLED") + "</span></header>" +
+      (attempt.events.length ? transcript(attempt.events) : '<p class="terminal-result">No transcript activity received yet.</p>') +
+      (attempt.terminalResult ? '<div class="terminal-result"><strong>Terminal result:</strong> ' + escapeHtml(attempt.terminalResult) + "</div>" : "") + "</section>"
+    ).join("") + "</div>";
+  }
+
   function drawer(candidate) {
     if (!candidate) return "";
     const session = candidate.session;
     const workspace = session && session.workspace ? session.workspace : "Not created";
+    const children = session ? nestedSessions(session) : [];
+    const pinnedHead = children.find((child) => child.headSha)?.headSha;
+    const parent = session ? parentFeed(session) : "";
     const content = session
-      ? '<div class="feed">' + session.attempts.map((attempt) =>
-          '<section class="attempt" aria-label="Attempt ' + attempt.attempt + '"><header class="attempt-header"><span>Attempt ' + attempt.attempt + " · " + (attempt.state === "current" ? "current" : "prior history") + "</span><span>" + (attempt.state === "current" ? "● LIVE" : "SETTLED") + "</span></header>" +
-          (attempt.events.length ? transcript(attempt.events) : '<p class="terminal-result">No transcript activity received yet.</p>') +
-          (attempt.terminalResult ? '<div class="terminal-result"><strong>Terminal result:</strong> ' + escapeHtml(attempt.terminalResult) + "</div>" : "") + "</section>"
-        ).join("") + "</div>"
+      ? children.length ? '<div class="activity-split">' + parent + childInspector(children) + "</div>" : parent
       : '<div class="no-session"><div><h3>No Ticket Session exists yet</h3><p>' + escapeHtml(candidate.reason) + "</p><p>Inspecting this candidate is read-only. Activity will appear only after the Coordinator dispatches it.</p></div></div>";
     return '<div class="drawer-backdrop"><section class="drawer" role="dialog" aria-modal="true" aria-labelledby="activity-title">' +
       '<header class="drawer-header"><div><p class="eyebrow">' + escapeHtml(STAGE_LABELS[candidate.stage]) + ' · READ-ONLY ACTIVITY</p><h2 id="activity-title">' + escapeHtml(candidate.item) + " · " + escapeHtml(candidate.title) + '</h2></div><button class="close" type="button" data-close-drawer data-focus-id="drawer-close">Close</button></header>' +
-      '<div class="drawer-meta"><div><span>Lifecycle</span><strong>' + status(candidate.status) + "</strong></div><div><span>Attempt</span><strong>" + candidate.attempt + "/5</strong></div><div><span>Process</span><strong>" + escapeHtml(session?.processId ?? "Not started") + "</strong></div><div><span>Session</span><strong>" + escapeHtml(session ? session.sessionId : "Not created") + "</strong></div><div><span>Workspace</span><strong>" + escapeHtml(workspace) + "</strong></div></div>" +
-      (session ? '<div class="initial-prompt"><span>INITIAL PROMPT</span><code>' + escapeHtml(session.initialPrompt) + "</code></div>" : "") + content + "</section></div>";
+      '<div class="drawer-meta"><div><span>Lifecycle</span><strong>' + status(candidate.status) + "</strong></div><div><span>Attempt</span><strong>" + candidate.attempt + "/5</strong></div><div><span>Process</span><strong>" + escapeHtml(session?.processId ?? "Not started") + "</strong></div><div><span>Session</span><strong>" + escapeHtml(session ? session.sessionId : "Not created") + "</strong></div><div><span>Workspace</span><strong>" + escapeHtml(workspace) + "</strong></div>" + (pinnedHead ? '<div><span>Pinned review head</span><strong>' + escapeHtml(pinnedHead.slice(0, 12)) + "</strong></div>" : "") + "</div>" +
+      (session ? '<div class="initial-prompt"><span>DISPATCH COMMAND</span><code>' + escapeHtml(session.initialPrompt) + "</code></div>" : "") + content + "</section></div>";
   }
 
   function render() {
@@ -787,6 +927,7 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
   function closeDrawer() {
     const focusKey = state.returnFocusKey;
     state.selectedKey = null;
+    state.selectedChildKey = null;
     render();
     if (focusKey) restoreFocus("candidate:" + focusKey);
   }
@@ -814,9 +955,14 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
   function bindInteractions() {
     document.querySelectorAll("[data-candidate-key]").forEach((element) => element.addEventListener("click", () => {
       state.selectedKey = element.dataset.candidateKey;
+      state.selectedChildKey = null;
       state.returnFocusKey = state.selectedKey;
       render();
       document.querySelector("[data-close-drawer]").focus();
+    }));
+    document.querySelectorAll("[data-child-key]").forEach((element) => element.addEventListener("click", () => {
+      state.selectedChildKey = element.dataset.childKey;
+      render();
     }));
     document.querySelectorAll("[data-stage]").forEach((element) => element.addEventListener("click", () => {
       const targetState = element.dataset.state === "on"
@@ -859,7 +1005,10 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
       timestamp: message.occurredAt,
       kind: ACTIVITY_KINDS.has(message.kind) ? message.kind : "coordinator",
       message: message.message || (message.data === undefined ? message.kind : JSON.stringify(message.data)),
-      ...(Number.isInteger(details.toolCount) ? { toolCount: details.toolCount } : {})
+      ...(Number.isInteger(details.toolCount) ? { toolCount: details.toolCount } : {}),
+      ...(typeof details.toolName === "string" ? { toolName: details.toolName } : {}),
+      ...(typeof details.toolCallId === "string" ? { toolCallId: details.toolCallId } : {}),
+      ...(isRecord(details.child) ? { child: details.child } : {})
     };
     validateActivityEntry(event, "activity.event");
     if (candidate) candidate.activity = event.message;

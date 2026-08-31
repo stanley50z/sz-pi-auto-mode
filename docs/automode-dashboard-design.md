@@ -91,16 +91,18 @@ Selecting a card opens a read-only activity drawer.
 For a live or persisted Ticket Session it shows:
 
 - item, Stage, lifecycle state, attempt count, session identity, and workspace
-- the exact initial Ticket Session prompt pinned above the scrolling activity
-- a Pi-like transcript containing assistant messages and muted thinking summaries
-- tool activity collapsed to `+ N tool calls`, without tool names, arguments, commands, or result bodies
+- the canonical Ticket Session dispatch command pinned above the scrolling activity
+- a Pi-like parent transcript containing assistant messages and muted thinking summaries
+- ordinary tool activity collapsed to `+ N tool calls`, without names, arguments, commands, or result bodies
+- visible `automode_panel` and native `subagent_*` launch rows
+- a desktop split inspector listing each Panel seat or native subagent child; selecting one shows its initial prompt, execution profile, pinned review head when present, compact transcript, and lifecycle
 - errors and terminal results
 - prior attempts retained for the current Coordinator process
 - the same compact transcript reconstructed from persisted Pi conversation history after retry or recovery
 
 Native lifecycle and streaming events such as `agent_start`, `turn_start`, `message_start`, `message_update`, and `message_end` are transport details and never appear as transcript rows.
 
-The activity view never sends prompts, mutates ticket work, attaches a second Pi process, or imports Ticket Session context into the Main Session.
+The activity view never sends prompts, mutates ticket work, attaches another process, or imports Ticket Session context into the Main Session. It observes the controlled Panel processes already launched by the Ticket Session. Native subagent launch metadata is displayable when such tools are present, but this dashboard feature does not add subagent capabilities to Automode.
 
 Ticket Sessions continue as isolated background Pi processes. There is no live terminal attach or takeover in this design.
 
@@ -181,8 +183,10 @@ The browser must not read GitHub, Pi session files, worktrees, or the Automode R
 ### Session activity
 
 - [ ] Selecting an active card opens a live Pi-like transcript without starting another Pi process.
-- [ ] The exact initial Ticket Session prompt remains pinned above the scrolling activity.
-- [ ] The transcript shows assistant messages, thinking summaries, and only aggregate tool counts; native event names and tool details are absent.
+- [ ] The canonical Ticket Session dispatch command remains pinned above the scrolling activity.
+- [ ] Ordinary tools remain aggregated while `automode_panel` and native `subagent_*` launch rows stay visible.
+- [ ] The desktop split inspector lists Panel seats and native subagent children; each child exposes its initial prompt, profile, lifecycle, and compact activity without exposing ordinary tool names or payloads.
+- [ ] An Auto-Review child displays the exact pinned review head.
 - [ ] Prior persisted conversation/attempt history uses the same compact transcript after retry or recovery.
 - [ ] Close, Escape, and clicking the dimmed backdrop dismiss the drawer and restore focus to its Stage Candidate.
 - [ ] A candidate without a Ticket Session clearly says no session exists and explains why.

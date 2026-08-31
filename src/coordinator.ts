@@ -1,3 +1,4 @@
+import type { NestedSessionEvent } from "./nested-session.js";
 import { AutomodeRestartRequiredError } from "./restart-required.js";
 import {
   AUTOMATION_STAGES,
@@ -90,6 +91,8 @@ export type TicketSessionActivityKind =
   | "assistant"
   | "thinking"
   | "tools"
+  | "tool"
+  | "child"
   | "error"
   | "terminal"
   | "coordinator";
@@ -108,6 +111,19 @@ export type TicketSessionObservedActivity =
   | (TicketSessionObservedActivityBase & {
       readonly kind: "tools";
       readonly toolCount: number;
+    })
+  | (TicketSessionObservedActivityBase & {
+      readonly kind: "tool";
+      readonly toolName: string;
+      readonly toolCallId: string;
+      readonly toolCount?: never;
+    })
+  | (TicketSessionObservedActivityBase & {
+      readonly kind: "child";
+      readonly toolName: string;
+      readonly toolCallId: string;
+      readonly child: NestedSessionEvent;
+      readonly toolCount?: never;
     })
   | (TicketSessionObservedActivityBase & {
       readonly kind: "error" | "terminal" | "coordinator";
@@ -243,6 +259,9 @@ export interface CoordinatorActivity {
     readonly sessionFile: string;
     readonly workspace?: string;
     readonly toolCount?: number;
+    readonly toolName?: string;
+    readonly toolCallId?: string;
+    readonly child?: NestedSessionEvent;
   };
 }
 
@@ -472,6 +491,10 @@ export class AutomodeCoordinator {
           sessionFile: handle.sessionFile,
           ...(active?.workspace === undefined ? {} : { workspace: active.workspace.worktree }),
           ...(activity.toolCount === undefined ? {} : { toolCount: activity.toolCount }),
+          ...(activity.kind === "tool" || activity.kind === "child"
+            ? { toolName: activity.toolName, toolCallId: activity.toolCallId }
+            : {}),
+          ...(activity.kind === "child" ? { child: activity.child } : {}),
         },
       },
     });

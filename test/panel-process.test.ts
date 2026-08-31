@@ -82,7 +82,7 @@ test("the production launcher runs controlled Pi and Claude Code seats with exac
   assert.ok(calls[1]!.args.includes("Read,Grep,Glob"));
 });
 
-test("the production launcher preserves a reviewer's Markdown report", async () => {
+test("the production launcher preserves and streams a reviewer's Markdown activity", async () => {
   const report = [
     "## Findings",
     "",
@@ -90,17 +90,28 @@ test("the production launcher preserves a reviewer's Markdown report", async () 
     "",
     "`src/usage/SubscriptionUsage.ts:476-479` publishes a stale snapshot.",
   ].join("\n");
+  const streamed = [
+    JSON.stringify({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "Inspecting the route" },
+          { type: "toolCall", id: "read-1", name: "read", arguments: { path: "src/route.ts" } },
+          { type: "toolCall", id: "grep-1", name: "grep", arguments: { pattern: "mtime" } },
+        ],
+      },
+    }),
+    JSON.stringify({
+      type: "message_end",
+      message: { role: "assistant", content: [{ type: "text", text: report }] },
+    }),
+  ].join("\n") + "\n";
   const runner: PanelCommandRunner = {
-    async run() {
-      return {
-        exitCode: 0,
-        signal: null,
-        stderr: "",
-        stdout: `${JSON.stringify({
-          type: "message_end",
-          message: { role: "assistant", content: [{ type: "text", text: report }] },
-        })}\n`,
-      };
+    async run(_command, _args, _cwd, _env, onStdout) {
+      onStdout?.(streamed.slice(0, 80));
+      onStdout?.(streamed.slice(80));
+      return { exitCode: 0, signal: null, stderr: "", stdout: streamed };
     },
   };
   const piPackageDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../node_modules/@earendil-works/pi-coding-agent");
@@ -111,6 +122,7 @@ test("the production launcher preserves a reviewer's Markdown report", async () 
     runner,
   });
 
+  const activity: unknown[] = [];
   const result = await launcher.launch({
     kind: "review",
     attribution: {
@@ -127,7 +139,12 @@ test("the production launcher preserves a reviewer's Markdown report", async () 
     },
     prompt: "Return a Markdown review.",
     tools: ["read", "grep", "find", "ls"],
+    onActivity: (entry) => activity.push(entry),
   });
 
   assert.equal(result.stdout, report);
+  assert.deepEqual(activity, [
+    { kind: "thinking", message: "Inspecting the route", toolCount: 2 },
+    { kind: "assistant", message: report },
+  ]);
 });

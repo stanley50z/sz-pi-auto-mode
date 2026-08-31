@@ -1,6 +1,7 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import type { ExecutionProfile } from "./capability-profile.js";
+import type { NestedSessionEvent } from "./nested-session.js";
 import { Type } from "typebox";
 import {
   createPanelSeats,
@@ -11,9 +12,16 @@ import {
   type ReviewRoundContext,
 } from "./panel-runtime.js";
 
+export interface TicketPanelNestedActivity {
+  readonly toolName: "automode_panel";
+  readonly toolCallId: string;
+  readonly child: NestedSessionEvent;
+}
+
 export function createTicketPanelExtension(
   launcher: PanelSeatLauncher,
   executions: readonly ExecutionProfile[],
+  onNestedActivity?: (activity: TicketPanelNestedActivity) => void,
 ): InlineExtension {
   const seats = createPanelSeats(executions);
   return {
@@ -27,13 +35,18 @@ export function createTicketPanelExtension(
           kind: StringEnum(["grilling", "review"] as const),
           context: Type.Unknown(),
         }),
-        async execute(_toolCallId, params) {
+        async execute(toolCallId, params) {
+          const nestedSessions: NestedSessionEvent[] = [];
+          const emit = (child: NestedSessionEvent): void => {
+            nestedSessions.push(child);
+            onNestedActivity?.({ toolName: "automode_panel", toolCallId, child });
+          };
           const result = params.kind === "grilling"
-            ? await runGrillingPanel({ context: params.context as GrillingRoundContext }, launcher, seats)
-            : await runReviewPanel({ context: params.context as ReviewRoundContext }, launcher, seats);
+            ? await runGrillingPanel({ context: params.context as GrillingRoundContext }, launcher, seats, emit)
+            : await runReviewPanel({ context: params.context as ReviewRoundContext }, launcher, seats, emit);
           return {
             content: [{ type: "text", text: JSON.stringify(result) }],
-            details: result,
+            details: { ...result, nestedSessions },
           };
         },
       });
