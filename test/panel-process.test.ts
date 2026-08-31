@@ -81,3 +81,53 @@ test("the production launcher runs controlled Pi and Claude Code seats with exac
   ]);
   assert.ok(calls[1]!.args.includes("Read,Grep,Glob"));
 });
+
+test("the production launcher preserves a reviewer's Markdown report", async () => {
+  const report = [
+    "## Findings",
+    "",
+    "**[P1] Reconcile after provider-registry changes**",
+    "",
+    "`src/usage/SubscriptionUsage.ts:476-479` publishes a stale snapshot.",
+  ].join("\n");
+  const runner: PanelCommandRunner = {
+    async run() {
+      return {
+        exitCode: 0,
+        signal: null,
+        stderr: "",
+        stdout: `${JSON.stringify({
+          type: "message_end",
+          message: { role: "assistant", content: [{ type: "text", text: report }] },
+        })}\n`,
+      };
+    },
+  };
+  const piPackageDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../node_modules/@earendil-works/pi-coding-agent");
+  const launcher = new CliPanelProcessLauncher({
+    cwd: "C:/repository",
+    normalAgentDir: "C:/normal-agent",
+    piPackageDir,
+    runner,
+  });
+
+  const result = await launcher.launch({
+    kind: "review",
+    attribution: {
+      seat: "seat-1",
+      harness: "pi",
+      providerSlug: "openai-codex",
+      modelSlug: "gpt-5.6-sol",
+      reasoningLevel: "high",
+    },
+    context: {
+      round: 1,
+      headSha: "cf410a3438",
+      brief: "Review provider reconciliation against the requirement that registry changes appear immediately. Inspect the exact diff and test evidence; report only introduced defects.",
+    },
+    prompt: "Return a Markdown review.",
+    tools: ["read", "grep", "find", "ls"],
+  });
+
+  assert.equal(result.stdout, report);
+});

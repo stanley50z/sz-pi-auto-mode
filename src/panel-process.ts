@@ -76,7 +76,7 @@ function parseStructuredText(text: string, context: string): string {
   return JSON.stringify(value);
 }
 
-function normalizePiOutput(output: string): string {
+function normalizePiOutput(output: string, structured: boolean): string {
   let finalText: string | undefined;
   for (const line of output.split("\n")) {
     if (line.trim().length === 0) continue;
@@ -101,10 +101,10 @@ function normalizePiOutput(output: string): string {
     if (text.length > 0) finalText = text;
   }
   if (finalText === undefined) throw new Error("Pi Panel seat did not emit a final assistant answer");
-  return parseStructuredText(finalText, "Pi Panel seat");
+  return structured ? parseStructuredText(finalText, "Pi Panel seat") : finalText;
 }
 
-function normalizeClaudeOutput(output: string): string {
+function normalizeClaudeOutput(output: string, structured: boolean): string {
   let envelope: unknown;
   try {
     envelope = JSON.parse(output.trim()) as unknown;
@@ -115,9 +115,9 @@ function normalizeClaudeOutput(output: string): string {
   const result = [...records].reverse().find((entry) => (
     !!entry && typeof entry === "object" && typeof (entry as { result?: unknown }).result === "string"
   )) as { result: string; is_error?: unknown } | undefined;
-  if (!result) throw new Error("Claude Code Panel seat did not emit a structured result");
+  if (!result) throw new Error("Claude Code Panel seat did not emit a final assistant answer");
   if (result.is_error === true) throw new Error("Claude Code Panel seat reported an error");
-  return parseStructuredText(result.result, "Claude Code Panel seat");
+  return structured ? parseStructuredText(result.result, "Claude Code Panel seat") : result.result;
 }
 
 function assertTools(tools: readonly string[]): void {
@@ -161,7 +161,7 @@ export class CliPanelProcessLauncher implements ProductionPanelProcessLauncher {
         request.prompt,
       ], this.#cwd, this.#env);
       if (result.exitCode !== 0 || result.signal !== null) return result;
-      return { ...result, stdout: normalizePiOutput(result.stdout) };
+      return { ...result, stdout: normalizePiOutput(result.stdout, request.kind === "grilling") };
     }
 
     const claudeTools = [...new Set(request.tools.map((tool) => {
@@ -180,6 +180,6 @@ export class CliPanelProcessLauncher implements ProductionPanelProcessLauncher {
       request.prompt,
     ], this.#cwd, this.#env);
     if (result.exitCode !== 0 || result.signal !== null) return result;
-    return { ...result, stdout: normalizeClaudeOutput(result.stdout) };
+    return { ...result, stdout: normalizeClaudeOutput(result.stdout, request.kind === "grilling") };
   }
 }

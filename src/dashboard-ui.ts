@@ -11,6 +11,7 @@ import {
   type AutomationStageOperatingStateValue,
   type AutomodeMode,
 } from "./stage-configuration.js";
+import { createCanonicalTicketSessionPrompt } from "./ticket-session-prompt.js";
 
 export type DashboardStageOperatingState = AutomationStageOperatingStateValue;
 export type DashboardCandidateStatus =
@@ -56,6 +57,7 @@ export interface DashboardTicketSessionActivity {
   readonly sessionId: string;
   readonly sessionFile?: string;
   readonly workspace?: string;
+  readonly initialPrompt: string;
   readonly attempts: readonly DashboardSessionAttempt[];
 }
 
@@ -367,13 +369,16 @@ button:disabled { cursor: not-allowed; opacity: .58; }
   background: #0a1220;
   box-shadow: var(--shadow);
 }
-.drawer-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); padding: 16px 18px; }
+.drawer-header { display: flex; flex: 0 0 auto; align-items: flex-start; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); padding: 16px 18px; }
 .drawer-header h2 { margin: 4px 0 0; font-size: 20px; line-height: 1.25; overflow-wrap: anywhere; }
 .close { border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-raised); padding: 7px 10px; }
-.drawer-meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; border-bottom: 1px solid var(--line); padding: 12px 18px; }
+.drawer-meta { display: grid; flex: 0 0 auto; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; border-bottom: 1px solid var(--line); padding: 12px 18px; }
 .drawer-meta span { display: block; color: var(--muted); font-size: 10px; }
 .drawer-meta strong { display: block; margin-top: 3px; overflow-wrap: anywhere; }
-.feed { overflow: auto; padding: 16px 18px 30px; }
+.initial-prompt { flex: 0 0 auto; border-bottom: 1px solid var(--line); background: #0f1a2d; padding: 10px 18px 12px; }
+.initial-prompt span { display: block; margin-bottom: 4px; color: var(--accent); font-size: 10px; font-weight: 800; letter-spacing: .08em; }
+.initial-prompt code { display: block; overflow-wrap: anywhere; color: #d9e8ff; font: inherit; font-size: 12px; white-space: pre-wrap; }
+.feed { flex: 1; min-height: 0; overflow: auto; padding: 16px 18px 30px; }
 .attempt { margin-bottom: 18px; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; }
 .attempt-header { display: flex; justify-content: space-between; gap: 12px; background: var(--surface-raised); color: var(--muted); padding: 9px 11px; font-size: 11px; }
 .transcript { padding: 16px 14px 18px; }
@@ -510,7 +515,7 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
   }
 
   function validateSession(value, path) {
-    if (!isRecord(value) || !optionalString(value.processId) || typeof value.sessionId !== "string" || !optionalString(value.sessionFile) || !optionalString(value.workspace) || !Array.isArray(value.attempts)) contractError(path);
+    if (!isRecord(value) || !optionalString(value.processId) || typeof value.sessionId !== "string" || !optionalString(value.sessionFile) || !optionalString(value.workspace) || typeof value.initialPrompt !== "string" || !Array.isArray(value.attempts)) contractError(path);
     value.attempts.forEach((attempt, index) => {
       const attemptPath = path + ".attempts[" + index + "]";
       if (!isRecord(attempt) || !isCount(attempt.attempt) || (attempt.state !== "current" && attempt.state !== "settled") || !Array.isArray(attempt.events) || !optionalString(attempt.terminalResult)) contractError(attemptPath);
@@ -663,7 +668,8 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
       : '<div class="no-session"><div><h3>No Ticket Session exists yet</h3><p>' + escapeHtml(candidate.reason) + "</p><p>Inspecting this candidate is read-only. Activity will appear only after the Coordinator dispatches it.</p></div></div>";
     return '<div class="drawer-backdrop"><section class="drawer" role="dialog" aria-modal="true" aria-labelledby="activity-title">' +
       '<header class="drawer-header"><div><p class="eyebrow">' + escapeHtml(STAGE_LABELS[candidate.stage]) + ' · READ-ONLY ACTIVITY</p><h2 id="activity-title">' + escapeHtml(candidate.item) + " · " + escapeHtml(candidate.title) + '</h2></div><button class="close" type="button" data-close-drawer data-focus-id="drawer-close">Close</button></header>' +
-      '<div class="drawer-meta"><div><span>Lifecycle</span><strong>' + status(candidate.status) + "</strong></div><div><span>Attempt</span><strong>" + candidate.attempt + "/5</strong></div><div><span>Process</span><strong>" + escapeHtml(session?.processId ?? "Not started") + "</strong></div><div><span>Session</span><strong>" + escapeHtml(session ? session.sessionId : "Not created") + "</strong></div><div><span>Workspace</span><strong>" + escapeHtml(workspace) + "</strong></div></div>" + content + "</section></div>";
+      '<div class="drawer-meta"><div><span>Lifecycle</span><strong>' + status(candidate.status) + "</strong></div><div><span>Attempt</span><strong>" + candidate.attempt + "/5</strong></div><div><span>Process</span><strong>" + escapeHtml(session?.processId ?? "Not started") + "</strong></div><div><span>Session</span><strong>" + escapeHtml(session ? session.sessionId : "Not created") + "</strong></div><div><span>Workspace</span><strong>" + escapeHtml(workspace) + "</strong></div></div>" +
+      (session ? '<div class="initial-prompt"><span>INITIAL PROMPT</span><code>' + escapeHtml(session.initialPrompt) + "</code></div>" : "") + content + "</section></div>";
   }
 
   function render() {
@@ -986,6 +992,7 @@ function mapDashboardCandidate(
         sessionId: candidate.session.sessionId,
         sessionFile: candidate.session.sessionFile,
         ...(candidate.session.workspace === undefined ? {} : { workspace: candidate.session.workspace }),
+        initialPrompt: createCanonicalTicketSessionPrompt(candidate.skillName, candidate.item.url),
         attempts: [],
       },
     }),

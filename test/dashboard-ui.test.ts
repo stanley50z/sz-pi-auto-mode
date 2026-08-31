@@ -124,6 +124,7 @@ test("Coordinator Stage Candidates map to the browser projection without tracker
       sessionId: "session-68",
       sessionFile: "/sessions/68.jsonl",
       workspace: "/worktrees/issue-68",
+      initialPrompt: "/skill:triage https://github.com/example/repository/issues/68",
       attempts: [],
     },
   });

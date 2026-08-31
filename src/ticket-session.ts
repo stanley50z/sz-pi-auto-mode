@@ -14,7 +14,10 @@ import type {
 import { resolveAutomodePaths } from "./paths.js";
 import { AutomodeRestartRequiredError } from "./restart-required.js";
 import type { AutomationStageConfiguration } from "./stage-configuration.js";
+import { createCanonicalTicketSessionPrompt } from "./ticket-session-prompt.js";
 import { createAssistantTranscript } from "./ticket-transcript.js";
+
+export { createCanonicalTicketSessionPrompt } from "./ticket-session-prompt.js";
 
 export const TICKET_SESSION_PROTOCOL_VERSION = 2 as const;
 
@@ -190,23 +193,6 @@ const defaultLauncher: TicketSessionProcessLauncher = ({ entrypoint, cwd, env })
     windowsHide: true,
   }) as TicketSessionProcess;
 };
-
-export function createCanonicalTicketSessionPrompt(skillName: string, itemUrl: string): string {
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(skillName)) {
-    throw new Error(`Invalid canonical skill name: ${skillName}`);
-  }
-  if (/\s/.test(itemUrl)) throw new Error("Ticket item URL must not contain whitespace");
-  let parsed: URL;
-  try {
-    parsed = new URL(itemUrl);
-  } catch (error) {
-    throw new Error(`Invalid ticket item URL: ${itemUrl}`, { cause: error });
-  }
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    throw new Error(`Ticket item URL must use HTTP or HTTPS: ${itemUrl}`);
-  }
-  return `/skill:${skillName} ${itemUrl}`;
-}
 
 function isChildEvent(message: unknown): message is ChildEventMessage {
   if (!message || typeof message !== "object") return false;

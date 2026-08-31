@@ -229,12 +229,7 @@ test("review launches every configured seat concurrently on one immutable exact-
     context: {
       round: 1,
       headSha: "0123456789abcdef",
-      pullRequestBody: "Closes #40",
-      linkedIssueOrSpecification: "Issue #40 and specification #21",
-      repositoryGuidance: ["AGENTS.md: follow TDD"],
-      mergeBaseDiff: "diff --git a/src/a.ts b/src/a.ts",
-      commits: ["abc123 Implement runtime"],
-      validationEvidence: ["npm test passed"],
+      brief: "Review PR #40 against specification #21 and AGENTS.md. Inspect the merge-base diff and recorded validation evidence.",
     },
   }, launcher, panelSeats);
 
@@ -245,66 +240,49 @@ test("review launches every configured seat concurrently on one immutable exact-
   assert.equal(launches[1]!.context, launches[2]!.context);
   assert.equal(Object.isFrozen(launches[0]!.context), true);
   assert.equal(launches.every((launch) => launch.prompt === launches[0]!.prompt), true);
+  assert.match(launches[0]!.prompt, /Markdown review/);
+  assert.doesNotMatch(launches[0]!.prompt, /Return JSON|no-actionable-findings|rootCause/);
 
-  completions.forEach((complete) => complete({ outcome: "no-actionable-findings", findings: [] }));
+  completions.forEach((complete, index) => complete(
+    index === 0
+      ? "No actionable findings."
+      : `**[P1] Fix the parser**\n\n\`src/parser.ts:42\` accepts incomplete input.`,
+  ));
   const result = await running;
-  assert.deepEqual(result.reports, panelSeats.map((seat) => ({
+  assert.deepEqual(result.reports, panelSeats.map((seat, index) => ({
     round: 1,
     headSha: "0123456789abcdef",
     ...seat,
-    outcome: "no-actionable-findings",
-    findings: [],
+    markdown: index === 0
+      ? "No actionable findings."
+      : "**[P1] Fix the parser**\n\n`src/parser.ts:42` accepts incomplete input.",
   })));
+  assert.deepEqual(result.failures, []);
 });
 
-test("review fails after every seat terminates unless every report is usable", async () => {
+test("review returns every completed report alongside failed-seat diagnostics", async () => {
   const calls: string[] = [];
   const launcher: PanelSeatLauncher = async ({ attribution }) => {
     calls.push(attribution.seat);
-    if (attribution.seat === "seat-2") {
-      return {
-        outcome: "findings",
-        findings: [{ rootCause: "missing evidence", violatedRequirement: "Spec #21", evidence: "" }],
-      };
-    }
-    return {
-      outcome: "findings",
-      findings: [{
-        rootCause: "The parser accepts an incomplete report",
-        violatedRequirement: "Every finding requires concrete evidence",
-        evidence: "src/parser.ts:42 accepts an empty evidence field",
-      }],
-    };
+    if (attribution.seat === "seat-2") throw new Error("provider connection closed");
+    return "**[P1] Fix the parser**\n\n`src/parser.ts:42` accepts incomplete input.";
   };
 
-  await assert.rejects(
-    () => runReviewPanel({
-      context: {
-        round: 2,
-        headSha: "fedcba9876543210",
-        pullRequestBody: "Closes #40",
-        linkedIssueOrSpecification: "Specification #21",
-        repositoryGuidance: ["AGENTS.md"],
-        mergeBaseDiff: "diff --git a/src/parser.ts b/src/parser.ts",
-        commits: ["def456 Fix parser"],
-        validationEvidence: ["focused tests pass"],
-        priorFindings: ["Parser accepted incomplete reports"],
-        reviewSessionDispositions: ["Valid and in scope"],
-        fixDiff: "diff --git a/src/parser.ts b/src/parser.ts",
-      },
-    }, launcher, panelSeats),
-    (error: unknown) => {
-      const failure = error as Error & {
-        failures: Array<{ attribution: { seat: string }; error: string }>;
-        successfulResults: unknown[];
-      };
-      assert.match(failure.message, /every configured seat/i);
-      assert.deepEqual(failure.failures.map(({ attribution }) => attribution.seat), ["seat-2"]);
-      assert.match(failure.failures[0]!.error, /requires a root cause, violated requirement, and evidence/);
-      assert.equal(failure.successfulResults.length, 2);
-      return true;
+  const result = await runReviewPanel({
+    context: {
+      round: 2,
+      headSha: "fedcba9876543210",
+      brief: "Re-review the parser fix against specification #21. Prior finding: incomplete reports were accepted. The Review Session marked it valid and in scope; inspect the fix diff and focused test evidence.",
     },
-  );
+  }, launcher, panelSeats);
+
+  assert.deepEqual(result.reports.map(({ seat, markdown }) => [seat, markdown]), [
+    ["seat-1", "**[P1] Fix the parser**\n\n`src/parser.ts:42` accepts incomplete input."],
+    ["seat-3", "**[P1] Fix the parser**\n\n`src/parser.ts:42` accepts incomplete input."],
+  ]);
+  assert.deepEqual(result.failures.map(({ attribution, error }) => [attribution.seat, error]), [
+    ["seat-2", "provider connection closed"],
+  ]);
   assert.deepEqual(calls, ["seat-1", "seat-2", "seat-3"]);
 });
 

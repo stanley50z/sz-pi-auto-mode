@@ -60,6 +60,7 @@ const proofCandidates: Readonly<Record<AutomationStage, readonly DashboardStageC
       sessionId: "dashboard-proof-session",
       sessionFile: ".pi/agent/sessions/dashboard-proof-session.jsonl",
       workspace: "worktrees/issue-50",
+      initialPrompt: "/skill:implement https://github.com/owner/repository/issues/50",
       attempts: [{
         attempt: 1,
         state: "settled",

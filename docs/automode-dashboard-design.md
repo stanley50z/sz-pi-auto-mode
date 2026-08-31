@@ -91,6 +91,7 @@ Selecting a card opens a read-only activity drawer.
 For a live or persisted Ticket Session it shows:
 
 - item, Stage, lifecycle state, attempt count, session identity, and workspace
+- the exact initial Ticket Session prompt pinned above the scrolling activity
 - a Pi-like transcript containing assistant messages and muted thinking summaries
 - tool activity collapsed to `+ N tool calls`, without tool names, arguments, commands, or result bodies
 - errors and terminal results
@@ -180,6 +181,7 @@ The browser must not read GitHub, Pi session files, worktrees, or the Automode R
 ### Session activity
 
 - [ ] Selecting an active card opens a live Pi-like transcript without starting another Pi process.
+- [ ] The exact initial Ticket Session prompt remains pinned above the scrolling activity.
 - [ ] The transcript shows assistant messages, thinking summaries, and only aggregate tool counts; native event names and tool details are absent.
 - [ ] Prior persisted conversation/attempt history uses the same compact transcript after retry or recovery.
 - [ ] Close, Escape, and clicking the dimmed backdrop dismiss the drawer and restore focus to its Stage Candidate.

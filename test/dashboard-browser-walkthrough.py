@@ -324,7 +324,36 @@ try:
     wait_until(lambda: has_accessible("dialog", "#50"), "read-only activity drawer")
     wait_until(lambda: "The implementation now passes the full suite." in body_text(), "drawer assistant activity")
     wait_until(lambda: "+ 3 tool calls" in body_text(), "drawer collapsed tool count")
+    wait_until(
+        lambda: "/skill:implement https://github.com/owner/repository/issues/50" in body_text(),
+        "pinned initial Ticket Session prompt",
+    )
+    prompt_position = json.loads(js("""JSON.stringify((() => {
+      const prompt = document.querySelector('.initial-prompt').getBoundingClientRect();
+      const feed = document.querySelector('.feed').getBoundingClientRect();
+      return {promptTop: prompt.top, promptBottom: prompt.bottom, feedTop: feed.top};
+    })())"""))
+    if prompt_position["promptBottom"] > prompt_position["feedTop"] + 1:
+        raise AssertionError(f"Initial prompt is not pinned above the scrolling transcript: {prompt_position!r}")
     capture_screenshot(str(artifact_dir / "activity-drawer-1440x900.png"))
+    set_exact_viewport(390, 500)
+    prompt_before_scroll = json.loads(js("""JSON.stringify((() => {
+      const prompt = document.querySelector('.initial-prompt').getBoundingClientRect();
+      const feed = document.querySelector('.feed');
+      return {top: prompt.top, bottom: prompt.bottom, scrollHeight: feed.scrollHeight, clientHeight: feed.clientHeight};
+    })())"""))
+    js("document.querySelector('.feed').scrollTop = document.querySelector('.feed').scrollHeight")
+    wait(0.1)
+    prompt_after_scroll = json.loads(js("""JSON.stringify((() => {
+      const prompt = document.querySelector('.initial-prompt').getBoundingClientRect();
+      const feed = document.querySelector('.feed');
+      return {top: prompt.top, bottom: prompt.bottom, scrollTop: feed.scrollTop};
+    })())"""))
+    if prompt_before_scroll["scrollHeight"] <= prompt_before_scroll["clientHeight"] or prompt_after_scroll["scrollTop"] <= 0:
+        raise AssertionError(f"Activity feed did not scroll: before={prompt_before_scroll!r} after={prompt_after_scroll!r}")
+    if prompt_before_scroll["top"] != prompt_after_scroll["top"] or prompt_before_scroll["bottom"] != prompt_after_scroll["bottom"]:
+        raise AssertionError(f"Initial prompt moved with activity: before={prompt_before_scroll!r} after={prompt_after_scroll!r}")
+    set_exact_viewport(1440, 900)
     click_at_xy(100, 100)
     wait_until(lambda: not has_accessible("dialog", "#50"), "backdrop click to close activity drawer")
     if "Inspect #50" not in active_control()["name"]:

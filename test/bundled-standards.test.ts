@@ -49,3 +49,16 @@ test("the Agent Brief is one verification contract shared by every delivery stag
   assert.match(stages[1]!, /Run every applicable proof step/);
   assert.match(stages[2]!, /Re-run every applicable proof step/);
 });
+
+test("Auto-Review publishes commit-pinned GitHub reviews with inline findings", () => {
+  const review = bundled("skills/automode/code-review/SKILL.md");
+
+  assert.match(review, /GitHub pull-request review/);
+  assert.match(review, /Reviewed commit:/);
+  assert.match(review, /POST \/repos\/\{owner\}\/\{repo\}\/pulls\/\{number\}\/reviews/);
+  assert.match(review, /`commit_id`/);
+  assert.match(review, /`event: "COMMENT"`/);
+  assert.match(review, /`path`, `line`, `side: "RIGHT"`, and `body`/);
+  assert.match(review, /Post every completed Reviewer report even when another seat failed/);
+  assert.match(review, /round, head SHA, and seat/);
+});

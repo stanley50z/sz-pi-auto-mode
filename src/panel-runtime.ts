@@ -53,15 +53,7 @@ export interface GrillingSeatLaunchRequest extends PanelSeatLaunchBase {
 export interface ReviewRoundContext {
   readonly round: number;
   readonly headSha: string;
-  readonly pullRequestBody: string;
-  readonly linkedIssueOrSpecification: string;
-  readonly repositoryGuidance: readonly string[];
-  readonly mergeBaseDiff: string;
-  readonly commits: readonly string[];
-  readonly validationEvidence: readonly string[];
-  readonly priorFindings?: readonly string[];
-  readonly reviewSessionDispositions?: readonly string[];
-  readonly fixDiff?: string;
+  readonly brief: string;
 }
 
 export interface ReviewSeatLaunchRequest extends PanelSeatLaunchBase {
@@ -95,6 +87,11 @@ export function createProductionPanelSeatLauncher(
         : `terminated by ${result.signal}`;
       const detail = result.stderr.trim();
       throw new Error(`Panel seat process ${termination}${detail ? `: ${detail}` : ""}`);
+    }
+    if (request.kind === "review") {
+      const report = result.stdout.trim();
+      if (!report) throw new Error("Reviewer returned an empty report");
+      return report;
     }
     try {
       const output: unknown = JSON.parse(result.stdout.trim());
@@ -134,21 +131,15 @@ export interface ReviewPanelRequest {
   readonly context: ReviewRoundContext;
 }
 
-export interface ReviewFinding {
-  readonly rootCause: string;
-  readonly violatedRequirement: string;
-  readonly evidence: string;
-}
-
 export interface AttributedReviewReport extends PanelSeatAttribution {
   readonly round: number;
   readonly headSha: string;
-  readonly outcome: "findings" | "no-actionable-findings";
-  readonly findings: readonly ReviewFinding[];
+  readonly markdown: string;
 }
 
 export interface ReviewPanelResult {
   readonly reports: readonly AttributedReviewReport[];
+  readonly failures: readonly PanelSeatFailure[];
 }
 
 function panelFailureDiagnostic(failure: PanelSeatFailure): string {
@@ -158,12 +149,10 @@ function panelFailureDiagnostic(failure: PanelSeatFailure): string {
 
 export class PanelRuntimeError extends Error {
   readonly failures: readonly PanelSeatFailure[];
-  readonly successfulResults: readonly unknown[];
 
   constructor(
     message: string,
     failures: readonly PanelSeatFailure[],
-    successfulResults: readonly unknown[] = [],
   ) {
     const diagnostic = failures.length === 0
       ? message
@@ -171,7 +160,6 @@ export class PanelRuntimeError extends Error {
     super(diagnostic);
     this.name = "PanelRuntimeError";
     this.failures = immutableClone(failures);
-    this.successfulResults = immutableClone(successfulResults);
   }
 }
 
@@ -357,66 +345,25 @@ function validateReviewContext(context: ReviewRoundContext): void {
     throw new Error("Review round number must be a positive integer");
   }
   if (!/^[a-f0-9]{7,64}$/i.test(context.headSha)) throw new Error("Review context requires an exact head SHA");
-  const strings = [
-    context.pullRequestBody,
-    context.linkedIssueOrSpecification,
-    context.mergeBaseDiff,
-  ];
-  if (strings.some((value) => !nonEmptyString(value))) {
-    throw new Error("Review context is missing pull-request, specification, or diff content");
-  }
-  const lists = [context.repositoryGuidance, context.commits, context.validationEvidence];
-  if (lists.some((list) => list.length === 0 || list.some((value) => !nonEmptyString(value)))) {
-    throw new Error("Review context requires guidance, commits, and validation evidence");
-  }
-  if (context.round > 1 && (
-    !context.priorFindings
-    || !context.reviewSessionDispositions
-    || !nonEmptyString(context.fixDiff)
-  )) {
-    throw new Error("Later review rounds require prior findings, Review Session dispositions, and the fix diff");
-  }
+  if (!nonEmptyString(context.brief)) throw new Error("Review context requires a review brief");
 }
 
 function reviewPrompt(context: ReviewRoundContext): string {
   return [
     "Independently review this exact head for correctness, specification compliance, and repository standards.",
     "Round one must be exhaustive. A later round must verify prior root causes, fixes, and directly affected invariant paths.",
-    "Report only substantiated root causes. For each finding, identify the violated requirement, rule, or invariant and concrete evidence. Do not decide scope or prescribe workflow actions.",
-    "Do not ask a human, progress queues, dispatch stages, launch subagents, merge, or mutate tracker state.",
-    "Return JSON with outcome set to findings or no-actionable-findings and a findings array. Each finding requires rootCause, violatedRequirement, and evidence.",
+    "Write a concise Markdown review for another agent to interpret and publish as a GitHub pull-request review.",
+    "For each substantiated pull-request-introduced finding, give a [P0]-[P3] title, the exact changed path and line or range, the violated requirement, and concrete evidence. State 'No actionable findings.' when appropriate.",
+    "Do not decide scope or prescribe workflow actions. Do not ask a human, progress queues, dispatch stages, launch subagents, merge, or mutate tracker state.",
     JSON.stringify(context),
   ].join("\n\n");
 }
 
-function validateReviewReport(value: unknown): {
-  readonly outcome: AttributedReviewReport["outcome"];
-  readonly findings: readonly ReviewFinding[];
-} {
-  if (!value || typeof value !== "object") throw new Error("Reviewer report must be structured JSON");
-  const candidate = value as { outcome?: unknown; findings?: unknown };
-  if (
-    candidate.outcome !== "findings"
-    && candidate.outcome !== "no-actionable-findings"
-  ) throw new Error("Reviewer report requires a valid outcome");
-  if (!Array.isArray(candidate.findings)) throw new Error("Reviewer report requires a findings array");
-  if (
-    (candidate.outcome === "findings" && candidate.findings.length === 0)
-    || (candidate.outcome === "no-actionable-findings" && candidate.findings.length !== 0)
-  ) throw new Error("Reviewer report outcome must agree with its findings");
-  for (const finding of candidate.findings) {
-    if (!finding || typeof finding !== "object") throw new Error("Every review finding must be structured");
-    const fields = finding as Record<string, unknown>;
-    if (
-      !nonEmptyString(fields.rootCause)
-      || !nonEmptyString(fields.violatedRequirement)
-      || !nonEmptyString(fields.evidence)
-    ) throw new Error("Every review finding requires a root cause, violated requirement, and evidence");
+function reviewMarkdown(value: unknown): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error("Reviewer report must contain Markdown text");
   }
-  return immutableClone({
-    outcome: candidate.outcome,
-    findings: candidate.findings as ReviewFinding[],
-  });
+  return value.trim();
 }
 
 export async function runReviewPanel(
@@ -447,13 +394,11 @@ export async function runReviewPanel(
       return;
     }
     try {
-      const report = validateReviewReport(result.value);
       reports.push(deepFreeze({
         round: context.round,
         headSha: context.headSha,
         ...seat,
-        outcome: report.outcome,
-        findings: report.findings,
+        markdown: reviewMarkdown(result.value),
       }));
     } catch (error) {
       failures.push(Object.freeze({
@@ -462,12 +407,5 @@ export async function runReviewPanel(
       }));
     }
   });
-  if (reports.length !== seats.length) {
-    throw new PanelRuntimeError(
-      "Review round requires usable reports from every configured seat",
-      failures,
-      reports,
-    );
-  }
-  return deepFreeze({ reports });
+  return deepFreeze({ reports, failures });
 }

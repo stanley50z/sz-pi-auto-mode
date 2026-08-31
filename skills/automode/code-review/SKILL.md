@@ -16,16 +16,22 @@ You are the authoritative Review Session for one open non-draft pull request. Th
 
 ## Review Panel round
 
-1. Call `automode_panel` once with `kind: "review"` and the complete structured exact-head context. That controlled tool dispatches every configured Reviewer seat concurrently against the same head SHA and identical context, with hidden same-round peers. Do not launch reviewer processes or subagents through any other path.
-2. Round one is exhaustive. Later rounds include prior findings, Review Session dispositions, fix diff, and directly affected invariant paths.
-3. Require one usable attributable report from every configured seat. Each report identifies round, head SHA, seat, harness, provider, model, reasoning, and either substantiated root-cause findings with violated requirement/rule/invariant plus concrete evidence, or no actionable findings. A missing report from any seat fails the Ticket Session attempt.
-4. Post each complete report as its own pull-request comment.
-5. Group findings by root cause and post a disposition comment classifying each as:
+1. Call `automode_panel` once with `kind: "review"` and `context: { round, headSha, brief }`. The brief is ordinary prose containing the complete pull-request, work-contract, repository-guidance, diff, commit, validation, and prior-round context needed for this round. The controlled tool dispatches every configured Reviewer seat concurrently against the same head SHA with hidden same-round peers. Do not launch reviewer processes or subagents through any other path.
+2. Round one is exhaustive. A later-round brief includes prior findings, Review Session dispositions, the fix diff, and directly affected invariant paths.
+3. Interpret each completed Reviewer's Markdown with your own judgment. A usable report either says no actionable findings or substantiates pull-request-introduced root causes with an exact changed path and line or range, violated requirement/rule/invariant, and concrete evidence. Formatting differences do not make a substantive report unusable.
+4. Post every completed Reviewer report even when another seat failed. Publish one actual GitHub pull-request review per seat, not an ordinary pull-request comment:
+   - Confirm the pull request still points to the pinned head immediately before posting.
+   - Read existing reviews first. A hidden marker keyed by round, head SHA, and seat makes publication idempotent across retries.
+   - Submit `POST /repos/{owner}/{repo}/pulls/{number}/reviews` through `gh api`. Set `commit_id` to the pinned head and `event: "COMMENT"` so advisory seats neither approve nor request changes.
+   - Format the review body as `## Automode review: <model>`, `Reviewed commit: <short SHA>`, a concise summary or `No actionable findings.`, full seat/provider/model/reasoning attribution, and the hidden marker.
+   - Validate each finding against the pinned diff, then attach it to the smallest relevant changed line. Each GitHub review comment supplies `path`, `line`, `side: "RIGHT"`, and `body`; add `start_line` and `start_side` for a range. Format the body as `**[P0-P3] <finding title>**` followed by the evidence and violated requirement. A claimed finding without an attachable changed line is not ready to publish.
+5. After every completed report is durable, treat each failed or unusable seat as a missing report. Post one concise failed-seat diagnostic and fail the Ticket Session attempt without disposition, fixes, or merge. Preserve already published reviews for the retry.
+6. When every configured seat has a durable usable review, group findings by root cause and post a disposition comment classifying each as:
    - valid/in scope
    - valid/out of scope
    - invalid
    - design unstable
-6. Only substantiated pull-request-introduced violations block convergence. Preferences, speculative improvements, and unsupported edge cases do not.
+7. Only substantiated pull-request-introduced violations block convergence. Preferences, speculative improvements, and unsupported edge cases do not.
 
 ## Converge
 
