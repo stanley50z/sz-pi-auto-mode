@@ -20,6 +20,7 @@ test("handoff forwards termination and cannot resume the bridge without a return
   const readyFile = join(fixture, "ready");
   const signalFile = join(fixture, "signal");
   const resumeFile = join(fixture, "resumed");
+  const cleanupFile = join(fixture, "cleaned");
   const childScript = join(fixture, "child.cjs");
   const bridgeScript = join(fixture, "bridge.mjs");
   const handoffModule = resolve(dirname(fileURLToPath(import.meta.url)), "../src/handoff.js");
@@ -50,7 +51,12 @@ const signalWhenReady = setInterval(() => {
   clearInterval(signalWhenReady);
   ${trigger};
 }, 10);
-await handoffTerminal({ command: process.execPath, args: [${JSON.stringify(childScript)}], cwd: ${JSON.stringify(fixture)} });
+await handoffTerminal({
+  command: process.execPath,
+  args: [${JSON.stringify(childScript)}],
+  cwd: ${JSON.stringify(fixture)},
+  onChildExit: () => writeFileSync(${JSON.stringify(cleanupFile)}, "cleaned"),
+});
 writeFileSync(${JSON.stringify(resumeFile)}, "resumed");
 `);
 
@@ -71,6 +77,7 @@ writeFileSync(${JSON.stringify(resumeFile)}, "resumed");
     assert.equal(readFileSync(signalFile, "utf8"), "SIGINT,SIGTERM");
   }
   assert.equal(existsSync(resumeFile), false);
+  assert.equal(readFileSync(cleanupFile, "utf8"), "cleaned");
 });
 
 test("handoff resumes the original normal Pi process after Automode requests it", async () => {

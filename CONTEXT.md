@@ -12,6 +12,10 @@ _Avoid_: Auto mode, autonomous Pi
 The minimal `/automode` entrypoint available in normal Pi that pauses the current Pi experience and starts a fresh Automode process for the repository's durable Automode Run at the Git repository root. Invoking `/automode` from the Automode Main Session gracefully drains the Coordinator and returns terminal ownership to that original normal Pi session. It does not expose Automode's mode-specific capabilities to the normal session.
 _Avoid_: `pi automode`, in-place mode toggle, Automode runtime
 
+**Automode Runtime Snapshot**:
+The immutable process-lifetime copy of Automode's compiled runtime code, bundled skills, package metadata, and runtime dependency packages captured by the Bridge before it launches a Main Session. One Coordinator process and all of its Ticket Sessions use the same snapshot, so development checkout rebuilds affect only later `/automode` launches.
+_Avoid_: live checkout runtime, durable Automode Run Record
+
 **Automode Capability Profile**:
 The explicit allowlist of tools and skills available to an Automode Run. The MVP uses a hard-coded, fail-closed profile rather than inheriting arbitrary capabilities from normal Pi; project-specific additions require an explicit allowlist.
 _Avoid_: Global skill discovery, inherited Pi setup, general configuration schema

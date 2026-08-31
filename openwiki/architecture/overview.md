@@ -1,15 +1,15 @@
 ---
 type: "Architecture Overview"
 title: "Architecture overview"
-description: "Runtime architecture for the Automode bridge, immutable configuration, fail-closed startup, controlled capability session, Main Session, and repository Coordinator lifecycle."
+description: "Runtime architecture for the Automode bridge, immutable runtime snapshot, fail-closed startup, controlled capability session, Main Session, and repository Coordinator lifecycle."
 tags: [automode, architecture, lifecycle, startup]
 openwiki:
   roles: [architecture, runtime, testing]
-  change_kinds: [lifecycle, public-api, security]
-  source_paths: [src/bridge.ts, src/automode-main.ts, src/startup.ts, src/coordinator-lock.ts, src/handoff.ts, src/handoff-protocol.ts]
-  symbols: [startAutomodeMainSession, validateAutomodeStartup, acquireRepositoryCoordinator, handoffTerminal, requestReturnToNormalPi, openLocalDashboard]
-  test_paths: [test/startup.test.ts, test/main-session.test.ts, test/coordinator-lock.test.ts, test/handoff.test.ts]
-  invariants: [Startup validation and execution attestation complete before work discovery., One live repository Coordinator owns the durable run., Main Session replacement and forking are cancelled., The authenticated GitHub actor is bound before Coordinator claims., Coordinator shutdown drains before force and preserves the lock until stopped.]
+  change_kinds: [lifecycle, public-api, security, runtime-snapshot]
+  source_paths: [src/bridge.ts, src/automode-main.ts, src/startup.ts, src/coordinator-lock.ts, src/handoff.ts, src/handoff-protocol.ts, src/launch.ts, src/runtime-snapshot.ts, src/dashboard.ts]
+  symbols: [startAutomodeMainSession, validateAutomodeStartup, acquireRepositoryCoordinator, handoffTerminal, requestReturnToNormalPi, launchAutomode, createAutomodeRuntimeSnapshot, openLocalDashboard]
+  test_paths: [test/startup.test.ts, test/main-session.test.ts, test/coordinator-lock.test.ts, test/handoff.test.ts, test/launch-runtime.test.ts, test/dashboard.test.ts]
+  invariants: [The Bridge captures one immutable Automode Runtime Snapshot before process handoff., Startup validation and execution attestation complete before work discovery., One live repository Coordinator owns the durable run., Main Session replacement and forking are cancelled., The authenticated GitHub actor is bound before Coordinator claims., Coordinator shutdown drains before force and preserves the lock until stopped.]
   validation_commands: [npm run build, "node --test dist/test/startup.test.js dist/test/main-session.test.js dist/test/coordinator-lock.test.js"]
 ---
 
@@ -17,13 +17,13 @@ openwiki:
 
 The repository now has a concrete `/automode` launch seam. Normal Pi registers the command, shows a stage selector, serializes a fixed Automation Stage Configuration baseline, and hands off to a fresh Automode Main Session in a child process.
 
-The current vocabulary in `CONTEXT.md` matches the implementation: Automode is a durable repository-scoped run with a Main Session that hosts the repository-singleton Automode Coordinator. After fail-closed startup, the Coordinator dispatches independent full-process Ticket Sessions; the Main Session never performs ticket work. Selector toggles define the launch baseline, while separate process-local Automation Stage Operating State determines current dispatch. Full-Auto requires all four Stages; Half-Auto defaults to Auto-Implement and Auto-Review and accepts any non-empty selection, including all four Stages; all stages may also be OFF at runtime. Startup validates repository identity, GitHub origin binding, required GitHub permission, the authenticated actor, fixed execution profiles, canonical skill provenance, and the live Coordinator lock before work discovery starts. The persisted Coordinator-bound state is the **Automode Run Record**, not the Automode Capability Profile, and it excludes process-local execution profiles and operating state; older `defaultReviewerExecution` data is migrated away on restart. Each `/automode` process resolves its Main Session model from the launching Pi provider/model or normal `models.json`. The capability session used during startup is the **Automode Capability Attestation Session**, not a Ticket Session.
+The current vocabulary in `CONTEXT.md` matches the implementation: Automode is a durable repository-scoped run with a Main Session that hosts the repository-singleton Automode Coordinator. The Bridge also creates an **Automode Runtime Snapshot**: an immutable temporary copy of compiled runtime files, bundled skills, package metadata, and transitive runtime dependencies used by that Main Session and its Ticket Sessions. After fail-closed startup, the Coordinator dispatches independent full-process Ticket Sessions; the Main Session never performs ticket work. Selector toggles define the launch baseline, while separate process-local Automation Stage Operating State determines current dispatch. Full-Auto requires all four Stages; Half-Auto defaults to Auto-Implement and Auto-Review and accepts any non-empty selection, including all four Stages; all stages may also be OFF at runtime. Startup validates repository identity, GitHub origin binding, required GitHub permission, the authenticated actor, fixed execution profiles, canonical skill provenance, and the live Coordinator lock before work discovery starts. The persisted Coordinator-bound state is the **Automode Run Record**, not the Automode Capability Profile, and it excludes process-local execution profiles and operating state; older `defaultReviewerExecution` data is migrated away on restart. Each `/automode` process resolves its Main Session model from the launching Pi provider/model or normal `models.json`. The capability session used during startup is the **Automode Capability Attestation Session**, not a Ticket Session.
 
 ## Implemented architecture
 
 ### Bridge and child process boundary
 
-`src/automode-main.ts`, `src/startup.ts`, `src/capability-profile.ts`, `src/capability-session.ts`, `src/controlled-services.ts`, and `src/coordinator-lock.ts` implement the startup and session boundary. The bridge/launch seam serializes the selected Automation Stage Configuration, hands it to the child process, and the child rejects tampered payloads before Main Session startup. After the dashboard binds, `startAutomodeMainSession` opens its exact validated loopback URL through `openLocalDashboard` before Coordinator discovery. `createCapabilitySession` is specifically the startup-only Automode Capability Attestation Session; [Coordinator and Ticket Sessions](coordinator.md) owns the later work-dispatch boundary.
+`src/automode-main.ts`, `src/startup.ts`, `src/capability-profile.ts`, `src/capability-session.ts`, `src/controlled-services.ts`, and `src/coordinator-lock.ts` implement the startup and session boundary. `src/launch.ts` creates the Automode Runtime Snapshot before `handoffTerminal`; `src/runtime-snapshot.ts` copies `package.json`, compiled `dist/src`, bundled `skills`, and reachable dependency packages, fingerprints source and copy both during capture and before returning, and disposes the temporary tree after child exit. The bridge/launch seam serializes the selected Automation Stage Configuration, hands it to the child process, and the child rejects tampered payloads before Main Session startup. After the dashboard binds, `startAutomodeMainSession` opens its exact validated loopback URL through `openLocalDashboard` before Coordinator discovery. `createCapabilitySession` is specifically the startup-only Automode Capability Attestation Session; [Coordinator and Ticket Sessions](coordinator.md) owns the later work-dispatch boundary.
 
 ### Immutable run configuration
 
@@ -49,6 +49,7 @@ sequenceDiagram
   participant L as Coordinator lease
   participant C as Capability session
   participant S as Main Session
+  participant D as Local dashboard
   B->>M: serialized configuration + digest
   M->>V: validate repository, GitHub, profiles
   V-->>M: validated startup
@@ -57,6 +58,10 @@ sequenceDiagram
   C-->>M: attested capability surface
   M->>S: create guarded Main Session
   M->>M: persist Automode Run Record
+  M->>D: start dashboard
+  D-->>M: exact localhost URL
+  M->>D: open URL in default browser
+  M->>C: begin discovery
   S-->>B: interactive Automode run
   S-->>B: return IPC after /automode drain
 ```

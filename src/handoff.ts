@@ -7,6 +7,7 @@ export interface HandoffOptions {
   args: string[];
   cwd: string;
   env?: NodeJS.ProcessEnv;
+  onChildExit?: () => void | Promise<void>;
 }
 
 function exitCode(code: number | null, signal: NodeJS.Signals | null): number {
@@ -62,6 +63,7 @@ export async function handoffTerminal(options: HandoffOptions): Promise<void> {
     child.off("message", receiveMessage);
   }
   const code = exitCode(...status);
+  await options.onChildExit?.();
   if (returnToNormal) {
     process.stdin.resume();
     if (code !== 0) throw new Error(`Automode exited with code ${code} while returning to normal Pi`);

@@ -3,6 +3,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createAutomodeEnvironment } from "./environment.js";
 import { handoffTerminal, type HandoffOptions } from "./handoff.js";
 import type { AutomodeLaunchRequest } from "./bridge.js";
+import {
+  createAutomodeRuntimeSnapshot,
+  type AutomodeRuntimeSnapshot,
+} from "./runtime-snapshot.js";
 import { confirmSerializedAutomationStageConfiguration } from "./stage-configuration.js";
 
 export interface AutomodeLaunchPlan extends HandoffOptions {
@@ -12,9 +16,9 @@ export interface AutomodeLaunchPlan extends HandoffOptions {
 export function createAutomodeLaunchPlan(
   request: AutomodeLaunchRequest,
   sourceEnvironment: NodeJS.ProcessEnv = process.env,
+  moduleDirectory = dirname(fileURLToPath(import.meta.url)),
 ): AutomodeLaunchPlan {
   const { environment, normalAgentDir } = createAutomodeEnvironment(sourceEnvironment);
-  const moduleDirectory = dirname(fileURLToPath(import.meta.url));
   const runtimeLoader = resolve(moduleDirectory, "pi-runtime-loader.js");
   const childEntrypoint = resolve(moduleDirectory, "automode-main.js");
   const runtimeLoaderUrl = pathToFileURL(runtimeLoader).href;
@@ -33,6 +37,28 @@ export function createAutomodeLaunchPlan(
   };
 }
 
-export async function launchAutomode(request: AutomodeLaunchRequest): Promise<void> {
-  return handoffTerminal(createAutomodeLaunchPlan(request));
+export interface AutomodeLaunchDependencies {
+  readonly createRuntimeSnapshot: (sourceModuleDirectory: string) => AutomodeRuntimeSnapshot;
+  readonly handoff: (options: HandoffOptions) => Promise<void>;
+}
+
+const defaultDependencies: AutomodeLaunchDependencies = {
+  createRuntimeSnapshot: createAutomodeRuntimeSnapshot,
+  handoff: handoffTerminal,
+};
+
+export async function launchAutomode(
+  request: AutomodeLaunchRequest,
+  dependencies: AutomodeLaunchDependencies = defaultDependencies,
+): Promise<void> {
+  const sourceModuleDirectory = dirname(fileURLToPath(import.meta.url));
+  const snapshot = dependencies.createRuntimeSnapshot(sourceModuleDirectory);
+  try {
+    await dependencies.handoff({
+      ...createAutomodeLaunchPlan(request, process.env, snapshot.moduleDirectory),
+      onChildExit: () => snapshot.dispose(),
+    });
+  } finally {
+    snapshot.dispose();
+  }
 }

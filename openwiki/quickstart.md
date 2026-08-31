@@ -5,8 +5,8 @@ description: "Entry point for navigating the Automode repository architecture, l
 tags: [repository, automode, navigation]
 openwiki:
   roles: [repository, architecture, testing]
-  change_kinds: [public-api, lifecycle, configuration]
-  source_paths: [README.md, src/automode-main.ts, src/startup.ts, package.json]
+  change_kinds: [public-api, lifecycle, configuration, runtime-snapshot]
+  source_paths: [README.md, src/automode-main.ts, src/startup.ts, src/launch.ts, src/runtime-snapshot.ts, package.json]
   validation_commands: [npm run build]
 ---
 
@@ -17,7 +17,7 @@ This repository is an early-stage Pi extension centered on **Automode**, a disti
 - the product launches from **`/automode` inside normal Pi**
 - `pi automode` is obsolete in the agent guidance
 - Automode uses a fixed launch-baseline Automation Stage Configuration, a separate process-local Automation Stage Operating State (`ON`, `DRAINING`, `OFF`), and a repository-scoped Main Session / Coordinator boundary; independent full-process Ticket Sessions perform stage work
-- the `/automode` bridge hands off to a fresh child process that confirms the serialized launch baseline, keeps terminal ownership in the launch seam, and starts from a selector that defaults to Full-Auto but allows Half-Auto to use any non-empty stage selection, including all four stages; the launching Pi provider/model configures only that process's Main Session, including models resolved from normal `models.json`; the dashboard design and supervision ADR document the Coordinator web surface
+- the `/automode` bridge captures an immutable Automode Runtime Snapshot of compiled code, bundled skills, package metadata, and reachable runtime dependencies, verifies the source and copy remain unchanged during capture, then hands off to a fresh child process that confirms the serialized launch baseline, keeps terminal ownership in the launch seam, and starts from a selector that defaults to Full-Auto but allows Half-Auto to use any non-empty stage selection, including all four stages; the launching Pi provider/model configures only that process's Main Session, including models resolved from normal `models.json`; the dashboard design and supervision ADR document the Coordinator web surface
 - startup fails closed until repository access, the Automode Capability Attestation Session, canonical skill provenance, and the repository Coordinator lock all validate; GitHub actor binding comes from `gh auth status --active` metadata, and transient GitHub startup failures are retried for up to 30 seconds before the startup path fails closed
 - the MVP is organized into four Automation Stages: Auto-Triage, Auto-Grilling, Auto-Implement, and Auto-Review
 - startup attests the fixed Panel execution profiles regardless of the launch baseline; Auto-Grilling and Auto-Review use exactly two Panel seats: Pi / `openai-codex/gpt-5.6-sol` / high reasoning and Pi / `github-copilot/claude-fable-5` / high reasoning
@@ -38,7 +38,7 @@ Start here, then follow the section pages below for the repository's runtime sea
 
 | Change area or user intent | Relevant wiki page | Exact source entry points | Important symbols or types | Focused tests | Minimal validation command |
 |---|---|---|---|---|---|
-| Change `/automode` launch or handoff | [Launch and automation](workflows/launch-and-automation.md) | `src/bridge.ts`, `src/launch.ts`, `src/handoff.ts`, `src/handoff-protocol.ts`, `src/automode-main.ts`, `src/dashboard.ts` | `startAutomodeMainSession`, `parseConfirmedAutomationStageConfiguration`, `handoffTerminal`, `requestReturnToNormalPi`, `openLocalDashboard` | `test/bridge.test.ts`, `test/stage-configuration.test.ts`, `test/process-handoff.test.ts`, `test/handoff.test.ts`, `test/main-status-card.test.ts`, `test/main-session.test.ts`, `test/dashboard.test.ts` | `npm run build && node --test dist/test/bridge.test.js dist/test/stage-configuration.test.js dist/test/process-handoff.test.js dist/test/handoff.test.js dist/test/main-status-card.test.js dist/test/main-session.test.js` |
+| Change `/automode` launch, runtime snapshot, or handoff | [Launch and automation](workflows/launch-and-automation.md) | `src/bridge.ts`, `src/launch.ts`, `src/runtime-snapshot.ts`, `src/handoff.ts`, `src/handoff-protocol.ts`, `src/automode-main.ts`, `src/dashboard.ts` | `startAutomodeMainSession`, `parseConfirmedAutomationStageConfiguration`, `launchAutomode`, `createAutomodeRuntimeSnapshot`, `handoffTerminal`, `requestReturnToNormalPi`, `openLocalDashboard` | `test/bridge.test.ts`, `test/stage-configuration.test.ts`, `test/process-handoff.test.ts`, `test/handoff.test.ts`, `test/launch-runtime.test.ts`, `test/main-status-card.test.ts`, `test/main-session.test.ts`, `test/dashboard.test.ts` | `npm run build && node --test dist/test/bridge.test.js dist/test/stage-configuration.test.js dist/test/process-handoff.test.js dist/test/handoff.test.js dist/test/launch-runtime.test.js dist/test/main-status-card.test.js dist/test/main-session.test.js dist/test/dashboard.test.js` |
 | Change startup safety, GitHub access, actor binding, or Claude Code probes | [Architecture overview](architecture/overview.md) | `src/startup.ts`, `src/automode-main.ts` | `validateAutomodeStartup`, `attestClaudeCodeExecutionProfile`, `ValidatedAutomodeStartup.actor` | `test/startup.test.ts`, `test/main-session.test.ts` | `npm run build && node --test dist/test/startup.test.js dist/test/main-session.test.js` |
 | Change skills, tools, models, or resource isolation | [Capability boundary](architecture/capability-boundary.md) | `src/capability-profile.ts`, `src/capability-session.ts`, `src/controlled-services.ts`, `src/attestation.ts` | `createAutomodeCapabilityProfile`, `createCapabilitySession`, `attestCanonicalCommands` | `test/capability-profile.test.ts`, `test/capability-session.test.ts`, `test/attestation.test.ts` | `npm run build && node --test dist/test/capability-profile.test.js dist/test/capability-session.test.js dist/test/attestation.test.js` |
 | Add or route a bundled skill, spec parent, or implementation ticket | [Skill catalog](skills/catalog.md) | `skills/native/*`, `skills/automode/*`, `skills/native/to-spec/SKILL.md`, `skills/native/to-tickets/SKILL.md`, `src/capability-profile.ts`, `src/coordinator.ts` | `STAGE_SKILLS`, `CapabilitySkill`, `NON_EXECUTABLE_ISSUE_LABELS` | `test/capability-profile.test.ts`, `test/capability-session.test.ts`, `test/bundled-standards.test.ts`, `test/coordinator.test.ts` | `npm run build && node --test dist/test/capability-profile.test.js dist/test/capability-session.test.js dist/test/bundled-standards.test.js dist/test/coordinator.test.js` |
@@ -55,7 +55,7 @@ Start here, then follow the section pages below for the repository's runtime sea
 ## What this wiki covers
 
 - the product shape and why the repo exists
-- the TypeScript application surfaces that implement Automode
+- the TypeScript application surfaces that implement Automode, including the immutable Automode Runtime Snapshot used across a launch
 - the Automode architecture boundary and stage model
 - the launch and workflow surface described by the source docs
 - the repository's operating conventions for issue tracking and local OpenWiki updates
