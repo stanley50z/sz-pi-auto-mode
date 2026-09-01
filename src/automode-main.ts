@@ -189,7 +189,7 @@ function persistAutomodeRunRecord(
   configuration: AutomationStageConfiguration,
   projectResources: ProjectResourceAllowlist | undefined,
 ): string {
-  const serialized = JSON.stringify({
+  const record = {
     version: 1,
     coordinatorId,
     stageConfiguration: configuration,
@@ -199,35 +199,50 @@ function persistAutomodeRunRecord(
         .map((path) => realpathSync(join(resolve(path), "SKILL.md")))
         .sort(),
     },
-  });
+  };
+  const serialized = JSON.stringify(record);
   try {
     writeFileSync(runRecordFile, `${serialized}\n`, { encoding: "utf8", flag: "wx" });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    let persisted: string;
-    let legacyReviewerField = false;
+    let persisted: Record<string, unknown>;
     try {
       const parsed: unknown = JSON.parse(readFileSync(runRecordFile, "utf8"));
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && "defaultReviewerExecution" in parsed) {
-        const { defaultReviewerExecution: _, ...durable } = parsed as Record<string, unknown>;
-        persisted = JSON.stringify(durable);
-        legacyReviewerField = true;
-      } else {
-        persisted = JSON.stringify(parsed);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("Expected an object");
       }
+      persisted = parsed as Record<string, unknown>;
     } catch (parseError) {
       throw new Error("The durable Automode Run Record is invalid", { cause: parseError });
     }
-    if (persisted !== serialized) {
-      throw new Error("The Automode Run Record is fixed for this Automode Run");
+
+    const persistedFields = Object.keys(persisted).filter((field) => (
+      field !== "stageConfiguration" && field !== "defaultReviewerExecution"
+    ));
+    const fixedFields = {
+      version: persisted.version,
+      coordinatorId: persisted.coordinatorId,
+      projectResources: persisted.projectResources,
+    };
+    const expectedFixedFields = {
+      version: record.version,
+      coordinatorId: record.coordinatorId,
+      projectResources: record.projectResources,
+    };
+    if (
+      persistedFields.length !== Object.keys(expectedFixedFields).length
+      || JSON.stringify(fixedFields) !== JSON.stringify(expectedFixedFields)
+    ) {
+      throw new Error("The Automode Run Record contains different fixed settings");
     }
-    if (legacyReviewerField) {
-      const migrationFile = `${runRecordFile}.${process.pid}.tmp`;
+
+    if (JSON.stringify(persisted) !== serialized) {
+      const replacementFile = `${runRecordFile}.${process.pid}.tmp`;
       try {
-        writeFileSync(migrationFile, `${serialized}\n`, { encoding: "utf8", flag: "wx" });
-        renameSync(migrationFile, runRecordFile);
+        writeFileSync(replacementFile, `${serialized}\n`, { encoding: "utf8", flag: "wx" });
+        renameSync(replacementFile, runRecordFile);
       } finally {
-        rmSync(migrationFile, { force: true });
+        rmSync(replacementFile, { force: true });
       }
     }
   }

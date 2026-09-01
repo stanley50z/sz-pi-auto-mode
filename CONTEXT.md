@@ -33,7 +33,7 @@ The Automode Dashboard grouping for one Automation Stage, its Operating State, a
 _Avoid_: Queue, workflow column
 
 **Automation Stage Configuration**:
-The fixed launch baseline containing the Full-Auto or Half-Auto label and the baseline-enabled Automation Stages confirmed when an Automode Run launches. It is serialized across the Automode Bridge process boundary and stored in the Automode Run Record. It does not represent process-local Stage changes.
+The launch baseline containing the Full-Auto or Half-Auto label and the baseline-enabled Automation Stages confirmed when an Automode Coordinator process launches. It is serialized across the Automode Bridge process boundary and stored as the latest launch baseline in the Automode Run Record. It stays unchanged within that process but may be replaced by the selection from a later `/automode` launch after the previous Coordinator stops. It does not represent process-local Stage changes.
 _Avoid_: Automation Stage Operating State, stage profile, Automode Capability Profile
 
 **Automation Stage Operating State**:
@@ -65,11 +65,11 @@ An extension-owned customization of a native Matt Pocock skill that retains the 
 _Avoid_: Full-Auto Skill Suite, global skill
 
 **Automode Run**:
-The durable, repository-scoped operating lifetime of Automode under one fixed Automation Stage Configuration. It spans ordinary Coordinator process restarts; the MVP defines process stopping and best-effort restart recovery, not run retirement or reconfiguration.
+The durable, repository-scoped operating lifetime of Automode. It spans Coordinator process restarts and preserves the Coordinator identity and recovery evidence while allowing each later `/automode` launch to choose a new Automation Stage Configuration after the previous Coordinator stops.
 _Avoid_: Single-ticket session, disposable process execution
 
 **Automode Run Record**:
-The Coordinator-bound durable record that identifies an Automode Run and stores its fixed Automation Stage Configuration and explicitly allowlisted project skill files. Execution profiles belong to each Automode process and are not stored in this record. It lives beside the durable Coordinator identity under the Git common directory, so linked worktrees and different Pi homes cannot accept divergent run settings.
+The Coordinator-bound durable record that identifies an Automode Run, stores the latest Automation Stage Configuration, and fixes the explicitly allowlisted project skill files. Execution profiles belong to each Automode process and are not stored in this record. It lives beside the durable Coordinator identity under the Git common directory, so linked worktrees and different Pi homes share the same identity, launch baseline, and project-resource selection.
 _Avoid_: Automode Capability Profile, stage profile, `capability-profile.json`
 
 **Automode Coordinator**:
@@ -105,11 +105,11 @@ One independently executed advisory seat in the Review Panel. A Reviewer examine
 _Avoid_: Panel Member, Review Session, voter
 
 **Half-Auto Mode**:
-The launch label whose selector preset initially enables Auto-Implement and Auto-Review while leaving Auto-Triage and Auto-Grilling off. The user may confirm any non-empty launch baseline, including all four Automation Stages. The label remains fixed even when process-local Automation Stage Operating State changes.
+The launch label whose selector preset initially enables Auto-Implement and Auto-Review while leaving Auto-Triage and Auto-Grilling off. The user may confirm any non-empty launch baseline, including all four Automation Stages. The label remains fixed within the launched Coordinator process even when process-local Automation Stage Operating State changes; a later `/automode` launch may select another mode.
 _Avoid_: Assisted mode, manual mode, proper subset
 
 **Full-Auto Mode**:
-The launch label whose baseline enables all four Automation Stages. It remains fixed even when one or all process-local Stage states become `OFF`; a Half-Auto launch baseline with all four Stages has the same initial operating state.
+The launch label whose baseline enables all four Automation Stages. It remains fixed within the launched Coordinator process even when one or all process-local Stage states become `OFF`; a later `/automode` launch may select another mode. A Half-Auto launch baseline with all four Stages has the same initial operating state.
 _Avoid_: Unattended mode, headless mode
 
 **Deliberation Panel**:

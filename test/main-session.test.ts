@@ -500,11 +500,11 @@ test("an Automode Run rejects changed project executable additions on restart", 
 
   await assert.rejects(
     () => startForTest({ repository, home, ...configuration }),
-    /Automode Run Record is fixed for this Automode Run/,
+    /Automode Run Record contains different fixed settings/,
   );
 });
 
-test("linked worktrees share the Coordinator identity and fixed Automode Run Record", async () => {
+test("linked worktrees share the Coordinator identity and latest launch baseline", async () => {
   const fixture = mkdtempSync(join(tmpdir(), "automode-linked-run-"));
   const primary = join(fixture, "primary");
   const linked = join(fixture, "linked");
@@ -541,18 +541,29 @@ test("linked worktrees share the Coordinator identity and fixed Automode Run Rec
   });
   restarted.dispose();
 
-  await assert.rejects(
-    () => startForTest({
-      repository: linked,
-      home: join(fixture, "third-home"),
-      ...confirmedConfiguration("half", ["auto-review"]),
-    }),
-    /Automode Run Record is fixed for this Automode Run/,
-  );
+  const reconfigured = await startForTest({
+    repository: linked,
+    home: join(fixture, "third-home"),
+    ...confirmedConfiguration("half", ["auto-review"]),
+  });
+  assert.equal(reconfigured.coordinatorId, coordinatorId);
+  assert.deepEqual(reconfigured.operatingState, {
+    byStage: {
+      "auto-triage": "OFF",
+      "auto-grilling": "OFF",
+      "auto-implement": "OFF",
+      "auto-review": "ON",
+    },
+  });
+  assert.deepEqual(JSON.parse(readFileSync(runRecordFile, "utf8")).stageConfiguration, {
+    mode: "half",
+    stages: ["auto-review"],
+  });
+  reconfigured.dispose();
 });
 
-test("an Automode Run rejects a different configuration on restart", async () => {
-  const fixture = mkdtempSync(join(tmpdir(), "automode-fixed-run-"));
+test("a stopped Automode Run accepts a different launch configuration on restart", async () => {
+  const fixture = mkdtempSync(join(tmpdir(), "automode-reconfigured-run-"));
   const repository = join(fixture, "repository");
   const home = join(fixture, "home");
   mkdirSync(join(repository, ".git"), { recursive: true });
@@ -572,12 +583,27 @@ test("an Automode Run rejects a different configuration on restart", async () =>
   assert.equal(restarted.coordinatorId, coordinatorId);
   restarted.dispose();
 
-  await assert.rejects(
-    () => startForTest({
-      repository,
-      home: join(fixture, "second-home"),
-      ...confirmedConfiguration("half", ["auto-review"]),
-    }),
-    /Automode Run Record is fixed for this Automode Run/,
-  );
+  const reconfigured = await startForTest({
+    repository,
+    home: join(fixture, "second-home"),
+    ...confirmedConfiguration("half", ["auto-review"]),
+  });
+  assert.equal(reconfigured.coordinatorId, coordinatorId);
+  assert.deepEqual(reconfigured.configuration, {
+    mode: "half",
+    stages: ["auto-review"],
+  });
+  assert.deepEqual(reconfigured.operatingState, {
+    byStage: {
+      "auto-triage": "OFF",
+      "auto-grilling": "OFF",
+      "auto-implement": "OFF",
+      "auto-review": "ON",
+    },
+  });
+  assert.deepEqual(JSON.parse(readFileSync(reconfigured.runRecordFile, "utf8")).stageConfiguration, {
+    mode: "half",
+    stages: ["auto-review"],
+  });
+  reconfigured.dispose();
 });

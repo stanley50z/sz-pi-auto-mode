@@ -144,18 +144,14 @@ test("the Main Session rejects environment tampering between confirmation and ch
   assert.match(child.stderr, /changed after confirmation/);
 });
 
-test("PTY walkthrough launches Full-Auto and Half-Auto stage selections in fresh Main Sessions", async () => {
+test("PTY walkthrough relaunches a stopped Full-Auto repository as Half-Auto", async () => {
   const fixture = mkdtempSync(join(tmpdir(), "automode-launch-"));
   const fullRepository = join(fixture, "full-repository");
   const fullNestedDirectory = join(fullRepository, "src", "feature");
-  const halfRepository = join(fixture, "half-repository");
-  const halfNestedDirectory = join(halfRepository, "src", "feature");
   const halfAllRepository = join(fixture, "half-all-repository");
   const halfAllNestedDirectory = join(halfAllRepository, "src", "feature");
   mkdirSync(join(fullRepository, ".git"), { recursive: true });
   mkdirSync(fullNestedDirectory, { recursive: true });
-  mkdirSync(join(halfRepository, ".git"), { recursive: true });
-  mkdirSync(halfNestedDirectory, { recursive: true });
   mkdirSync(join(halfAllRepository, ".git"), { recursive: true });
   mkdirSync(halfAllNestedDirectory, { recursive: true });
 
@@ -175,12 +171,12 @@ test("PTY walkthrough launches Full-Auto and Half-Auto stage selections in fresh
   assert.notEqual(full.proof.pid, full.bridgePid);
   assert.equal(full.proof.sessionName, "Automode Main — Full-Auto");
 
-  const half = await runBridge(halfNestedDirectory, "\t\r");
+  const half = await runBridge(fullNestedDirectory, "\t\r");
   assert.deepEqual(half.proof.configuration, {
     mode: "half",
     stages: ["auto-implement", "auto-review"],
   });
-  assert.equal(half.proof.cwd, halfRepository);
+  assert.equal(half.proof.cwd, fullRepository);
   assert.doesNotMatch(half.output, /UNEXPECTED_AGENT_START/);
   assert.equal(half.proof.configurationFrozen, true);
   assert.equal(half.proof.mutationRejected, true);

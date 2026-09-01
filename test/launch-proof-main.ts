@@ -58,7 +58,7 @@ async function main(): Promise<void> {
     sessionFile: mainSession.sessionFile,
     pid: process.pid,
   })}`);
-  mainSession.dispose();
+  await mainSession.dispose();
 }
 
 const isEntrypoint = process.argv[1]
