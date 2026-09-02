@@ -10,14 +10,17 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
+import type { GlobalSkillSource } from "./global-skills.js";
 
 export interface AutomodeRuntimeSnapshot {
   readonly moduleDirectory: string;
+  readonly globalSkillRoot: string;
   dispose(): void;
 }
 
 export interface AutomodeRuntimeSnapshotOptions {
   readonly copyFile?: (source: string, destination: string) => void;
+  readonly globalSkills?: readonly GlobalSkillSource[];
 }
 
 function packageDependencies(packageDirectory: string): string[] {
@@ -106,11 +109,36 @@ export function createAutomodeRuntimeSnapshot(
   try {
     const sourceFiles = runtimeFiles(packageRoot);
     const sourceFingerprint = fingerprint(packageRoot, sourceFiles);
+    const globalSkillRoot = join(snapshotRoot, "skills", "global");
+    const copiedNames = new Set<string>();
+    const globalCaptures = (options.globalSkills ?? []).map((skill) => {
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(skill.name) || copiedNames.has(skill.name)) {
+        throw new Error(`Invalid or duplicate global skill snapshot entry: ${skill.name}`);
+      }
+      copiedNames.add(skill.name);
+      const sourceRoot = resolve(skill.sourceRoot);
+      const files = filesUnder(sourceRoot, sourceRoot).sort();
+      return {
+        sourceRoot,
+        destinationRoot: join(globalSkillRoot, skill.name),
+        files,
+        sourceFingerprint: fingerprint(sourceRoot, files),
+      };
+    });
+
     for (const file of sourceFiles) {
       const destination = join(snapshotRoot, file);
       mkdirSync(dirname(destination), { recursive: true });
       copyFile(join(packageRoot, file), destination);
     }
+    for (const capture of globalCaptures) {
+      for (const file of capture.files) {
+        const destination = join(capture.destinationRoot, file);
+        mkdirSync(dirname(destination), { recursive: true });
+        copyFile(join(capture.sourceRoot, file), destination);
+      }
+    }
+
     const currentSourceFiles = runtimeFiles(packageRoot);
     if (
       sourceFiles.length !== currentSourceFiles.length
@@ -120,8 +148,21 @@ export function createAutomodeRuntimeSnapshot(
     ) {
       throw new Error("The Automode runtime changed while its immutable snapshot was being created");
     }
+    for (const capture of globalCaptures) {
+      const currentFiles = filesUnder(capture.sourceRoot, capture.sourceRoot).sort();
+      if (
+        capture.files.length !== currentFiles.length
+        || capture.files.some((file, index) => file !== currentFiles[index])
+        || fingerprint(capture.sourceRoot, currentFiles) !== capture.sourceFingerprint
+        || fingerprint(capture.destinationRoot, capture.files) !== capture.sourceFingerprint
+      ) {
+        throw new Error("An allowlisted global skill changed while its immutable snapshot was being created");
+      }
+    }
+
     return {
       moduleDirectory: join(snapshotRoot, "dist", "src"),
+      globalSkillRoot,
       dispose,
     };
   } catch (error) {

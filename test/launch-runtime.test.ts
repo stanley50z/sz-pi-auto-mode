@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { resolveAllowlistedGlobalSkills } from "../src/global-skills.js";
 import type { HandoffOptions } from "../src/handoff.js";
 import { launchAutomode } from "../src/launch.js";
 import { createAutomodeRuntimeSnapshot } from "../src/runtime-snapshot.js";
@@ -34,6 +35,13 @@ function launchRequest(cwd: string) {
     },
     piPackageDir: resolve("node_modules/@earendil-works/pi-coding-agent"),
   };
+}
+
+function writeSkill(root: string, name: string, body: string): string {
+  const directory = join(root, name);
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, "SKILL.md"), `---\nname: ${name}\ndescription: Test skill.\n---\n${body}\n`);
+  return directory;
 }
 
 function writeRuntimeFixture(root: string): string {
@@ -71,18 +79,37 @@ function writeRuntimeFixture(root: string): string {
   return moduleDirectory;
 }
 
+test("global skill discovery resolves only installed allowlist entries", () => {
+  const fixture = mkdtempSync(join(tmpdir(), "automode-global-discovery-"));
+  const normalAgentDir = join(fixture, "pi-agent");
+  const browserHarness = writeSkill(join(normalAgentDir, "skills"), "browser-harness", "browser");
+  const unslop = writeSkill(join(fixture, ".agents", "skills"), "unslop", "unslop");
+  writeSkill(join(fixture, ".agents", "skills"), "ambient-global", "ambient");
+
+  assert.deepEqual(resolveAllowlistedGlobalSkills({ home: fixture, normalAgentDir }), [
+    { name: "browser-harness", sourceRoot: browserHarness },
+    { name: "unslop", sourceRoot: unslop },
+  ]);
+});
+
 test("/automode launches every process from one Bridge-owned runtime snapshot", async () => {
   const fixture = mkdtempSync(join(tmpdir(), "automode-runtime-launch-"));
   const snapshotModuleDirectory = join(fixture, "snapshot", "dist", "src");
   let launchPlan: HandoffOptions | undefined;
   let sourceModuleDirectory = "";
+  let capturedGlobalSkillNames: string[] = [];
   let disposed = false;
 
   await launchAutomode(launchRequest(fixture), {
-    createRuntimeSnapshot(sourceDirectory) {
+    resolveGlobalSkills() {
+      return [{ name: "unslop", sourceRoot: join(fixture, "installed", "unslop") }];
+    },
+    createRuntimeSnapshot(sourceDirectory, options) {
       sourceModuleDirectory = sourceDirectory;
+      capturedGlobalSkillNames = options.globalSkills?.map((skill) => skill.name) ?? [];
       return {
         moduleDirectory: snapshotModuleDirectory,
+        globalSkillRoot: join(fixture, "snapshot", "skills", "global"),
         dispose() { disposed = true; },
       };
     },
@@ -93,8 +120,13 @@ test("/automode launches every process from one Bridge-owned runtime snapshot", 
   });
 
   assert.match(sourceModuleDirectory.replaceAll("\\", "/"), /\/dist\/src$/);
+  assert.deepEqual(capturedGlobalSkillNames, ["unslop"]);
   assert.equal(launchPlan?.args[1], pathToFileURL(join(snapshotModuleDirectory, "pi-runtime-loader.js")).href);
   assert.equal(launchPlan?.args[2], join(snapshotModuleDirectory, "automode-main.js"));
+  assert.equal(
+    launchPlan?.env?.AUTOMODE_GLOBAL_SKILL_ROOT,
+    join(fixture, "snapshot", "skills", "global"),
+  );
   assert.equal(disposed, true);
 });
 
@@ -104,9 +136,11 @@ test("the Bridge disposes its runtime snapshot when handoff fails", async () => 
 
   await assert.rejects(
     () => launchAutomode(launchRequest(fixture), {
+      resolveGlobalSkills() { return []; },
       createRuntimeSnapshot() {
         return {
           moduleDirectory: join(fixture, "snapshot", "dist", "src"),
+          globalSkillRoot: join(fixture, "snapshot", "skills", "global"),
           dispose() { disposed = true; },
         };
       },
@@ -143,6 +177,78 @@ test("the captured production runtime can launch Ticket Session code independent
   } finally {
     snapshot.dispose();
   }
+});
+
+test("runtime snapshots pin allowlisted global skill directories", () => {
+  const sourceRoot = mkdtempSync(join(tmpdir(), "automode-runtime-global-source-"));
+  const sourceModuleDirectory = writeRuntimeFixture(sourceRoot);
+  const installedRoot = mkdtempSync(join(tmpdir(), "automode-installed-global-"));
+  const unslop = writeSkill(installedRoot, "unslop", "original global skill");
+  mkdirSync(join(unslop, "references"), { recursive: true });
+  writeFileSync(join(unslop, "references", "rules.md"), "original rules\n");
+
+  const snapshot = createAutomodeRuntimeSnapshot(sourceModuleDirectory, {
+    globalSkills: [{ name: "unslop", sourceRoot: unslop }],
+  });
+  try {
+    writeFileSync(join(unslop, "SKILL.md"), "changed after launch\n");
+    writeFileSync(join(unslop, "references", "rules.md"), "changed rules\n");
+
+    assert.equal(
+      readFileSync(join(snapshot.globalSkillRoot, "unslop", "SKILL.md"), "utf8").includes("original global skill"),
+      true,
+    );
+    assert.equal(
+      readFileSync(join(snapshot.globalSkillRoot, "unslop", "references", "rules.md"), "utf8"),
+      "original rules\n",
+    );
+  } finally {
+    snapshot.dispose();
+  }
+});
+
+test("snapshot creation rejects runtime changes during global skill capture", () => {
+  const sourceRoot = mkdtempSync(join(tmpdir(), "automode-runtime-global-race-"));
+  const sourceModuleDirectory = writeRuntimeFixture(sourceRoot);
+  const installedRoot = mkdtempSync(join(tmpdir(), "automode-global-race-skill-"));
+  const unslop = writeSkill(installedRoot, "unslop", "global skill");
+
+  assert.throws(
+    () => createAutomodeRuntimeSnapshot(sourceModuleDirectory, {
+      globalSkills: [{ name: "unslop", sourceRoot: unslop }],
+      copyFile(source, destination) {
+        copyFileSync(source, destination);
+        if (source === join(unslop, "SKILL.md")) {
+          writeFileSync(join(sourceModuleDirectory, "automode-main.js"), "export const runtime = 'rebuilt';\n");
+        }
+      },
+    }),
+    /runtime changed while its immutable snapshot was being created/,
+  );
+});
+
+test("snapshot creation rejects earlier global skill changes during later skill capture", () => {
+  const sourceRoot = mkdtempSync(join(tmpdir(), "automode-global-cross-race-"));
+  const sourceModuleDirectory = writeRuntimeFixture(sourceRoot);
+  const installedRoot = mkdtempSync(join(tmpdir(), "automode-global-cross-skill-"));
+  const browserHarness = writeSkill(installedRoot, "browser-harness", "browser");
+  const unslop = writeSkill(installedRoot, "unslop", "unslop");
+
+  assert.throws(
+    () => createAutomodeRuntimeSnapshot(sourceModuleDirectory, {
+      globalSkills: [
+        { name: "browser-harness", sourceRoot: browserHarness },
+        { name: "unslop", sourceRoot: unslop },
+      ],
+      copyFile(source, destination) {
+        copyFileSync(source, destination);
+        if (source === join(unslop, "SKILL.md")) {
+          writeFileSync(join(browserHarness, "SKILL.md"), "changed after its copy\n");
+        }
+      },
+    }),
+    /global skill changed while its immutable snapshot was being created/,
+  );
 });
 
 test("snapshot creation rejects a checkout rebuild during capture", () => {

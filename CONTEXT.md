@@ -13,12 +13,20 @@ The minimal `/automode` entrypoint available in normal Pi that pauses the curren
 _Avoid_: `pi automode`, in-place mode toggle, Automode runtime
 
 **Automode Runtime Snapshot**:
-The immutable process-lifetime copy of Automode's compiled runtime code, bundled skills, package metadata, and runtime dependency packages captured by the Bridge before it launches a Main Session. One Coordinator process and all of its Ticket Sessions use the same snapshot, so development checkout rebuilds affect only later `/automode` launches.
+The immutable process-lifetime copy of Automode's compiled runtime code, bundled skills, allowlisted installed global skills, package metadata, and runtime dependency packages captured by the Bridge before it launches a Main Session. One Coordinator process and all of its Ticket Sessions use the same snapshot, so development checkout rebuilds and global skill updates affect only later `/automode` launches.
 _Avoid_: live checkout runtime, durable Automode Run Record
 
 **Automode Capability Profile**:
-The explicit allowlist of tools and skills available to an Automode Run. The MVP uses a hard-coded, fail-closed profile rather than inheriting arbitrary capabilities from normal Pi; project-specific additions require an explicit allowlist.
-_Avoid_: Global skill discovery, inherited Pi setup, general configuration schema
+The explicit allowlist of tools and skills available to an Automode Run. It contains bundled Matt-Pocock-native skills, extension-owned Stage customizations, and installed skills named by the fixed global allowlist. Arbitrary ambient capabilities remain excluded; project-specific additions require explicit trust and a separate allowlist.
+_Avoid_: Ambient skill discovery, inherited Pi setup, general configuration schema
+
+**Allowlisted Global Skill**:
+A user-installed Pi skill whose name appears in Automode's fixed global allowlist. The Bridge resolves it from Pi's global skill directories and copies the complete skill directory into the Automode Runtime Snapshot before launch. Missing allowlisted skills remain unavailable rather than becoming Automode dependencies.
+_Avoid_: Matt-Pocock-native skill, bundled skill, project skill
+
+**Matt-Pocock-native skill**:
+An unmodified or locally pinned part of the Matt Pocock skill system bundled with Automode because the product is based on that suite. `native` names this lineage, not Pi's ambient global skill discovery.
+_Avoid_: Allowlisted Global Skill, Automode Stage Skill
 
 **Automation Stage**:
 One independently controllable part of the repository workflow: Auto-Triage, Auto-Grilling, Auto-Implement, or Auto-Review. Its launch baseline comes from the Automation Stage Configuration, while its current process behavior comes from its Automation Stage Operating State.

@@ -73,6 +73,34 @@ test("a controlled capability session exposes every pre-attested Stage capabilit
   }
 });
 
+test("a controlled capability session exposes snapshotted allowlisted global skills", async () => {
+  const fixture = mkdtempSync(join(tmpdir(), "automode-global-capability-"));
+  const globalSkillRoot = join(fixture, "global-skills");
+  for (const name of ["browser-harness", "unslop", "ambient-global"]) {
+    const skillRoot = join(globalSkillRoot, name);
+    mkdirSync(skillRoot, { recursive: true });
+    writeFileSync(
+      join(skillRoot, "SKILL.md"),
+      `---\nname: ${name}\ndescription: Test global skill.\n---\n`,
+    );
+  }
+
+  const controlled = await createCapabilitySession({
+    cwd: repository,
+    home: fixture,
+    globalSkillRoot,
+    model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
+  });
+  try {
+    const commands = controlled.extensionsResult.runtime.getCommands();
+    assert.equal(commands.some((command) => command.name === "skill:browser-harness"), true);
+    assert.equal(commands.some((command) => command.name === "skill:unslop"), true);
+    assert.equal(commands.some((command) => command.name === "skill:ambient-global"), false);
+  } finally {
+    controlled.session.dispose();
+  }
+});
+
 test("ambient user and project executable resources never enter the controlled session", async () => {
   const fixture = mkdtempSync(join(tmpdir(), "automode-ambient-"));
   const isolatedRepository = join(fixture, "repository");

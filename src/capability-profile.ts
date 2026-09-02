@@ -1,8 +1,10 @@
-import { dirname, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { GLOBAL_SKILL_ALLOWLIST } from "./global-skills.js";
 import type { AutomationStage } from "./stage-configuration.js";
 
-export type CapabilitySkillOwner = "native" | "automode";
+export type CapabilitySkillOwner = "native" | "automode" | "global";
 export type CapabilitySkillKind = "shared" | "support" | "stage";
 
 export interface CapabilitySkill {
@@ -54,10 +56,8 @@ const SHARED_SKILLS = [
 ] as const;
 
 const SUPPORT_SKILLS = [
-  "browser-harness",
   "ketch",
   "diagnosing-bugs",
-  "openwiki",
   "writing-for-agents",
   "wizard",
 ] as const;
@@ -118,12 +118,18 @@ export function parsePiExecutionProfile(serialized: string): PiExecutionProfile 
   });
 }
 
-function packageSkillRoot(owner: CapabilitySkillOwner, name: string): string {
+function packageSkillRoot(owner: Exclude<CapabilitySkillOwner, "global">, name: string): string {
   const sourceDirectory = dirname(fileURLToPath(import.meta.url));
   return resolve(sourceDirectory, "../../skills", owner, name);
 }
 
-export function createAutomodeCapabilityProfile(): AutomodeCapabilityProfile {
+export interface AutomodeCapabilityProfileOptions {
+  readonly globalSkillRoot?: string;
+}
+
+export function createAutomodeCapabilityProfile(
+  options: AutomodeCapabilityProfileOptions = {},
+): AutomodeCapabilityProfile {
   const skills: CapabilitySkill[] = SHARED_SKILLS.map((name) => Object.freeze({
     name,
     owner: "native" as const,
@@ -147,6 +153,20 @@ export function createAutomodeCapabilityProfile(): AutomodeCapabilityProfile {
         owner: "automode",
         kind: "stage" as const,
         sourceRoot: packageSkillRoot("automode", name),
+      }));
+    }
+  }
+
+  const globalSkillRoot = options.globalSkillRoot ?? process.env.AUTOMODE_GLOBAL_SKILL_ROOT;
+  if (globalSkillRoot) {
+    for (const name of GLOBAL_SKILL_ALLOWLIST) {
+      const sourceRoot = join(resolve(globalSkillRoot), name);
+      if (!existsSync(join(sourceRoot, "SKILL.md"))) continue;
+      skills.push(Object.freeze({
+        name,
+        owner: "global",
+        kind: "support",
+        sourceRoot,
       }));
     }
   }

@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { createAutomodeCapabilityProfile } from "../src/capability-profile.js";
+
+function writeSkill(root: string, name: string): void {
+  const directory = join(root, name);
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, "SKILL.md"), `---\nname: ${name}\ndescription: Test skill.\n---\n`);
+}
 
 test("the capability profile preloads every Automode Stage Skill and fixed controlled surface", () => {
   const profile = createAutomodeCapabilityProfile();
@@ -36,8 +45,12 @@ test("the capability profile preloads every Automode Stage Skill and fixed contr
   ]);
 });
 
-test("the capability profile keeps shared and support skills native", () => {
-  const profile = createAutomodeCapabilityProfile();
+test("the capability profile keeps Matt Pocock skills native and adds installed global allowlist entries", () => {
+  const globalSkillRoot = mkdtempSync(join(tmpdir(), "automode-global-skills-"));
+  writeSkill(globalSkillRoot, "browser-harness");
+  writeSkill(globalSkillRoot, "unslop");
+  writeSkill(globalSkillRoot, "ambient-global");
+  const profile = createAutomodeCapabilityProfile({ globalSkillRoot });
 
   assert.deepEqual(
     profile.skills.filter((skill) => skill.kind === "shared").map((skill) => skill.name),
@@ -56,7 +69,16 @@ test("the capability profile keeps shared and support skills native", () => {
   );
   assert.ok(profile.skills.filter((skill) => skill.kind === "shared").every((skill) => skill.owner === "native"));
   assert.deepEqual(
-    profile.skills.filter((skill) => skill.kind === "support").map((skill) => skill.name),
-    ["browser-harness", "ketch", "diagnosing-bugs", "openwiki", "writing-for-agents", "wizard"],
+    profile.skills.filter((skill) => skill.kind === "support").map(({ name, owner }) => [name, owner]),
+    [
+      ["ketch", "native"],
+      ["diagnosing-bugs", "native"],
+      ["writing-for-agents", "native"],
+      ["wizard", "native"],
+      ["browser-harness", "global"],
+      ["unslop", "global"],
+    ],
   );
+  assert.equal(profile.skills.some((skill) => skill.name === "ambient-global"), false);
+  assert.equal(profile.skills.some((skill) => skill.name === "openwiki"), false);
 });

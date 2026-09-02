@@ -5,17 +5,17 @@ description: "Defines the allowlisted skills, tools, models, settings, guidance,
 tags: [automode, capabilities, security, skills]
 openwiki:
   roles: [architecture, security, testing]
-  change_kinds: [security, public-api, configuration]
-  source_paths: [src/capability-profile.ts, src/capability-session.ts, src/controlled-services.ts, src/attestation.ts]
-  symbols: [createAutomodeCapabilityProfile, createCapabilitySession, createControlledServices]
-  test_paths: [test/capability-profile.test.ts, test/capability-session.test.ts, test/attestation.test.ts]
-  invariants: [Automode disables ambient extensions, skills, prompt templates, and themes., Project executable resources require explicit trust and remain inside the repository., Every exposed skill command must resolve to its canonical allowlisted source.]
-  validation_commands: [npm run build, "node --test dist/test/capability-profile.test.js dist/test/capability-session.test.js dist/test/attestation.test.js"]
+  change_kinds: [security, public-api, configuration, runtime-snapshot]
+  source_paths: [src/capability-profile.ts, src/global-skills.ts, src/capability-session.ts, src/controlled-services.ts, src/attestation.ts, src/runtime-snapshot.ts]
+  symbols: [createAutomodeCapabilityProfile, resolveAllowlistedGlobalSkills, GLOBAL_SKILL_ALLOWLIST, createCapabilitySession, createControlledServices]
+  test_paths: [test/capability-profile.test.ts, test/capability-session.test.ts, test/attestation.test.ts, test/launch-runtime.test.ts]
+  invariants: [Automode disables ambient extensions, skills, prompt templates, and themes., Project executable resources require explicit trust and remain inside the repository., Every exposed skill command must resolve to its canonical allowlisted source., Only browser-harness and unslop may be admitted from installed global skill roots, with at most one source per name., Allowlisted global skill copies are included in the immutable runtime snapshot.]
+  validation_commands: [npm run build, "node --test dist/test/capability-profile.test.js dist/test/capability-session.test.js dist/test/attestation.test.js dist/test/launch-runtime.test.js"]
 ---
 
 # Automode capability boundary
 
-Automode does not inherit the normal Pi resource surface. `createAutomodeCapabilityProfile` builds an immutable profile from shared native skills, support skills, and pre-attested Automode Stage Skills. Every Automode Stage Skill is preloaded so Automation Stage Operating State can change without widening the capability boundary; the profile exposes `read`, `bash`, `edit`, `write`, `grep`, `find`, and `ls`, the `fast` extension command, high reasoning, and `defaultProjectTrust: "never"`. The `/automode` command is a process handoff, not an in-place capability toggle: the Main Session can gracefully drain and return to the original normal Pi session, whose resource surface remains outside this profile. The handoff behavior is described in the [launch workflow](../workflows/launch-and-automation.md).
+Automode does not inherit the normal Pi resource surface. `createAutomodeCapabilityProfile` builds an immutable profile from shared native skills, support skills, and pre-attested Automode Stage Skills. Every Automode Stage Skill is preloaded so Automation Stage Operating State can change without widening the capability boundary; the profile exposes `read`, `bash`, `edit`, `write`, `grep`, `find`, and `ls`, the `fast` extension command, high reasoning, and `defaultProjectTrust: "never"`. The only installed global skills admitted are the fixed `GLOBAL_SKILL_ALLOWLIST`: `browser-harness` and `unslop`. `resolveAllowlistedGlobalSkills` checks both the normal Pi skill directory (from `PI_CODING_AGENT_DIR` or the default under the selected home) and `~/.agents/skills`, resolves real paths, rejects multiple installed sources for one name, and omits missing skills. The child capability session consumes the snapshot root through `AUTOMODE_GLOBAL_SKILL_ROOT`; callers can inject an explicit root for focused tests. The Bridge snapshots admitted copies before handoff, so an installed skill update cannot mutate a live process. The `/automode` command is a process handoff, not an in-place capability toggle: the Main Session can gracefully drain and return to the original normal Pi session, whose resource surface remains outside this profile. The handoff behavior is described in the [launch workflow](../workflows/launch-and-automation.md).
 
 ## Session construction
 

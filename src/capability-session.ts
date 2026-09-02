@@ -28,6 +28,7 @@ export interface CapabilitySessionOptions {
   home?: string;
   normalAgentDir?: string;
   extensions?: readonly InlineExtension[];
+  globalSkillRoot?: string;
   projectResources?: ProjectResourceAllowlist;
   sessionName?: string;
 }
@@ -59,7 +60,9 @@ export async function createCapabilitySession(
   options: CapabilitySessionOptions,
 ): Promise<CapabilitySession> {
   const repository = repositoryRoot(options.cwd);
-  const profile = createAutomodeCapabilityProfile();
+  const profile = createAutomodeCapabilityProfile({
+    globalSkillRoot: options.globalSkillRoot ?? process.env.AUTOMODE_GLOBAL_SKILL_ROOT,
+  });
   const paths = resolveAutomodePaths(repository, options.home, options.normalAgentDir);
   mkdirSync(paths.automodeDir, { recursive: true });
   mkdirSync(paths.sessionDir, { recursive: true });
