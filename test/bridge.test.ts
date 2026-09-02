@@ -75,10 +75,24 @@ test("a completed Automode handoff visibly returns to normal Pi", async () => {
 
   await harness.command().handler("", {
     ...commandContext(fixture),
-    ui: { notify(message: string) { events.push(`notify:${message}`); } },
+    ui: {
+      async custom(factory: (
+        tui: { requestRender(force?: boolean): void },
+        theme: unknown,
+        keybindings: unknown,
+        done: () => void,
+      ) => unknown) {
+        factory({ requestRender(force) { events.push(`render:${String(force)}`); } }, {}, {}, () => {});
+      },
+      notify(message: string) { events.push(`notify:${message}`); },
+    },
   });
 
-  assert.deepEqual(events, ["launch-complete", "notify:Returned to normal Pi"]);
+  assert.deepEqual(events, [
+    "launch-complete",
+    "render:true",
+    "notify:Returned to normal Pi",
+  ]);
 });
 
 test("a confirmed configuration is serialized and launches from the repository root", async () => {

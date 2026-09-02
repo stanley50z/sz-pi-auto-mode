@@ -75,6 +75,18 @@ const defaultDependencies: AutomodeBridgeDependencies = {
   launch: launchAutomode,
 };
 
+/** Discards normal Pi's cached terminal frame after the Automode child rewrites it. */
+async function redrawNormalPi(ctx: ExtensionCommandContext): Promise<void> {
+  await ctx.ui.custom<void>((tui, _theme, _keybindings, done) => {
+    tui.requestRender(true);
+    done();
+    return {
+      invalidate() {},
+      render() { return []; },
+    };
+  });
+}
+
 export async function runAutomodeCommand(
   _args: string,
   ctx: ExtensionCommandContext,
@@ -95,6 +107,7 @@ export async function runAutomodeCommand(
     },
     piPackageDir: launchingPiPackageDir(),
   });
+  await redrawNormalPi(ctx);
   ctx.ui.notify("Returned to normal Pi", "info");
 }
 
