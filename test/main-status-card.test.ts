@@ -97,7 +97,7 @@ test("the Main Session status card reacts to projection changes and exposes /dra
   assert.equal(shutdowns, 1);
 });
 
-test("/automode gracefully drains before returning to the original normal Pi session", async () => {
+test("/automode drains and shuts down through its command context before returning to normal Pi", async () => {
   const commands = new Map<string, (args: string, ctx: ExtensionContext) => void | Promise<void>>();
   const pi = {
     on() {},
@@ -106,6 +106,8 @@ test("/automode gracefully drains before returning to the original normal Pi ses
     },
   } as unknown as ExtensionAPI;
   const events: string[] = [];
+  let finishDrain!: () => void;
+  const coordinatorStopped = new Promise<void>((resolve) => { finishDrain = resolve; });
   const card = createAutomodeStatusCard({
     initial: snapshot("active"),
     async onReturnToNormal() { events.push("return"); },
@@ -114,10 +116,18 @@ test("/automode gracefully drains before returning to the original normal Pi ses
   });
   if (typeof card.extension === "function") throw new Error("Expected the named status-card extension");
   await card.extension.factory(pi);
+  card.shutdownWhen(coordinatorStopped);
 
   assert.ok(commands.has("automode"));
-  await commands.get("automode")!("", {} as ExtensionContext);
+  const command = commands.get("automode")!("", {
+    shutdown() { events.push("shutdown"); },
+  } as ExtensionContext);
+  await new Promise<void>((resolve) => setImmediate(resolve));
   assert.deepEqual(events, ["return", "drain"]);
+
+  finishDrain();
+  await command;
+  assert.deepEqual(events, ["return", "drain", "shutdown"]);
 });
 
 test("/exit force-stops active Ticket Sessions before exiting the Main Session", async () => {

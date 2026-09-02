@@ -81,11 +81,14 @@ export function createAutomodeStatusCard(
   let requestShutdown: (() => void) | undefined;
   let stopped: Promise<void> | undefined;
   let shutdownAttached = false;
+  let commandOwnsShutdown = false;
 
   const attachShutdown = () => {
     if (shutdownAttached || !requestShutdown || !stopped) return;
     shutdownAttached = true;
-    void stopped.then(() => requestShutdown!());
+    void stopped.then(() => {
+      if (!commandOwnsShutdown) requestShutdown?.();
+    });
   };
 
   const extension = {
@@ -93,9 +96,13 @@ export function createAutomodeStatusCard(
     factory: (pi) => {
       pi.registerCommand("automode", {
         description: "Gracefully drain Automode, then return to normal Pi",
-        handler: async () => {
+        handler: async (_args, ctx) => {
+          commandOwnsShutdown = true;
           await options.onReturnToNormal();
           options.onDrain();
+          if (!stopped) throw new Error("Automode Coordinator shutdown is not ready");
+          await stopped;
+          ctx.shutdown();
         },
       });
       pi.registerCommand("drain", {
