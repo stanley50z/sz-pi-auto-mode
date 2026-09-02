@@ -63,6 +63,24 @@ test("dismissing the selector is a clean cancellation", async () => {
   assert.equal(result, null);
 });
 
+test("a completed Automode handoff visibly returns to normal Pi", async () => {
+  const fixture = mkdtempSync(join(tmpdir(), "automode-bridge-return-"));
+  mkdirSync(join(fixture, ".git"));
+  const events: string[] = [];
+  const harness = bridgeHarness();
+  automodeBridge(harness.pi, {
+    selectConfiguration: async () => ({ mode: "full", stages: AUTOMATION_STAGES }),
+    launch: async () => { events.push("launch-complete"); },
+  });
+
+  await harness.command().handler("", {
+    ...commandContext(fixture),
+    ui: { notify(message: string) { events.push(`notify:${message}`); } },
+  });
+
+  assert.deepEqual(events, ["launch-complete", "notify:Returned to normal Pi"]);
+});
+
 test("a confirmed configuration is serialized and launches from the repository root", async () => {
   const fixture = mkdtempSync(join(tmpdir(), "automode-bridge-"));
   const repository = join(fixture, "repository");

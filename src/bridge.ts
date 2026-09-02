@@ -95,6 +95,7 @@ export async function runAutomodeCommand(
     },
     piPackageDir: launchingPiPackageDir(),
   });
+  ctx.ui.notify("Returned to normal Pi", "info");
 }
 
 export default function automodeBridge(

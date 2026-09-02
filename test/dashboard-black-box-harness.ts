@@ -113,7 +113,6 @@ export default function (pi) {
         ...plan,
         args: [...plan.args.slice(0, 2), proofEntrypoint, ...plan.args.slice(3)],
       });
-      process.stdout.write("NORMAL_PI_RESUMED\\n");
     },
   });
 }

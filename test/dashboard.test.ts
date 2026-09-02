@@ -653,14 +653,15 @@ test("black-box /automode gracefully drains and resumes the original normal Pi s
     await launched.ready;
     launched.submitCommand("/automode");
     const deadline = Date.now() + 8_000;
-    while (!launched.output().includes("NORMAL_PI_RESUMED") && Date.now() < deadline) {
+    while (!launched.output().includes("Returned to normal Pi") && Date.now() < deadline) {
       await new Promise<void>((resolve) => setTimeout(resolve, 50));
     }
-    assert.match(launched.output(), /NORMAL_PI_RESUMED/);
+    assert.match(launched.output(), /Returned to normal Pi/);
     launched.submitCommand("/normal-proof-exit");
     const result = await launched.exited;
     assert.equal(result.exitCode, 0);
     assert.match(result.visibleOutput, /\/automode: graceful drain, then return to normal Pi/);
+    assert.match(result.visibleOutput, /Returned to normal Pi/);
   } finally {
     await launched.stop();
   }
