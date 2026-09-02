@@ -800,7 +800,7 @@ export class AutomodeCoordinator {
             try {
               await this.options.workspaces!.completeReview(item, record.workspace);
             } catch (error) {
-              diagnostic = `Merge succeeded but cleanup failed during recovery: ${errorMessage(error)}`;
+              diagnostic = `Merge succeeded but post-merge finalization failed during recovery: ${errorMessage(error)}`;
             }
           } else {
             diagnostic = "Merge succeeded but no recorded workspace was available for recovery cleanup";
@@ -1156,12 +1156,12 @@ export class AutomodeCoordinator {
         : !isEligibleForChoice(fresh, choice, this.options.actor, true);
       if (terminal.status === "clean" && trackerProvesSuccess) {
         this.awaitingFeedback.delete(itemKey(fresh));
-        let cleanupDiagnostic: string | undefined;
+        let finalizationDiagnostic: string | undefined;
         if (choice.skillName === "code-review") {
           try {
             await this.options.workspaces!.completeReview(fresh, preparedWorkspace!);
           } catch (error) {
-            cleanupDiagnostic = `Merge succeeded but cleanup failed: ${errorMessage(error)}`;
+            finalizationDiagnostic = `Merge succeeded but post-merge finalization failed: ${errorMessage(error)}`;
           }
         }
         await this.options.tracker.upsertBookkeeping({
@@ -1178,7 +1178,7 @@ export class AutomodeCoordinator {
           sessionFile: handle.sessionFile,
           workspace: preparedWorkspace,
           ...this.sessionTiming(itemKey(fresh), handle.sessionId),
-          diagnostic: cleanupDiagnostic,
+          diagnostic: finalizationDiagnostic,
         });
         return;
       }

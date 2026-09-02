@@ -62,6 +62,10 @@ The child calls `startAutomodeMainSession`, which validates repository identity,
 
 For launch changes, update bridge/selector serialization and child parsing together; focused tests cover cancellation, keyboard selection, digest tampering, environment tampering, and fresh-process ownership. The Main Session exposes `/automode` to gracefully drain and return terminal ownership to the original normal Pi session, `/drain` to gracefully drain and exit after active Ticket Sessions settle, and `/exit` to force-stop active Ticket Sessions and exit after cleanup. The child communicates the return request over the handoff IPC channel; `handoffTerminal` resumes the waiting normal Pi process only after a successful child exit. Automode does not intercept `Ctrl-C` so Pi retains its default TUI behavior. Do not reintroduce interrupt-based shutdown claims in launch docs. `npm run prove:handoff` is conditional and required when terminal ownership or child handoff behavior changes.
 
+## Post-merge project refresh
+
+Auto-Review owns validation and merge, but the Review Session does not restart the project root. After fresh merged proof, `WorkspaceManager.completeReview` in `src/workspace.ts` removes the review worktree and same-repository branch, refreshes the remote default-branch reference, verifies that the project root is checked out on that branch, and performs a fast-forward-only merge. If the updated root has `start.py`, the manager runs `stop.py` first when it exists and then runs `start.py`, using `python` on Windows and `python3` elsewhere. If `start.py` is absent, neither script is run. Any failure is reported as post-merge finalization diagnostics: GitHub's completed merge is not rolled back. The focused evidence is `completing a merged review fast-forwards the project root to the remote default branch` and `completing a merged review runs stop.py before start.py from the updated project root` in `test/workspace.test.ts`; validate with `npm run build && node --test dist/test/workspace.test.js`.
+
 ## Local documentation refresh
 
 OpenWiki documentation is refreshed locally with:

@@ -37,7 +37,7 @@ OpenWiki is maintained locally using the saved ChatGPT-subscription login:
 OPENWIKI_PROVIDER=openai-chatgpt openwiki code --update --print
 ```
 
-The repository intentionally has no OpenWiki CI workflow. `AGENTS.md` and `CLAUDE.md` both point readers to `openwiki/quickstart.md`, preserve the local-only `OPENWIKI_PROVIDER=openai-chatgpt openwiki code --update --print` command, and warn against hand-editing generated OpenWiki pages unless explicitly asked.
+The repository intentionally has no OpenWiki CI workflow. The agent-facing OpenWiki guidance in `AGENTS.md` and `CLAUDE.md` says that this repository uses OpenWiki for recurring code documentation, directs readers to `openwiki/quickstart.md` and its links to architecture, workflows, integrations, and operations, preserves the local-only `OPENWIKI_PROVIDER=openai-chatgpt openwiki code --update --print` command, and warns against hand-editing generated OpenWiki pages unless explicitly asked.
 
 ## Repo conventions worth preserving
 

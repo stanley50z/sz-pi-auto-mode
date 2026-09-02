@@ -1133,7 +1133,7 @@ test("a new Coordinator process resets an exhausted attempt budget", async () =>
   await coordinator.whenStopped();
 });
 
-test("Auto-Review requires merged proof and reports cleanup only after merge", async () => {
+test("Auto-Review requires merged proof and finalizes the project only after merge", async () => {
   const pullRequest: WorkflowItem = {
     kind: "pull-request",
     number: 44,
@@ -1167,10 +1167,10 @@ test("Auto-Review requires merged proof and reports cleanup only after merge", a
       };
     },
   };
-  const cleanups: number[] = [];
+  const finalizations: number[] = [];
   const workspaces = {
     ...fakeWorkspaces,
-    async completeReview(item: WorkflowItem) { cleanups.push(item.number); },
+    async completeReview(item: WorkflowItem) { finalizations.push(item.number); },
   };
   const coordinator = new AutomodeCoordinator({
     configuration: createAutomationStageConfiguration("half", ["auto-review"]),
@@ -1185,7 +1185,7 @@ test("Auto-Review requires merged proof and reports cleanup only after merge", a
   await coordinator.waitForIdle();
 
   assert.equal(starts, 2);
-  assert.deepEqual(cleanups, [44]);
+  assert.deepEqual(finalizations, [44]);
   assert.equal(tracker.records.get("pull-request:44")?.lifecycle, "succeeded");
   coordinator.interrupt();
   await coordinator.whenStopped();

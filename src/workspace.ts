@@ -10,6 +10,7 @@ import type {
 
 const execFileAsync = promisify(execFile);
 const COMMAND_TIMEOUT_MS = 30_000;
+const PYTHON_COMMAND = process.platform === "win32" ? "python" : "python3";
 
 export type WorkspaceIdentity = TicketWorkspaceIdentity;
 
@@ -215,6 +216,7 @@ export class WorkspaceManager implements TicketWorkspaceManager {
       headBranch: item.headBranch,
       sameRepository: item.headRepository.toLowerCase() === this.#repositorySlug.toLowerCase(),
     });
+    await this.#refreshProjectAfterMerge();
   }
 
   async prepareProductionIssue(issueNumber: number): Promise<WorkspaceIdentity> {
@@ -311,6 +313,32 @@ export class WorkspaceManager implements TicketWorkspaceManager {
         this.#repositoryRoot,
       );
     }
+  }
+
+  /** Refreshes and optionally restarts the project after Auto-Review proves that GitHub merged the pull request. */
+  async #refreshProjectAfterMerge(): Promise<void> {
+    const originDefault = await this.#refreshOriginDefault();
+    const currentBranch = (await this.#runner.run(
+      "git",
+      ["branch", "--show-current"],
+      this.#repositoryRoot,
+    )).trim();
+    if (currentBranch !== originDefault.branch) {
+      throw new Error(
+        `Cannot update the project root after merge: expected branch ${originDefault.branch}, found ${currentBranch || "detached HEAD"}`,
+      );
+    }
+    await this.#runner.run(
+      "git",
+      ["merge", "--ff-only", `refs/remotes/origin/${originDefault.branch}`],
+      this.#repositoryRoot,
+    );
+
+    if (!await this.#fileSystem.exists(join(this.#repositoryRoot, "start.py"))) return;
+    if (await this.#fileSystem.exists(join(this.#repositoryRoot, "stop.py"))) {
+      await this.#runner.run(PYTHON_COMMAND, ["stop.py"], this.#repositoryRoot);
+    }
+    await this.#runner.run(PYTHON_COMMAND, ["start.py"], this.#repositoryRoot);
   }
 
   async #prepareIssue(branch: string, directory: string): Promise<WorkspaceIdentity> {

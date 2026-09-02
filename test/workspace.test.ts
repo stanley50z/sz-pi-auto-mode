@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -307,11 +307,109 @@ test("cleanup is rejected before a successful merge and preserves every artifact
   }
 });
 
+test("completing a merged review fast-forwards the project root to the remote default branch", async () => {
+  const fixture = createRepositoryFixture();
+  try {
+    const manager = new WorkspaceManager({
+      repositoryRoot: fixture.repository,
+      repositorySlug: "owner/repository",
+    });
+    const workspace = await manager.prepareProductionIssue(49);
+    writeFileSync(join(workspace.worktree, "merged.txt"), "merged delivery\n", "utf8");
+    git(workspace.worktree, "add", "merged.txt");
+    git(workspace.worktree, "commit", "-m", "merged delivery");
+    const mergedHead = git(workspace.worktree, "rev-parse", "HEAD");
+    git(workspace.worktree, "push", "origin", `HEAD:refs/heads/${workspace.branch}`);
+    git(fixture.seed, "fetch", "origin", workspace.branch);
+    git(fixture.seed, "merge", "--ff-only", "FETCH_HEAD");
+    git(fixture.seed, "push", "origin", "main");
+
+    await manager.completeReview({
+      kind: "pull-request",
+      number: 49,
+      url: "https://github.com/owner/repository/pull/49",
+      state: "closed",
+      labels: [],
+      assignees: [],
+      blockedBy: 0,
+      draft: false,
+      merged: true,
+      headSha: mergedHead,
+      headBranch: workspace.branch,
+      headRepository: "owner/repository",
+      updatedAt: "2026-01-01T00:00:00Z",
+      materialVersion: "merged-pr-49",
+    }, workspace);
+
+    assert.equal(git(fixture.repository, "branch", "--show-current"), "main");
+    assert.equal(git(fixture.repository, "rev-parse", "HEAD"), mergedHead);
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test("completing a merged review runs stop.py before start.py from the updated project root", async () => {
+  const fixture = createRepositoryFixture();
+  try {
+    const manager = new WorkspaceManager({
+      repositoryRoot: fixture.repository,
+      repositorySlug: "owner/repository",
+    });
+    const workspace = await manager.prepareProductionIssue(50);
+    writeFileSync(join(workspace.worktree, "stop.py"), [
+      "from pathlib import Path",
+      "import subprocess",
+      "head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()",
+      "Path('restart-order.txt').write_text(f'stop {head}\\n', encoding='utf-8')",
+      "",
+    ].join("\n"), "utf8");
+    writeFileSync(join(workspace.worktree, "start.py"), [
+      "from pathlib import Path",
+      "import subprocess",
+      "head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()",
+      "path = Path('restart-order.txt')",
+      "path.write_text(path.read_text(encoding='utf-8') + f'start {head}\\n', encoding='utf-8')",
+      "",
+    ].join("\n"), "utf8");
+    git(workspace.worktree, "add", "stop.py", "start.py");
+    git(workspace.worktree, "commit", "-m", "add project restart scripts");
+    const mergedHead = git(workspace.worktree, "rev-parse", "HEAD");
+    git(workspace.worktree, "push", "origin", `HEAD:refs/heads/${workspace.branch}`);
+    git(fixture.seed, "fetch", "origin", workspace.branch);
+    git(fixture.seed, "merge", "--ff-only", "FETCH_HEAD");
+    git(fixture.seed, "push", "origin", "main");
+
+    await manager.completeReview({
+      kind: "pull-request",
+      number: 50,
+      url: "https://github.com/owner/repository/pull/50",
+      state: "closed",
+      labels: [],
+      assignees: [],
+      blockedBy: 0,
+      draft: false,
+      merged: true,
+      headSha: mergedHead,
+      headBranch: workspace.branch,
+      headRepository: "owner/repository",
+      updatedAt: "2026-01-01T00:00:00Z",
+      materialVersion: "merged-pr-50",
+    }, workspace);
+
+    assert.deepEqual(
+      readFileSync(join(fixture.repository, "restart-order.txt"), "utf8").trim().split(/\r?\n/u),
+      [`stop ${mergedHead}`, `start ${mergedHead}`],
+    );
+  } finally {
+    fixture.dispose();
+  }
+});
+
 test("successful-merge cleanup removes same-repository artifacts and is idempotent", async () => {
   const fixture = createRepositoryFixture();
   try {
     const manager = new WorkspaceManager({ repositoryRoot: fixture.repository });
-    const workspace = await manager.prepareProductionIssue(49);
+    const workspace = await manager.prepareProductionIssue(51);
     git(workspace.worktree, "push", "origin", `HEAD:refs/heads/${workspace.branch}`);
     const cleanup = {
       mergeSucceeded: true,
@@ -336,19 +434,19 @@ test("successful-merge cleanup never deletes a fork head branch", async () => {
   const fixture = createRepositoryFixture();
   try {
     const manager = new WorkspaceManager({ repositoryRoot: fixture.repository });
-    const workspace = await manager.prepareProductionIssue(50);
-    git(workspace.worktree, "push", "origin", "HEAD:refs/heads/fork-owner/pr-50");
+    const workspace = await manager.prepareProductionIssue(52);
+    git(workspace.worktree, "push", "origin", "HEAD:refs/heads/fork-owner/pr-52");
 
     await manager.cleanupAfterSuccessfulMerge({
       mergeSucceeded: true,
       workspace,
       headRemote: "origin",
-      headBranch: "fork-owner/pr-50",
+      headBranch: "fork-owner/pr-52",
       sameRepository: false,
     });
 
     assert.equal(existsSync(workspace.worktree), false);
-    assert.notEqual(git(fixture.repository, "ls-remote", "--heads", "origin", "refs/heads/fork-owner/pr-50"), "");
+    assert.notEqual(git(fixture.repository, "ls-remote", "--heads", "origin", "refs/heads/fork-owner/pr-52"), "");
   } finally {
     fixture.dispose();
   }

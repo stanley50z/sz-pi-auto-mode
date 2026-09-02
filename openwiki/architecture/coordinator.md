@@ -57,13 +57,32 @@ Terminal outcomes are `clean`, `error`, or `waiting`. A successful or waiting ch
 
 ## GitHub and workspace contracts
 
-`GitHubTracker` shells out to `gh`, normalizes issues and pull requests, parses only the Automode bookkeeping marker from comments, and uses compare-and-verify behavior for claims and updates. Bookkeeping comments retain a machine-readable base64 payload inside a hidden data marker plus a human-readable status table; diagnostics are rendered safely and sensitive local session paths are not included in the visible table. On reread, issue bodies using either a `## Blocked by` section or a top-of-body `Blocked by:` fallback are checked against GitHub's native dependency relationship count and fail closed when the declared blocker count exceeds native relationships. This prevents prose-only blockers from changing eligibility without corresponding GitHub dependency edges. Its complete snapshot revision incorporates `updated_at` values, not just labels or assignment, so external edits trigger reconsideration. When mapping output pull requests back to issues, a closed pull request with `merged !== true` is ignored: it is an abandoned output and does not conflict with an open or merged pull request that closes the same issue. `WorkspaceManager` prepares `.worktree` branches for prototype and implementation issues; review worktrees fetch the exact pull-request head and verify it before use. A missing worktree can be recreated from its surviving branch, while a fork head without a configured writable head remote fails fast. Branch names, revisions, remotes, and paths are validated. Merged review workspaces are cleaned only after successful merge proof, and fork-head branches are not deleted. Auto-Implement creates non-draft pull requests; Auto-Review is the stage that validates, applies warranted fixes, merges, and cleans up after a completed merge.
+`GitHubTracker` shells out to `gh`, normalizes issues and pull requests, parses only the Automode bookkeeping marker from comments, and uses compare-and-verify behavior for claims and updates. Bookkeeping comments retain a machine-readable base64 payload inside a hidden data marker plus a human-readable status table; diagnostics are rendered safely and sensitive local session paths are not included in the visible table. On reread, issue bodies using either a `## Blocked by` section or a top-of-body `Blocked by:` fallback are checked against GitHub's native dependency relationship count and fail closed when the declared blocker count exceeds native relationships. This prevents prose-only blockers from changing eligibility without corresponding GitHub dependency edges. Its complete snapshot revision incorporates `updated_at` values, not just labels or assignment, so external edits trigger reconsideration. When mapping output pull requests back to issues, a closed pull request with `merged !== true` is ignored: it is an abandoned output and does not conflict with an open or merged pull request that closes the same issue. `WorkspaceManager` prepares `.worktree` branches for prototype and implementation issues; review worktrees fetch the exact pull-request head and verify it before use. A missing worktree can be recreated from its surviving branch, while a fork head without a configured writable head remote fails fast. Branch names, revisions, remotes, and paths are validated. Merged review workspaces are cleaned only after successful merge proof, and fork-head branches are not deleted. After `completeReview` proves the merge and removes review artifacts, it refreshes the origin default branch, requires the project root to be checked out on that branch, and advances it with `git merge --ff-only`. If the updated root contains `start.py`, it runs `stop.py` first when present and then `start.py` using the project root as the working directory; if `start.py` is absent, no restart script runs. A fast-forward or restart failure is retained as a post-merge finalization diagnostic and cannot undo the GitHub merge. Auto-Implement creates non-draft pull requests; Auto-Review is the stage that validates, applies warranted fixes, merges, and cleans up after a completed merge.
+
+```mermaid
+sequenceDiagram
+  participant R as Review Session
+  participant C as Coordinator
+  participant W as Workspace manager
+  participant G as Git remote
+  participant P as Project root
+  R-->>C: settled result and merge proof
+  C->>W: finalize merged review
+  W->>W: remove review artifacts
+  W->>G: fetch default branch
+  W->>P: fast-forward checked-out default branch
+  W->>P: run stop.py when present
+  W->>P: run start.py when present
+  W-->>C: finalization result or diagnostic
+```
+
+*After merge proof, project refresh is best-effort finalization and cannot undo the completed GitHub merge.*
 
 ## Change navigation
 
 - Coordinator policy or lifecycle: change `AutomodeCoordinator` and `test/coordinator.test.ts`; preserve precedence, snapshot gating, reconciliation, `/automode`/`/drain`/`/exit` behavior, and the exclusion of `spec`/`wayfinder:map` issues from implementation dispatch.
 - Child protocol, transcript projection, termination, or runtime compatibility: change `src/ticket-session.ts`, `src/ticket-session-main.ts`, `src/ticket-transcript.ts`, or `src/restart-required.ts`; run `test/ticket-session.test.ts`, `test/ticket-session-result.test.ts`, and the restart case in `test/coordinator.test.ts`. Protocol changes must be validated at the real child-process seam, not only by testing the internal transcript helper.
 - GitHub mapping, dependency validation, snapshot reconciliation, or bookkeeping rendering: change `src/github-tracker.ts` and `test/github-tracker.test.ts`; preserve strict normalization, marker parsing, hidden payload decoding, safe visible rendering, fail-closed blocker checks, and the one-shot recovery of transient issue/PR index skew. The focused tests include transiently incomplete snapshots and stale open indexes after merge.
-- Branch/worktree behavior: change `src/workspace.ts` and `test/workspace.test.ts`; validate exact fetched heads and cleanup guards.
+- Branch/worktree and post-merge project refresh: change `src/workspace.ts` (`completeReview`, `cleanupAfterSuccessfulMerge`, `#refreshProjectAfterMerge`) and `test/workspace.test.ts`; preserve exact fetched-head checks, cleanup guards, the project-root default-branch check, fast-forward-only update, and `stop.py`-before-`start.py` ordering. The focused cases are `completing a merged review fast-forwards the project root to the remote default branch` and `completing a merged review runs stop.py before start.py from the updated project root`; validate with `npm run build && node --test dist/test/workspace.test.js`.
 
 The [architecture overview](overview.md) documents startup and the durable Automode Run Record; this page documents the Coordinator/Ticket Session runtime that begins after the Main Session starts.
