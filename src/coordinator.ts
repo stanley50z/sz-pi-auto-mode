@@ -245,6 +245,7 @@ export interface CoordinatorProjection {
   readonly poll: {
     readonly lastSuccessfulPoll?: string;
     readonly nextScheduledPoll?: string;
+    readonly error?: string;
   };
 }
 
@@ -451,6 +452,7 @@ export class AutomodeCoordinator {
   private lastSnapshotRevision: string | undefined;
   private lastSuccessfulPoll: string | undefined;
   private nextScheduledPoll: string | undefined;
+  private pollError: string | undefined;
   private started = false;
   private draining = false;
   private forcing = false;
@@ -666,6 +668,7 @@ export class AutomodeCoordinator {
       poll: {
         ...(this.lastSuccessfulPoll === undefined ? {} : { lastSuccessfulPoll: this.lastSuccessfulPoll }),
         ...(this.nextScheduledPoll === undefined ? {} : { nextScheduledPoll: this.nextScheduledPoll }),
+        ...(this.pollError === undefined ? {} : { error: this.pollError }),
       },
     };
   }
@@ -763,7 +766,7 @@ export class AutomodeCoordinator {
         try {
           await this.scan(false);
         } catch (error) {
-          await this.recordCoordinatorFailure(error);
+          this.recordCoordinatorFailure(error);
         }
       });
     }
@@ -829,6 +832,7 @@ export class AutomodeCoordinator {
     if (this.draining) return;
     const snapshot = await this.options.tracker.snapshot();
     this.lastSuccessfulPoll = this.clock.now().toISOString();
+    this.pollError = undefined;
     if (!initial && snapshot.revision === this.lastSnapshotRevision) {
       this.refreshProjection();
       return;
@@ -1240,9 +1244,10 @@ export class AutomodeCoordinator {
     }
   }
 
-  private async recordCoordinatorFailure(error: unknown): Promise<void> {
+  private recordCoordinatorFailure(error: unknown): void {
     if (this.draining) return;
-    throw new Error(`Automode Coordinator polling failed: ${errorMessage(error)}`, { cause: error });
+    this.pollError = boundedCoordinatorActivity(errorMessage(error));
+    this.refreshProjection();
   }
 
   /** Requests an immediate full tracker snapshot and eligibility scan. */

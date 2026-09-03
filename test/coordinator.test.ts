@@ -736,6 +736,45 @@ test("the Coordinator projection reports successful and next scheduled poll timi
   await coordinator.whenStopped();
 });
 
+test("a failed background poll preserves the Coordinator and reports recovery on the next poll", async () => {
+  const tracker = new FakeTracker([]);
+  const successfulSnapshot = tracker.snapshot.bind(tracker);
+  let pollFails = false;
+  tracker.snapshot = async () => {
+    if (pollFails) throw new Error("temporary GitHub outage");
+    return successfulSnapshot();
+  };
+  const clock = new ManualClock();
+  const coordinator = new AutomodeCoordinator({
+    configuration: createAutomationStageConfiguration("half", ["auto-triage"]),
+    actor: "automation-user",
+    tracker,
+    sessions: new FakeTicketSessions(async () => undefined),
+    clock,
+  });
+
+  await coordinator.start();
+  pollFails = true;
+  clock.current = new Date("2026-02-03T04:05:36.000Z");
+  await assert.doesNotReject(async () => clock.callback?.());
+  assert.deepEqual(coordinator.getProjection().poll, {
+    lastSuccessfulPoll: "2026-02-03T04:05:06.000Z",
+    nextScheduledPoll: "2026-02-03T04:06:06.000Z",
+    error: "temporary GitHub outage",
+  });
+
+  pollFails = false;
+  clock.current = new Date("2026-02-03T04:06:06.000Z");
+  await clock.callback?.();
+  assert.deepEqual(coordinator.getProjection().poll, {
+    lastSuccessfulPoll: "2026-02-03T04:06:06.000Z",
+    nextScheduledPoll: "2026-02-03T04:06:36.000Z",
+  });
+
+  coordinator.interrupt();
+  await coordinator.whenStopped();
+});
+
 test("polling rescans all enabled stages only when the 30-second material snapshot changes", async () => {
   const tracker = new FakeTracker([]);
   const sessions = new FakeTicketSessions((request) => {

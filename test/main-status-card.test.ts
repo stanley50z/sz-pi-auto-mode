@@ -6,7 +6,10 @@ import {
   type AutomodeStatusCardSnapshot,
 } from "../src/main-status-card.js";
 
-function snapshot(lifecycle: AutomodeStatusCardSnapshot["projection"]["run"]["lifecycle"]): AutomodeStatusCardSnapshot {
+function snapshot(
+  lifecycle: AutomodeStatusCardSnapshot["projection"]["run"]["lifecycle"],
+  pollError?: string,
+): AutomodeStatusCardSnapshot {
   const totals = { candidates: 2, active: 1, queued: 1, held: 0, retrying: 0, exhausted: 0 };
   return {
     projection: {
@@ -19,6 +22,7 @@ function snapshot(lifecycle: AutomodeStatusCardSnapshot["projection"]["run"]["li
         startedAt: "2026-08-18T11:45:00.000Z",
         lastSuccessfulPoll: "2026-08-18T12:00:00.000Z",
         nextPoll: "2026-08-18T12:00:30.000Z",
+        ...(pollError === undefined ? {} : { pollError }),
       },
       totals,
       lanes: [
@@ -85,8 +89,9 @@ test("the Main Session status card reacts to projection changes and exposes /dra
   assert.match(rendered, /\u001b]8;;https:\/\/automode\.example\.ts\.net/);
   assert.match(rendered, /\/drain: graceful drain/);
   assert.match(rendered, /\/exit: force-stop active Ticket Sessions, then exit/);
-  card.publish(snapshot("active"));
+  card.publish(snapshot("degraded", "temporary GitHub outage"));
   assert.equal(renders, 1);
+  assert.match(component.render(200).join("\n"), /GITHUB POLL ERROR: temporary GitHub outage/);
 
   assert.ok(commands.has("drain"));
   await commands.get("drain")!("", ctx);

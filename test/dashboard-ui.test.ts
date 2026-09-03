@@ -85,6 +85,7 @@ test("Coordinator Stage Candidates map to the browser projection without tracker
     poll: {
       lastSuccessfulPoll: "2026-08-17T12:00:00.000Z",
       nextScheduledPoll: "2026-08-17T12:00:30.000Z",
+      error: "temporary GitHub outage",
     },
     recent: [{
       item: { kind: "pull-request", number: 61, url: "https://github.com/example/repository/pull/61" },
@@ -115,6 +116,7 @@ test("Coordinator Stage Candidates map to the browser projection without tracker
     startedAt: "2026-08-17T11:45:00.000Z",
     lastSuccessfulPoll: "2026-08-17T12:00:00.000Z",
     nextPoll: "2026-08-17T12:00:30.000Z",
+    pollError: "temporary GitHub outage",
   });
   assert.deepEqual(projection.lanes[0]?.candidates[0], {
     key: "issue:68:auto-triage",

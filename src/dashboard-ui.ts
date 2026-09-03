@@ -115,6 +115,7 @@ export interface DashboardProjection {
     readonly startedAt: string;
     readonly lastSuccessfulPoll?: string;
     readonly nextPoll?: string;
+    readonly pollError?: string;
   };
   readonly totals: {
     readonly candidates: number;
@@ -132,7 +133,7 @@ export interface DashboardProjection {
 
 export interface DashboardProjectionContext {
   readonly repository: DashboardProjection["repository"];
-  readonly run: Omit<DashboardProjection["run"], "lastSuccessfulPoll" | "nextPoll">;
+  readonly run: Omit<DashboardProjection["run"], "lastSuccessfulPoll" | "nextPoll" | "pollError">;
 }
 
 export interface DashboardUiAsset {
@@ -617,7 +618,7 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
   }
 
   function validateProjection(value) {
-    if (!isRecord(value) || value.version !== 1 || !isRecord(value.repository) || typeof value.repository.name !== "string" || !isWebUrl(value.repository.url) || !isRecord(value.run) || typeof value.run.id !== "string" || !MODE_LABELS[value.run.mode] || !RUN_LIFECYCLES.has(value.run.lifecycle) || !isTimestamp(value.run.startedAt) || !optionalString(value.run.lastSuccessfulPoll) || !optionalString(value.run.nextPoll) || !Array.isArray(value.lanes) || !Array.isArray(value.recent) || (value.stale !== undefined && typeof value.stale !== "boolean") || !optionalString(value.tailscaleError)) contractError("root");
+    if (!isRecord(value) || value.version !== 1 || !isRecord(value.repository) || typeof value.repository.name !== "string" || !isWebUrl(value.repository.url) || !isRecord(value.run) || typeof value.run.id !== "string" || !MODE_LABELS[value.run.mode] || !RUN_LIFECYCLES.has(value.run.lifecycle) || !isTimestamp(value.run.startedAt) || !optionalString(value.run.lastSuccessfulPoll) || !optionalString(value.run.nextPoll) || !optionalString(value.run.pollError) || !Array.isArray(value.lanes) || !Array.isArray(value.recent) || (value.stale !== undefined && typeof value.stale !== "boolean") || !optionalString(value.tailscaleError)) contractError("root");
     validateTotals(value.totals, "totals", true);
     const seenStages = new Set();
     const seenCandidates = new Set();
@@ -1201,6 +1202,9 @@ export function createDashboardProjection(
       ...(coordinator.poll.nextScheduledPoll === undefined
         ? {}
         : { nextPoll: coordinator.poll.nextScheduledPoll }),
+      ...(coordinator.poll.error === undefined
+        ? {}
+        : { pollError: coordinator.poll.error }),
     },
     totals: { ...coordinator.totals },
     lanes: coordinator.lanes.map((lane) => ({

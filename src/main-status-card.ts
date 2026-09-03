@@ -64,6 +64,9 @@ function renderStatusCard(
     theme.fg("warning", "/automode: graceful drain, then return to normal Pi"),
     theme.fg("warning", "/drain: graceful drain  ·  /exit: force-stop active Ticket Sessions, then exit"),
   ];
+  if (projection.run.pollError) {
+    lines.splice(-2, 0, theme.fg("error", `GITHUB POLL ERROR: ${projection.run.pollError}`));
+  }
   if (dashboard.exposureError) {
     lines.splice(4, 0, theme.fg(
       "error",

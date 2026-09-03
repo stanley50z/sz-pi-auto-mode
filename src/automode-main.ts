@@ -403,8 +403,9 @@ export async function startAutomodeMainSession(
     statusCard.publish({ projection, dashboard: dashboardStatus });
   };
   const activeLifecycle = (): DashboardProjection["run"]["lifecycle"] => {
-    if (dashboardStatus.exposureError) return "degraded";
-    return coordinator.getProjection().totals.candidates === 0 ? "empty" : "active";
+    const coordinatorProjection = coordinator.getProjection();
+    if (dashboardStatus.exposureError || coordinatorProjection.poll.error) return "degraded";
+    return coordinatorProjection.totals.candidates === 0 ? "empty" : "active";
   };
 
   const startCoordinator = async () => {
