@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import type { GlobalSkillSource } from "./global-skills.js";
+import { SNAPSHOTTED_PI_PACKAGES } from "./pi-runtime-packages.js";
 
 export interface AutomodeRuntimeSnapshot {
   readonly moduleDirectory: string;
@@ -51,7 +52,9 @@ function runtimeDependencyDirectories(packageRoot: string): string[] {
     const directory = resolveDependencyPackage(packageRoot, dependency.owner, dependency.name);
     if (directories.has(directory)) continue;
     directories.add(directory);
-    pending.push(...packageDependencies(directory).map((name) => ({ owner: directory, name })));
+    if (!SNAPSHOTTED_PI_PACKAGES.includes(dependency.name)) {
+      pending.push(...packageDependencies(directory).map((name) => ({ owner: directory, name })));
+    }
   }
   return [...directories].sort();
 }

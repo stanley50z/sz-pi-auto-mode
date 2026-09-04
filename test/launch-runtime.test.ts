@@ -179,6 +179,70 @@ test("the captured production runtime can launch Ticket Session code independent
   }
 });
 
+test("the captured runtime supplies a Pi package omitted from the launching Pi manifest", () => {
+  const sourceRoot = mkdtempSync(join(tmpdir(), "automode-runtime-undeclared-pi-package-"));
+  const sourceModuleDirectory = writeRuntimeFixture(sourceRoot);
+  const compiledSource = resolve(dirname(fileURLToPath(import.meta.url)), "../src");
+  copyFileSync(join(compiledSource, "pi-runtime-loader.js"), join(sourceModuleDirectory, "pi-runtime-loader.js"));
+  copyFileSync(join(compiledSource, "pi-runtime-packages.js"), join(sourceModuleDirectory, "pi-runtime-packages.js"));
+  writeFileSync(join(sourceRoot, "package.json"), JSON.stringify({
+    type: "module",
+    dependencies: {
+      "@earendil-works/pi-server": "0.85.0",
+      "runtime-dependency": "1.0.0",
+    },
+  }));
+  const piServer = join(sourceRoot, "node_modules", "@earendil-works", "pi-server");
+  mkdirSync(piServer, { recursive: true });
+  writeFileSync(join(piServer, "package.json"), JSON.stringify({
+    name: "@earendil-works/pi-server",
+    type: "module",
+    exports: "./index.js",
+    dependencies: { "@earendil-works/chord": "0.85.0" },
+  }));
+  writeFileSync(
+    join(piServer, "index.js"),
+    "import { chordRuntime } from '@earendil-works/chord'; export const serverRuntime = `snapshot pi-server with ${chordRuntime}`;\n",
+  );
+
+  const launchingPi = mkdtempSync(join(tmpdir(), "automode-launching-pi-"));
+  writeFileSync(join(launchingPi, "package.json"), JSON.stringify({
+    name: "@earendil-works/pi-coding-agent",
+    type: "module",
+  }));
+  writeFileSync(
+    join(launchingPi, "index.js"),
+    "export { serverRuntime } from '@earendil-works/pi-server';\n",
+  );
+  const launchingChord = join(launchingPi, "node_modules", "@earendil-works", "chord");
+  mkdirSync(launchingChord, { recursive: true });
+  writeFileSync(join(launchingChord, "package.json"), JSON.stringify({
+    name: "@earendil-works/chord",
+    type: "module",
+    exports: "./index.js",
+  }));
+  writeFileSync(join(launchingChord, "index.js"), "export const chordRuntime = 'launching chord';\n");
+
+  const snapshot = createAutomodeRuntimeSnapshot(sourceModuleDirectory);
+  try {
+    const child = spawnSync(process.execPath, [
+      "--import",
+      pathToFileURL(join(snapshot.moduleDirectory, "pi-runtime-loader.js")).href,
+      "--input-type=module",
+      "-e",
+      `const runtime = await import(${JSON.stringify(pathToFileURL(join(launchingPi, "index.js")).href)}); console.log(runtime.serverRuntime)`,
+    ], {
+      env: { ...process.env, AUTOMODE_PI_PACKAGE_DIR: launchingPi },
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    assert.equal(child.status, 0, child.stderr);
+    assert.equal(child.stdout.trim(), "snapshot pi-server with launching chord");
+  } finally {
+    snapshot.dispose();
+  }
+});
+
 test("runtime snapshots pin allowlisted global skill directories", () => {
   const sourceRoot = mkdtempSync(join(tmpdir(), "automode-runtime-global-source-"));
   const sourceModuleDirectory = writeRuntimeFixture(sourceRoot);
