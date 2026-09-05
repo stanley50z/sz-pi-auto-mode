@@ -1,3 +1,4 @@
+import { TEST_MAIN_EXECUTION } from "./execution-fixture.js";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,6 +12,7 @@ const repository = realpathSync(process.cwd());
 test("a controlled capability session exposes every pre-attested Stage capability", async () => {
   const home = mkdtempSync(join(tmpdir(), "automode-capability-"));
   const controlled = await createCapabilitySession({
+    mainExecution: TEST_MAIN_EXECUTION,
     cwd: repository,
     home,
     model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
@@ -86,6 +88,7 @@ test("a controlled capability session exposes snapshotted allowlisted global ski
   }
 
   const controlled = await createCapabilitySession({
+    mainExecution: TEST_MAIN_EXECUTION,
     cwd: repository,
     home: fixture,
     globalSkillRoot,
@@ -142,6 +145,7 @@ test("ambient user and project executable resources never enter the controlled s
   );
 
   const controlled = await createCapabilitySession({
+    mainExecution: TEST_MAIN_EXECUTION,
     cwd: isolatedRepository,
     home,
     model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
@@ -164,6 +168,7 @@ test("project executable resources require both explicit trust and an allowlist"
   const model = getBuiltinModel("openai-codex", "gpt-5.6-sol");
   await assert.rejects(
     () => createCapabilitySession({
+      mainExecution: TEST_MAIN_EXECUTION,
       cwd: repository,
       home: mkdtempSync(join(tmpdir(), "automode-untrusted-")),
       model,
@@ -176,6 +181,7 @@ test("project executable resources require both explicit trust and an allowlist"
   );
   await assert.rejects(
     () => createCapabilitySession({
+      mainExecution: TEST_MAIN_EXECUTION,
       cwd: repository,
       home: mkdtempSync(join(tmpdir(), "automode-shadowed-")),
       model,
@@ -188,6 +194,7 @@ test("project executable resources require both explicit trust and an allowlist"
   );
 
   const controlled = await createCapabilitySession({
+    mainExecution: TEST_MAIN_EXECUTION,
     cwd: repository,
     home: mkdtempSync(join(tmpdir(), "automode-allowlist-")),
     model,

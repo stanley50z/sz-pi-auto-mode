@@ -41,7 +41,8 @@ export default function (pi) {
       cwd: repository,
       env: { ...process.env, PI_OFFLINE: "1" },
       name: "xterm-color",
-      cols: 80,
+      // Pi disables autowrap; keep the JSON proof on one untruncated terminal row.
+      cols: 4096,
       rows: 24,
     });
     let output = "";

@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { GLOBAL_SKILL_ALLOWLIST } from "./global-skills.js";
 import type { AutomationStage } from "./stage-configuration.js";
 
@@ -18,7 +19,7 @@ export interface ExecutionProfile {
   readonly harness: "pi" | "claude-code";
   readonly provider?: string;
   readonly model: string;
-  readonly reasoning: "high";
+  readonly reasoning: ModelThinkingLevel;
 }
 
 export interface PiExecutionProfile extends ExecutionProfile {
@@ -77,18 +78,12 @@ export const AUTOMODE_SETTINGS: AutomodeSettings = Object.freeze({
   defaultProjectTrust: "never",
 });
 
-export const ORDINARY_TICKET_EXECUTION: PiExecutionProfile = Object.freeze({
-  harness: "pi",
-  provider: "openai-codex",
-  model: "gpt-5.6-sol",
-  reasoning: "high",
-});
-
 export const PANEL_EXECUTIONS: readonly ExecutionProfile[] = Object.freeze([
-  ORDINARY_TICKET_EXECUTION,
+  Object.freeze({ harness: "pi", provider: "openai-codex", model: "gpt-6-astra", reasoning: "high" }),
   Object.freeze({ harness: "pi", provider: "github-copilot", model: "claude-fable-5", reasoning: "high" }),
 ]);
 
+/** Validates execution settings crossing the Main Session and Ticket Session process boundaries. */
 export function parsePiExecutionProfile(serialized: string): PiExecutionProfile {
   let value: unknown;
   try {
@@ -106,7 +101,13 @@ export function parsePiExecutionProfile(serialized: string): PiExecutionProfile 
     || candidate.provider.length === 0
     || typeof candidate.model !== "string"
     || candidate.model.length === 0
-    || candidate.reasoning !== "high"
+    || (candidate.reasoning !== "off"
+      && candidate.reasoning !== "minimal"
+      && candidate.reasoning !== "low"
+      && candidate.reasoning !== "medium"
+      && candidate.reasoning !== "high"
+      && candidate.reasoning !== "xhigh"
+      && candidate.reasoning !== "max")
   ) {
     throw new Error("The Pi execution profile is invalid");
   }
@@ -114,7 +115,7 @@ export function parsePiExecutionProfile(serialized: string): PiExecutionProfile 
     harness: "pi",
     provider: candidate.provider,
     model: candidate.model,
-    reasoning: "high",
+    reasoning: candidate.reasoning,
   });
 }
 
@@ -124,11 +125,13 @@ function packageSkillRoot(owner: Exclude<CapabilitySkillOwner, "global">, name: 
 }
 
 export interface AutomodeCapabilityProfileOptions {
+  readonly mainExecution: PiExecutionProfile;
   readonly globalSkillRoot?: string;
 }
 
+/** Builds controlled resources and the Panel from the Main Session settings captured for this dispatch. */
 export function createAutomodeCapabilityProfile(
-  options: AutomodeCapabilityProfileOptions = {},
+  options: AutomodeCapabilityProfileOptions,
 ): AutomodeCapabilityProfile {
   const skills: CapabilitySkill[] = SHARED_SKILLS.map((name) => Object.freeze({
     name,
@@ -171,13 +174,19 @@ export function createAutomodeCapabilityProfile(
     }
   }
 
+  const execution = parsePiExecutionProfile(JSON.stringify(options.mainExecution));
+  const represented = PANEL_EXECUTIONS.some((seat) => (
+    seat.provider === execution.provider && seat.model === execution.model
+  ));
+  const panelExecutions = represented ? PANEL_EXECUTIONS : Object.freeze([...PANEL_EXECUTIONS, execution]);
+
   return Object.freeze({
     skills: Object.freeze(skills),
     tools: AUTOMODE_TOOLS,
     extensionCommands: Object.freeze(["fast"]),
     prompts: Object.freeze([]),
     settings: AUTOMODE_SETTINGS,
-    ordinaryTicketExecution: ORDINARY_TICKET_EXECUTION,
-    panelExecutions: PANEL_EXECUTIONS,
+    ordinaryTicketExecution: execution,
+    panelExecutions,
   });
 }

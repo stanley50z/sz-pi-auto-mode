@@ -96,6 +96,7 @@ export async function runAutomodeCommand(
   const configuration = await dependencies.selectConfiguration(ctx);
   if (configuration === null) return;
   if (!ctx.model) throw new Error("/automode requires an active Pi model for the Main Session");
+  if (ctx.thinkingLevel === undefined) throw new Error("/automode requires the active Pi thinking level");
   await dependencies.launch({
     cwd: repositoryRoot(ctx.cwd),
     serializedConfiguration: serializeAutomationStageConfiguration(configuration),
@@ -103,7 +104,7 @@ export async function runAutomodeCommand(
       harness: "pi",
       provider: ctx.model.provider,
       model: ctx.model.id,
-      reasoning: "high",
+      reasoning: ctx.thinkingLevel,
     },
     piPackageDir: launchingPiPackageDir(),
   });

@@ -182,6 +182,7 @@ test("a deterministic /automode journey advances triage, grilling, implementatio
       cwd: repository,
       mode: "tui",
       model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
+      thinkingLevel: "high",
       waitForIdle: async () => undefined,
       ui: { notify() {} },
     }),

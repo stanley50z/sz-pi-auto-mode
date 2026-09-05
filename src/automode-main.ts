@@ -260,6 +260,7 @@ export async function startAutomodeMainSession(
   const automodeStartedAt = (options.coordinatorClock ?? processCoordinatorClock).now().toISOString();
   const validated = await validateAutomodeStartup({
     repository: options.repository,
+    mainExecution: options.mainExecution,
     home: options.home,
     normalAgentDir: options.normalAgentDir,
     runner: options.startupValidation?.runner,
@@ -271,6 +272,7 @@ export async function startAutomodeMainSession(
     options.normalAgentDir,
   );
   const lease = acquireRepositoryCoordinator(paths.coordinatorDir);
+  let runtime: Awaited<ReturnType<typeof createMainSessionRuntime>> | undefined;
   const coordinator = options.coordinator ?? new AutomodeCoordinator({
     configuration,
     actor: validated.actor,
@@ -283,6 +285,16 @@ export async function startAutomodeMainSession(
     sessions: new AutomodeTicketSessionHost({
       repository: validated.repository,
       configuration,
+      getMainExecution: () => {
+        const session = runtime?.session;
+        if (!session?.model) throw new Error("Ticket dispatch requires an active Main Session model");
+        return {
+          harness: "pi",
+          provider: session.model.provider,
+          model: session.model.id,
+          reasoning: session.thinkingLevel,
+        };
+      },
       home: options.home,
       normalAgentDir: options.normalAgentDir,
     }),
@@ -318,12 +330,12 @@ export async function startAutomodeMainSession(
     onDrain: () => requestDrain(),
     onExit: () => requestForceStop(),
   });
-  let runtime;
   let runRecordFile!: string;
   try {
     const attestationSession = await createCapabilitySession({
       cwd: validated.repository,
-      model: options.capabilityModel,
+      mainExecution: options.mainExecution,
+      model: options.capabilityModel ?? options.model,
       home: options.home,
       normalAgentDir: options.normalAgentDir,
       projectResources: options.projectResources,

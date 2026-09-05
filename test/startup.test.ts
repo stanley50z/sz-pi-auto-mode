@@ -1,9 +1,9 @@
+import { TEST_MAIN_EXECUTION } from "./execution-fixture.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createAutomodeCapabilityProfile } from "../src/capability-profile.js";
 import {
   attestClaudeCodeExecutionProfile,
   validateAutomodeStartup,
@@ -44,6 +44,7 @@ test("startup verifies the GitHub repository and every required execution profil
   const attested: unknown[] = [];
 
   const result = await validateAutomodeStartup({
+    mainExecution: TEST_MAIN_EXECUTION,
     repository,
     runner,
     attestExecutions: async (profiles) => {
@@ -70,7 +71,11 @@ test("startup verifies the GitHub repository and every required execution profil
   ]);
   assert.deepEqual(
     attested,
-    createAutomodeCapabilityProfile().panelExecutions,
+    [
+      { harness: "pi", provider: "openai-codex", model: "gpt-6-astra", reasoning: "high" },
+      { harness: "pi", provider: "github-copilot", model: "claude-fable-5", reasoning: "high" },
+      { harness: "pi", provider: "openai-codex", model: "gpt-5.6-sol", reasoning: "high" },
+    ],
   );
 });
 
@@ -85,6 +90,7 @@ test("startup does not depend on the intermittently unavailable REST user endpoi
   };
 
   const result = await validateAutomodeStartup({
+    mainExecution: TEST_MAIN_EXECUTION,
     repository,
     runner,
     attestExecutions: async () => undefined,
@@ -166,6 +172,7 @@ test("startup binds gh access to local origin and requires mutation permission",
   };
   await assert.rejects(
     () => validateAutomodeStartup({
+      mainExecution: TEST_MAIN_EXECUTION,
       repository,
       runner: mismatch,
       attestExecutions: async () => undefined,
@@ -188,6 +195,7 @@ test("startup binds gh access to local origin and requires mutation permission",
   };
   await assert.rejects(
     () => validateAutomodeStartup({
+      mainExecution: TEST_MAIN_EXECUTION,
       repository,
       runner: readOnly,
       attestExecutions: async () => undefined,
@@ -213,6 +221,7 @@ test("startup polls through consecutive transient GitHub service failures instea
   };
 
   const result = await validateAutomodeStartup({
+    mainExecution: TEST_MAIN_EXECUTION,
     repository,
     runner,
     attestExecutions: async () => undefined,
@@ -248,6 +257,7 @@ test("repository, GitHub authentication/access, and execution failures abort sta
     };
     await assert.rejects(
       () => validateAutomodeStartup({
+        mainExecution: TEST_MAIN_EXECUTION,
         repository,
         runner,
         attestExecutions: async () => undefined,
@@ -258,6 +268,7 @@ test("repository, GitHub authentication/access, and execution failures abort sta
 
   await assert.rejects(
     () => validateAutomodeStartup({
+      mainExecution: TEST_MAIN_EXECUTION,
       repository: repositoryFixture(),
       runner: new RecordedRunner(),
       attestExecutions: async () => {

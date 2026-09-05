@@ -38,7 +38,7 @@ function startForTest(options: StartForTestOptions) {
     model: options.mainExecution
       ? options.model
       : options.model ?? getBuiltinModel("openai-codex", "gpt-5.6-sol"),
-    capabilityModel: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
+    capabilityModel: options.capabilityModel,
     openDashboardInBrowser: options.openDashboardInBrowser ?? (async () => undefined),
     startupValidation: {
       runner: {

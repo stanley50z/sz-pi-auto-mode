@@ -12,6 +12,7 @@ import { attestCanonicalCommands, isPathInside } from "./attestation.js";
 import {
   createAutomodeCapabilityProfile,
   type AutomodeCapabilityProfile,
+  type PiExecutionProfile,
 } from "./capability-profile.js";
 import { createControlledServices } from "./controlled-services.js";
 import { resolvePiExecutionModel } from "./model-execution.js";
@@ -24,6 +25,7 @@ export interface ProjectResourceAllowlist {
 
 export interface CapabilitySessionOptions {
   cwd: string;
+  mainExecution: PiExecutionProfile;
   model?: Model<any>;
   home?: string;
   normalAgentDir?: string;
@@ -61,6 +63,7 @@ export async function createCapabilitySession(
 ): Promise<CapabilitySession> {
   const repository = repositoryRoot(options.cwd);
   const profile = createAutomodeCapabilityProfile({
+    mainExecution: options.mainExecution,
     globalSkillRoot: options.globalSkillRoot ?? process.env.AUTOMODE_GLOBAL_SKILL_ROOT,
   });
   const paths = resolveAutomodePaths(repository, options.home, options.normalAgentDir);
@@ -70,6 +73,7 @@ export async function createCapabilitySession(
   const services = await createControlledServices({
     cwd: repository,
     paths,
+    modelsPath: join(paths.normalAgentDir, "models.json"),
     skillPaths: [...profile.skills.map((skill) => skill.sourceRoot), ...projectSkillPaths],
     extensions: options.extensions,
     systemPrompt: "You are an Automode Capability Attestation Session. Inspect the controlled capability surface, then terminate without doing tracker work.",

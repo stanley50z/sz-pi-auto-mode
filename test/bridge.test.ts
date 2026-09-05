@@ -7,6 +7,7 @@ import { getPackageDir, type ExtensionAPI } from "@earendil-works/pi-coding-agen
 import automodeBridge, {
   selectAutomationStageConfiguration,
   type AutomodeBridgeDependencies,
+  type AutomodeLaunchRequest,
 } from "../src/bridge.js";
 import { AUTOMATION_STAGES } from "../src/stage-configuration.js";
 
@@ -35,6 +36,7 @@ function commandContext(cwd: string) {
     cwd,
     mode: "tui",
     model: { provider: "anthropic", id: "claude-opus-4-8" },
+    thinkingLevel: "medium",
     waitForIdle: async () => {},
     ui: { notify() {} },
   };
@@ -102,17 +104,7 @@ test("a confirmed configuration is serialized and launches from the repository r
   mkdirSync(join(repository, ".git"), { recursive: true });
   mkdirSync(nestedDirectory, { recursive: true });
   const harness = bridgeHarness();
-  const launches: Array<{
-    cwd: string;
-    serializedConfiguration: string;
-    mainExecution: {
-      harness: "pi";
-      provider: string;
-      model: string;
-      reasoning: "high";
-    };
-    piPackageDir: string;
-  }> = [];
+  const launches: AutomodeLaunchRequest[] = [];
   automodeBridge(harness.pi, {
     selectConfiguration: async () => ({ mode: "full", stages: AUTOMATION_STAGES }),
     launch: async (request) => { launches.push(request); throw new Error("handoff test stop"); },
@@ -129,7 +121,7 @@ test("a confirmed configuration is serialized and launches from the repository r
       harness: "pi",
       provider: "anthropic",
       model: "claude-opus-4-8",
-      reasoning: "high",
+      reasoning: "medium",
     },
     piPackageDir: getPackageDir(),
   }]);

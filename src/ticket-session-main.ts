@@ -229,7 +229,7 @@ export const createControlledTicketSession: TicketSessionChildSessionFactory = a
   const cwd = realpathSync(resolve(request.cwd));
   repositoryRoot(cwd);
   createAutomationStageConfiguration(request.configuration.mode, request.configuration.stages);
-  const profile = createAutomodeCapabilityProfile();
+  const profile = createAutomodeCapabilityProfile({ mainExecution: request.mainExecution });
   const requestedSkill = profile.skills.find((skill) => skill.name === request.skillName);
   if (!requestedSkill || requestedSkill.kind !== "stage" || requestedSkill.owner !== "automode") {
     throw new Error(`Skill is not an Automode Stage Skill: ${request.skillName}`);
@@ -269,6 +269,7 @@ export const createControlledTicketSession: TicketSessionChildSessionFactory = a
   const services = await createControlledServices({
     cwd,
     paths,
+    modelsPath: join(paths.normalAgentDir, "models.json"),
     skillPaths: profile.skills.map((skill) => skill.sourceRoot),
     extensions,
     systemPrompt: "You are an authoritative Automode Ticket Session. Perform only the one canonically dispatched item workflow in this persistent session. You must finish by calling automode_ticket_result exactly once; never merely describe completion in prose.",

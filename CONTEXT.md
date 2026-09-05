@@ -85,7 +85,7 @@ The repository-singleton orchestrator for an Automode Run. At most one live Coor
 _Avoid_: Ticket worker, subagent
 
 **Main Session**:
-The repository-scoped coordinator session that hosts the Automode Coordinator for an Automode Run. Each Main Session uses the Pi provider and model active when its `/automode` process launches. It supervises work but does not stand in for a stage-specific Ticket Session.
+The repository-scoped coordinator session that hosts the Automode Coordinator for an Automode Run. Each Main Session inherits the Pi provider, model, and reasoning active when its `/automode` process launches. It supervises work but does not stand in for a stage-specific Ticket Session.
 _Avoid_: Grilling Session, Review Session, ticket worker
 
 **Automode Dashboard**:
@@ -93,7 +93,7 @@ The comprehensive browser supervision surface for one live Automode Coordinator.
 _Avoid_: Coordinator GUI, Ticket Session terminal, Main Session TUI
 
 **Ticket Session**:
-One durable logical Pi session that owns one eligible tracker ticket or pull request through its applicable Automode Stage Skill. It normally runs in an independent full background Pi process, persists conversation history through native Pi session storage, and may resume in a replacement process without sharing context with other items. A `waiting` result holds the item without consuming retries until a material tracker update, and its summary remains visible to supervision. It is not a subagent. A stage-specific Ticket Session keeps its stage-specific name, such as Grilling Session or Review Session.
+One durable logical Pi session that owns one eligible tracker ticket or pull request through its applicable Automode Stage Skill. It normally runs in an independent full background Pi process, persists conversation history through native Pi session storage, and may resume in a replacement process without sharing context with other items. A `waiting` result holds the item without consuming retries until a material tracker update, and its summary remains visible to supervision. It is not a subagent. Each new or resumed Ticket Session inherits the Main Session's current provider, model, and reasoning at dispatch. A stage-specific Ticket Session keeps its stage-specific name, such as Grilling Session or Review Session.
 _Avoid_: Work item, Panel Member, shared worker session
 
 **Grilling Session**:
@@ -105,7 +105,7 @@ The authoritative Ticket Session for one pull request processed by Auto-Review. 
 _Avoid_: Main Session, Automode Coordinator, Reviewer
 
 **Review Panel**:
-The configured set of independent Reviewer seats used by Auto-Review. The default seats are Pi / `openai-codex/gpt-5.6-sol` and Pi / `github-copilot/claude-fable-5`, both with high reasoning. The seats retain the Deliberation Panel's execution profiles but receive review-specific prompts, context, and capabilities.
+The independent Reviewer seats used by Auto-Review, with the same execution profiles as the Deliberation Panel but review-specific prompts, context, and capabilities.
 _Avoid_: Deliberation Panel, Codex Cloud review
 
 **Reviewer**:
@@ -121,7 +121,7 @@ The launch label whose baseline enables all four Automation Stages. It remains f
 _Avoid_: Unattended mode, headless mode
 
 **Deliberation Panel**:
-A configurable set of independent Panel Members that produces candidate answers whenever Auto-Grilling is enabled, without members seeing one another's answers. The default seats are Pi / `openai-codex/gpt-5.6-sol` and Pi / `github-copilot/claude-fable-5`, both with high reasoning.
+The independent Panel Members advising Auto-Grilling without seeing one another's answers. Two fixed high-reasoning seats, Pi / `openai-codex/gpt-6-astra` and Pi / `github-copilot/claude-fable-5`, are joined by the Ticket Session's inherited Main Session execution only when its provider/model is not already represented.
 _Avoid_: Agent swarm, voting committee
 
 **Panel Member**:

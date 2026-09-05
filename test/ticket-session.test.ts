@@ -1,3 +1,4 @@
+import { TEST_MAIN_EXECUTION } from "./execution-fixture.js";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
@@ -113,6 +114,7 @@ test("TicketSessionHost launches one child in the actual item cwd with determini
   });
 
   const run = host.launch({
+    mainExecution: TEST_MAIN_EXECUTION,
     cwd,
     skillName: "triage",
     itemUrl: "https://github.com/owner/repository/issues/17",
@@ -127,6 +129,7 @@ test("TicketSessionHost launches one child in the actual item cwd with determini
     type: "ticket-session:start",
     version: TICKET_SESSION_PROTOCOL_VERSION,
     request: {
+      mainExecution: { harness: "pi", provider: "openai-codex", model: "gpt-5.6-sol", reasoning: "high" },
       cwd,
       skillName: "triage",
       itemUrl: "https://github.com/owner/repository/issues/17",
@@ -166,6 +169,7 @@ test("the production host requires a Coordinator restart after its Ticket Sessio
   writeFileSync(childEntrypoint, "// runtime version two\n");
 
   assert.throws(() => host.launch({
+    mainExecution: TEST_MAIN_EXECUTION,
     cwd,
     skillName: "triage",
     itemUrl: "https://github.com/owner/repository/issues/171",
@@ -181,6 +185,7 @@ test("the Ticket Session protocol rejects a tool summary without a positive coun
     launcher: () => child,
   });
   const run = host.launch({
+    mainExecution: TEST_MAIN_EXECUTION,
     cwd,
     skillName: "triage",
     itemUrl: "https://github.com/owner/repository/issues/170",
@@ -235,6 +240,7 @@ test("Coordinator recovery replaces mismatched in-root session history instead o
     launcher: () => child,
   });
   const adapter = new AutomodeTicketSessionHost({
+    getMainExecution: () => TEST_MAIN_EXECUTION,
     repository: cwd,
     configuration,
     home,
@@ -289,6 +295,7 @@ test("a fresh Ticket Session validates its persisted identity before reporting s
   const sessionFile = join(sessionDir, "fresh-session.jsonl");
   const child = new FakeTicketProcess();
   const adapter = new AutomodeTicketSessionHost({
+    getMainExecution: () => TEST_MAIN_EXECUTION,
     repository: cwd,
     configuration,
     home,
@@ -360,6 +367,7 @@ test("the Coordinator host exposes persisted Pi history and future structured ac
     launcher: () => child,
   });
   const adapter = new AutomodeTicketSessionHost({
+    getMainExecution: () => TEST_MAIN_EXECUTION,
     repository: cwd,
     configuration,
     home,
@@ -442,6 +450,7 @@ test("the Coordinator host rejects cross-directory session history and force-sto
   })}\n`);
   const child = new FakeTicketProcess();
   const adapter = new AutomodeTicketSessionHost({
+    getMainExecution: () => TEST_MAIN_EXECUTION,
     repository: cwd,
     configuration,
     home: join(cwd, "home"),
@@ -502,6 +511,7 @@ test("the child reports persistent identity and structured activity around one c
   const events: unknown[] = [];
 
   const result = await runTicketSessionChild({
+    mainExecution: TEST_MAIN_EXECUTION,
     cwd,
     skillName: "triage",
     itemUrl: "https://github.com/owner/repository/issues/18",
@@ -561,6 +571,7 @@ test("a completed Review Session publishes its final disposition with post-settl
   };
 
   const result = await runTicketSessionChild({
+    mainExecution: TEST_MAIN_EXECUTION,
     cwd,
     skillName: "code-review",
     itemUrl: "https://github.com/owner/repository/pull/42",
@@ -686,6 +697,7 @@ test("terminate is idempotent and forces a child that does not stop gracefully",
     terminationGraceMs: 5,
   });
   const run = host.launch({
+    mainExecution: TEST_MAIN_EXECUTION,
     cwd,
     skillName: "triage",
     itemUrl: "https://github.com/owner/repository/issues/19",
@@ -713,6 +725,7 @@ test("graceful termination aborts and disposes the controlled child session", as
   let aborted = 0;
   let disposed = 0;
   const running = runTicketSessionChild({
+    mainExecution: TEST_MAIN_EXECUTION,
     cwd,
     skillName: "triage",
     itemUrl: "https://github.com/owner/repository/issues/20",
@@ -739,6 +752,7 @@ test("the child returns an explicit error terminal result when the controlled tu
   const cwd = mkdtempSync(join(tmpdir(), "ticket-error-"));
   let disposed = false;
   const result = await runTicketSessionChild({
+    mainExecution: TEST_MAIN_EXECUTION,
     cwd,
     skillName: "triage",
     itemUrl: "https://github.com/owner/repository/issues/20",
@@ -766,6 +780,7 @@ test("an exact persisted session file can resume and settle waiting", async () =
   let receivedResume: string | undefined;
 
   const result = await runTicketSessionChild({
+    mainExecution: TEST_MAIN_EXECUTION,
     cwd,
     skillName: "prototype",
     itemUrl: "https://github.com/owner/repository/issues/21",
@@ -795,6 +810,7 @@ test("an exact persisted session file can resume and settle waiting", async () =
 
 test("the production child adapter can dispatch a pre-attested Stage outside the launch baseline", async () => {
   const session = await createControlledTicketSession({
+    mainExecution: TEST_MAIN_EXECUTION,
     cwd: process.cwd(),
     skillName: "triage",
     itemUrl: "https://github.com/owner/repository/issues/22",
@@ -821,6 +837,7 @@ import { writeFileSync } from "node:fs";
 writeFileSync(${JSON.stringify(preloadMarker)}, "loaded");
 `);
   const adapter = new AutomodeTicketSessionHost({
+    getMainExecution: () => TEST_MAIN_EXECUTION,
     repository: cwd,
     configuration,
     home,
@@ -874,6 +891,7 @@ writeFileSync(${JSON.stringify(preloadMarker)}, "loaded");
     },
   });
   const run = host.launch({
+    mainExecution: TEST_MAIN_EXECUTION,
     cwd,
     skillName: "triage",
     itemUrl: "https://github.com/owner/repository/issues/22",

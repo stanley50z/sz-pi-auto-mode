@@ -21,7 +21,7 @@ interface MainProof {
     harness: "pi";
     provider: string;
     model: string;
-    reasoning: "high";
+    reasoning: string;
   }>;
   sessionName: string;
   sessionFile: string;
@@ -57,13 +57,15 @@ export default function (pi) {
       "--no-extensions",
       "--offline",
       "--model", "openai-codex/gpt-5.6-sol",
+      "--thinking", "low",
       "-e", proofExtension,
     ];
     const terminal = spawnPty(command, piArgs, {
       cwd: repository,
       env: { ...process.env, PI_OFFLINE: "1" },
       name: "xterm-color",
-      cols: 80,
+      // Pi disables autowrap; keep the JSON proof on one untruncated terminal row.
+      cols: 4096,
       rows: 24,
     });
     let output = "";
@@ -165,8 +167,9 @@ test("PTY walkthrough relaunches a stopped Full-Auto repository as Half-Auto", a
   assert.equal(full.proof.configurationFrozen, true);
   assert.equal(full.proof.mutationRejected, true);
   assert.deepEqual(full.proof.panelExecutions, [
-    { harness: "pi", provider: "openai-codex", model: "gpt-5.6-sol", reasoning: "high" },
+    { harness: "pi", provider: "openai-codex", model: "gpt-6-astra", reasoning: "high" },
     { harness: "pi", provider: "github-copilot", model: "claude-fable-5", reasoning: "high" },
+    { harness: "pi", provider: "openai-codex", model: "gpt-5.6-sol", reasoning: "low" },
   ]);
   assert.notEqual(full.proof.pid, full.bridgePid);
   assert.equal(full.proof.sessionName, "Automode Main — Full-Auto");
