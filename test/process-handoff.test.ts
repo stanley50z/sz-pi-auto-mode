@@ -74,6 +74,7 @@ test("fresh child owns the terminal and composes only isolated SDK state", async
   writeFileSync(join(automodePaths.automodeDir, "settings.json"), JSON.stringify({ defaultThinkingLevel: "low" }));
   const configuredNormalAgentDir = join(home, "configured-normal-pi");
   mkdirSync(configuredNormalAgentDir, { recursive: true });
+  writeFileSync(join(configuredNormalAgentDir, "AGENTS.md"), "GLOBAL_AUTOMODE_GUIDANCE", "utf8");
   writeFileSync(
     join(configuredNormalAgentDir, "auth.json"),
     JSON.stringify({ "proof-credential": { type: "api_key", key: "not-a-real-secret" } }),
@@ -113,7 +114,10 @@ test("fresh child owns the terminal and composes only isolated SDK state", async
   assert.deepEqual(proof.credentialProviders, ["proof-credential"]);
   assert.equal(proof.settingsDefaultThinkingLevel, "high");
   assert.deepEqual(proof.appendSystemPrompts, []);
-  assert.deepEqual(proof.contextFilePaths.map((path) => resolve(path)), [resolve(repository, "AGENTS.md")]);
+  assert.deepEqual(proof.contextFilePaths.map((path) => resolve(path)), [
+    resolve(configuredNormalAgentDir, "AGENTS.md"),
+    resolve(repository, "AGENTS.md"),
+  ]);
   assert.equal(proof.credentialEnvironmentPresent, true);
   assert.deepEqual(proof.inheritedNormalConfiguration, []);
   assert.deepEqual(proof.invocations, [

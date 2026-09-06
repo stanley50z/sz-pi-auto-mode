@@ -5,6 +5,7 @@ import type {
   PanelSeatLaunchRequest,
   ProductionPanelProcessLauncher,
 } from "./panel-runtime.js";
+import { loadGlobalGuidance } from "./global-guidance.js";
 import { createAssistantTranscript } from "./ticket-transcript.js";
 import { addUsage, emptyUsage, parseUsage } from "./usage.js";
 
@@ -235,6 +236,10 @@ export class CliPanelProcessLauncher implements ProductionPanelProcessLauncher {
 
   async launch(request: PanelSeatLaunchRequest): Promise<PanelProcessResult> {
     assertTools(request.tools);
+    const guidance = loadGlobalGuidance(this.#normalAgentDir)
+      .map((file) => `## Global guidance: ${file.path}\n\n${file.content}`)
+      .join("\n\n");
+    const guidanceArgs = guidance ? ["--append-system-prompt", guidance] : [];
     if (request.attribution.harness === "pi") {
       const activityStream = createPiActivityStream(request);
       const result = await this.#runner.run(process.execPath, [
@@ -251,6 +256,7 @@ export class CliPanelProcessLauncher implements ProductionPanelProcessLauncher {
         "--model", request.attribution.modelSlug,
         "--thinking", request.attribution.reasoningLevel,
         "--tools", request.tools.join(","),
+        ...guidanceArgs,
         request.prompt,
       ], this.#cwd, this.#env, (chunk) => activityStream.push(chunk));
       activityStream.finish();
@@ -271,6 +277,7 @@ export class CliPanelProcessLauncher implements ProductionPanelProcessLauncher {
       "--output-format", "json",
       "--tools", claudeTools.join(","),
       "--no-session-persistence",
+      ...guidanceArgs,
       request.prompt,
     ], this.#cwd, this.#env);
     if (result.exitCode !== 0 || result.signal !== null) return result;

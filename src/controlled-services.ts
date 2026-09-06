@@ -10,6 +10,7 @@ import {
 import { isPathInside } from "./attestation.js";
 import { AUTOMODE_SETTINGS } from "./capability-profile.js";
 import { createAutomodeFastModeExtension } from "./fast-mode.js";
+import { loadGlobalGuidance } from "./global-guidance.js";
 import { repositoryRoot, type AutomodePaths } from "./paths.js";
 
 export interface ControlledServicesOptions {
@@ -89,7 +90,10 @@ export async function createControlledServices(
       noThemes: true,
       noContextFiles: false,
       agentsFilesOverride: ({ agentsFiles }) => ({
-        agentsFiles: controlledGuidanceFiles(agentsFiles, repository),
+        agentsFiles: [
+          ...loadGlobalGuidance(options.paths.normalAgentDir),
+          ...controlledGuidanceFiles(agentsFiles, repository),
+        ],
       }),
       systemPrompt: options.systemPrompt,
       appendSystemPrompt: [],

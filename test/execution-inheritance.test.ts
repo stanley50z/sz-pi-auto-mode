@@ -21,6 +21,14 @@ test("workers inherit live Main Session settings across dispatch and resume; the
   const normalAgentDir = join(fixture, "normal-agent");
   mkdirSync(join(repository, ".git"), { recursive: true });
   mkdirSync(normalAgentDir);
+  writeFileSync(join(normalAgentDir, "AGENTS.md"), "Close every browser tab opened for the task.\n全局指导。\n", "utf8");
+  writeFileSync(join(repository, "AGENTS.md"), "REPOSITORY_GUIDANCE_PROOF", "utf8");
+  for (const root of [normalAgentDir, join(repository, ".pi")]) {
+    mkdirSync(join(root, "extensions"), { recursive: true });
+    writeFileSync(join(root, "extensions", "ambient.js"), "throw new Error('Ambient extension executed');", "utf8");
+    mkdirSync(join(root, "skills", "ambient-skill"), { recursive: true });
+    writeFileSync(join(root, "skills", "ambient-skill", "SKILL.md"), "---\nname: ambient-skill\ndescription: AMBIENT_SKILL_LEAK\n---\n", "utf8");
+  }
   const requests: Array<{
     model: string;
     reasoning_effort?: string;
@@ -70,6 +78,8 @@ test("workers inherit live Main Session settings across dispatch and resume; the
   try {
     assert.equal(runtime.session.model?.id, "first");
     assert.equal(runtime.session.thinkingLevel, "low");
+    await runtime.session.prompt("Confirm Main Session guidance without using tools.");
+    assert.match(JSON.stringify(requests[0]!.messages), /Close every browser tab opened for the task\./);
     const getMainExecution = () => {
       const model = runtime.session.model!;
       return { harness: "pi" as const, provider: model.provider, model: model.id, reasoning: runtime.session.thinkingLevel };
@@ -111,10 +121,19 @@ test("workers inherit live Main Session settings across dispatch and resume; the
     assert.equal(review.stdout, "No actionable findings.");
     assert.deepEqual(requests.map(({ model, reasoning_effort }) => ({ model, reasoning_effort })), [
       { model: "first", reasoning_effort: "low" },
+      { model: "first", reasoning_effort: "low" },
       { model: "second", reasoning_effort: "medium" },
       { model: "second", reasoning_effort: "medium" },
     ]);
-    assert.ok(requests[1]!.messages.length > requests[0]!.messages.length, "resumed worker retains its prior context");
+    for (const [index, request] of requests.entries()) {
+      const messages = JSON.stringify(request.messages);
+      assert.match(messages, /Close every browser tab opened for the task\./, `request ${index} receives global guidance`);
+      assert.match(messages, /全局指导。/);
+      assert.doesNotMatch(messages, /AMBIENT_SKILL_LEAK/);
+      if (index < 3) assert.match(messages, /REPOSITORY_GUIDANCE_PROOF/);
+    }
+    assert.deepEqual(requests[3]!.tools?.map((tool) => tool.function.name), ["read"]);
+    assert.ok(requests[2]!.messages.length > requests[1]!.messages.length, "resumed worker retains its prior context");
   } finally {
     await active?.terminate(true);
     runtime.session.dispose();

@@ -390,8 +390,12 @@ button:disabled { cursor: not-allowed; opacity: .58; }
   box-shadow: var(--shadow);
 }
 .drawer-header { display: flex; flex: 0 0 auto; align-items: flex-start; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); padding: 16px 18px; }
+.drawer-header > div:first-child { min-width: 0; }
 .drawer-header h2 { margin: 4px 0 0; font-size: 20px; line-height: 1.25; overflow-wrap: anywhere; }
+.drawer-actions { display: flex; flex: 0 0 auto; align-items: stretch; gap: 8px; }
 .close { border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-raised); padding: 7px 10px; }
+.github-link { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; color: var(--text); text-decoration: none; }
+.github-link:hover { background: var(--surface-hover); border-color: var(--accent); }
 .drawer-meta { display: grid; flex: 0 0 auto; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; border-bottom: 1px solid var(--line); padding: 12px 18px; }
 .drawer-meta span { display: block; color: var(--muted); font-size: 10px; }
 .drawer-meta strong { display: block; margin-top: 3px; overflow-wrap: anywhere; }
@@ -840,7 +844,7 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
       ? children.length ? '<div class="activity-split">' + parent + childInspector(children) + "</div>" : parent
       : '<div class="no-session"><div><h3>No Ticket Session exists yet</h3><p>' + escapeHtml(candidate.reason) + "</p><p>Inspecting this candidate is read-only. Activity will appear only after the Coordinator dispatches it.</p></div></div>";
     return '<div class="drawer-backdrop"><section class="drawer" role="dialog" aria-modal="true" aria-labelledby="activity-title">' +
-      '<header class="drawer-header"><div><p class="eyebrow">' + escapeHtml(STAGE_LABELS[candidate.stage]) + ' · READ-ONLY ACTIVITY</p><h2 id="activity-title">' + escapeHtml(candidate.item) + " · " + escapeHtml(candidate.title) + '</h2></div><button class="close" type="button" data-close-drawer data-focus-id="drawer-close">Close</button></header>' +
+      '<header class="drawer-header"><div><p class="eyebrow">' + escapeHtml(STAGE_LABELS[candidate.stage]) + ' · READ-ONLY ACTIVITY</p><h2 id="activity-title">' + escapeHtml(candidate.item) + " · " + escapeHtml(candidate.title) + '</h2></div><div class="drawer-actions"><a class="close github-link" href="' + escapeHtml(candidate.url) + '" target="_blank" rel="noopener noreferrer" aria-label="Open on GitHub (opens in a new tab)" title="Open on GitHub (opens in a new tab)" data-focus-id="drawer-github"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6m0-6L10 14"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg></a><button class="close" type="button" data-close-drawer data-focus-id="drawer-close">Close</button></div></header>' +
       '<div class="drawer-meta"><div><span>Lifecycle</span><strong>' + status(candidate.status) + "</strong></div><div><span>Attempt</span><strong>" + candidate.attempt + "/5</strong></div><div><span>Elapsed</span><strong>" + (session?.startedAt ? elapsedMarkup(session.startedAt, session.endedAt) : "Not available") + "</strong></div><div><span>Process</span><strong>" + escapeHtml(session?.processId ?? "Not started") + "</strong></div><div><span>Session</span><strong>" + escapeHtml(session ? session.sessionId : "Not created") + "</strong></div><div><span>Workspace</span><strong>" + escapeHtml(workspace) + "</strong></div>" + (pinnedHead ? '<div><span>Pinned review head</span><strong>' + escapeHtml(pinnedHead.slice(0, 12)) + "</strong></div>" : "") + "</div>" +
       (session ? '<div class="initial-prompt"><span>DISPATCH COMMAND</span><code>' + escapeHtml(session.initialPrompt) + "</code></div>" : "") + content + "</section></div>";
   }

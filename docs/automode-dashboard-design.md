@@ -87,7 +87,7 @@ This behavior supersedes #21's rule that the selected Stage settings remain immu
 
 ## Ticket Session activity
 
-Selecting a card opens a read-only activity drawer.
+Selecting a card opens a read-only activity drawer. In every Stage, an external-link icon beside Close opens the candidate's GitHub issue or pull request in a new tab, preserving the dashboard. The control has an accessible name and tooltip and remains available before a Ticket Session exists.
 
 For a live or persisted Ticket Session it shows:
 
@@ -193,6 +193,7 @@ The browser must not read GitHub, Pi session files, worktrees, or the Automode R
 - [ ] Prior persisted conversation/attempt history uses the same compact transcript after retry or recovery.
 - [ ] Close, Escape, and clicking the dimmed backdrop dismiss the drawer and restore focus to its Stage Candidate.
 - [ ] A candidate without a Ticket Session clearly says no session exists and explains why.
+- [x] Every Stage's drawer opens the candidate's GitHub URL in a new tab through the icon beside Close, including candidates without a Ticket Session.
 - [ ] Browser inspection never mutates or injects context into a Ticket Session or Main Session.
 
 ### Controls and security

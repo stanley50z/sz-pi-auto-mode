@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { dirname, resolve } from "node:path";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CliPanelProcessLauncher,
@@ -39,7 +41,11 @@ function request(harness: "pi" | "claude-code"): PanelSeatLaunchRequest {
   };
 }
 
-test("the production launcher runs controlled Pi and Claude Code seats with exact profiles", async () => {
+test("the production launcher includes global guidance in Pi and Claude Code seats without widening capabilities", async (t) => {
+  const normalAgentDir = mkdtempSync(join(tmpdir(), "automode-panel-guidance-"));
+  t.after(() => rmSync(normalAgentDir, { recursive: true, force: true }));
+  const guidance = "Close every browser tab opened for the task.\n全局指导。";
+  writeFileSync(join(normalAgentDir, "AGENTS.md"), guidance, "utf8");
   const calls: Array<{ command: string; args: readonly string[]; cwd: string; env: NodeJS.ProcessEnv }> = [];
   const runner: PanelCommandRunner = {
     async run(command, args, cwd, env) {
@@ -77,7 +83,7 @@ test("the production launcher runs controlled Pi and Claude Code seats with exac
   const piPackageDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../node_modules/@earendil-works/pi-coding-agent");
   const launcher = new CliPanelProcessLauncher({
     cwd: "C:/repository",
-    normalAgentDir: "C:/normal-agent",
+    normalAgentDir,
     piPackageDir,
     runner,
   });
@@ -102,7 +108,15 @@ test("the production launcher runs controlled Pi and Claude Code seats with exac
   ]);
   assert.ok(calls[0]!.args.includes("openai-codex"));
   assert.ok(calls[0]!.args.includes("gpt-5.6-sol"));
-  assert.equal(calls[0]!.env.PI_CODING_AGENT_DIR, resolve("C:/normal-agent"));
+  assert.equal(calls[0]!.env.PI_CODING_AGENT_DIR, normalAgentDir);
+  assert.ok(calls[0]!.args.includes("--no-context-files"));
+  for (const call of calls) {
+    assert.equal(call.args.at(-1), "return structured JSON");
+    const flag = call.args.indexOf("--append-system-prompt");
+    assert.notEqual(flag, -1);
+    assert.ok(call.args[flag + 1]!.includes(guidance));
+    assert.ok(call.args[flag + 1]!.includes(join(normalAgentDir, "AGENTS.md")));
+  }
   assert.deepEqual(calls[1]!.args.slice(0, 7), [
     "--safe-mode", "--model", "claude-fable-5", "--effort", "high", "--print", "--output-format",
   ]);
