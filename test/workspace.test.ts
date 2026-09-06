@@ -10,6 +10,9 @@ import {
   type WorkspaceCommandRunner,
 } from "../src/workspace.js";
 
+import { AutomodeCoordinator } from "../src/coordinator.js";
+import { createAutomationStageConfiguration } from "../src/stage-configuration.js";
+
 const COMMAND_TIMEOUT_MS = 10_000;
 
 function git(cwd: string, ...args: string[]): string {
@@ -64,6 +67,37 @@ function createRepositoryFixture(): RepositoryFixture {
     },
   };
 }
+
+test("Coordinator reports root branch changes even when the tracker snapshot is unchanged", async () => {
+  const fixture = createRepositoryFixture();
+  const coordinator = new AutomodeCoordinator({
+    configuration: createAutomationStageConfiguration("half", ["auto-review"]),
+    actor: "automation-user",
+    tracker: {
+      async snapshot() { return { revision: "unchanged", items: [] }; },
+      async listBookkeeping() { return []; },
+      async read() { throw new Error("No tracker items"); },
+      async claim() { throw new Error("No tracker items"); },
+      async upsertBookkeeping() { throw new Error("No tracker items"); },
+    },
+    sessions: { async start() { throw new Error("No sessions expected"); } },
+    workspaces: new WorkspaceManager({ repositoryRoot: fixture.repository }),
+  });
+  try {
+    await coordinator.start();
+    assert.equal(coordinator.getProjection().rootCheckout?.branch, "main");
+    git(fixture.repository, "switch", "-c", "feature/interactive");
+    await coordinator.refresh();
+    assert.equal(coordinator.getProjection().rootCheckout?.branch, "feature/interactive");
+    git(fixture.repository, "checkout", "--detach");
+    await coordinator.refresh();
+    assert.equal(coordinator.getProjection().rootCheckout?.branch, "detached HEAD");
+  } finally {
+    coordinator.interrupt();
+    await coordinator.whenStopped();
+    fixture.dispose();
+  }
+});
 
 test("a production issue gets a deterministic isolated worktree from the freshly fetched origin default", async () => {
   const fixture = createRepositoryFixture();
@@ -347,6 +381,87 @@ test("completing a merged review fast-forwards the project root to the remote de
     fixture.dispose();
   }
 });
+
+test("a cleanup failure still updates the root and restarts the project, while reporting the failure", async () => {
+  const fixture = createRepositoryFixture();
+  try {
+    const manager = new WorkspaceManager({
+      repositoryRoot: fixture.repository,
+      repositorySlug: "owner/repository",
+      runner: {
+        run(command, args, cwd) {
+          if (command === "git" && args[0] === "worktree" && args[1] === "remove") {
+            throw new Error("worktree remove: Permission denied");
+          }
+          return processWorkspaceCommandRunner.run(command, args, cwd);
+        },
+      },
+    });
+    const workspace = await manager.prepareProductionIssue(53);
+    writeFileSync(join(fixture.seed, "start.py"), "from pathlib import Path\nPath('restarted.txt').write_text('started', encoding='utf-8')\n", "utf8");
+    git(fixture.seed, "add", "start.py");
+    const mergedHead = fixture.commitAndPush("merged despite cleanup failure\n");
+
+    await assert.rejects(manager.completeReview({
+      kind: "pull-request", number: 53, url: "https://github.com/owner/repository/pull/53",
+      state: "closed", labels: [], assignees: [], blockedBy: 0, merged: true,
+      headRepository: "owner/repository", headBranch: workspace.branch,
+      updatedAt: "2026-01-01T00:00:00Z", materialVersion: "merged-53",
+    }, workspace), /Permission denied/u);
+
+    assert.equal(git(fixture.repository, "rev-parse", "HEAD"), mergedHead);
+    assert.equal(readFileSync(join(fixture.repository, "restarted.txt"), "utf8"), "started");
+    assert.equal(existsSync(workspace.worktree), true);
+  } finally {
+    fixture.dispose();
+  }
+});
+
+for (const rootState of ["feature branch", "detached HEAD", "diverged main"] as const) {
+  test(`cleanup failure preserves ${rootState}, reports both failures, and does not restart`, async () => {
+    const fixture = createRepositoryFixture();
+    try {
+      const manager = new WorkspaceManager({
+        repositoryRoot: fixture.repository, repositorySlug: "owner/repository",
+        runner: {
+          run(command, args, cwd) {
+            if (args[0] === "worktree" && args[1] === "remove") throw new Error("Permission denied");
+            return processWorkspaceCommandRunner.run(command, args, cwd);
+          },
+        },
+      });
+      const workspace = await manager.prepareProductionIssue(54);
+      if (rootState === "feature branch") git(fixture.repository, "switch", "-c", "feature/interactive");
+      if (rootState === "detached HEAD") git(fixture.repository, "checkout", "--detach");
+      if (rootState === "diverged main") {
+        writeFileSync(join(fixture.repository, "local.txt"), "local work\n", "utf8");
+        git(fixture.repository, "add", "local.txt");
+        git(fixture.repository, "commit", "-m", "local work");
+      }
+      const originalHead = git(fixture.repository, "rev-parse", "HEAD");
+      const originalBranch = git(fixture.repository, "branch", "--show-current");
+      writeFileSync(join(fixture.repository, "start.py"), "from pathlib import Path\nPath('unexpected-restart').touch()\n", "utf8");
+      fixture.commitAndPush("remote delivery\n");
+      await assert.rejects(manager.completeReview({
+        kind: "pull-request", number: 54, url: "https://github.com/owner/repository/pull/54",
+        state: "closed", labels: [], assignees: [], blockedBy: 0, merged: true,
+        headRepository: "owner/repository", headBranch: workspace.branch,
+        updatedAt: "2026-01-01T00:00:00Z", materialVersion: "merged-54",
+      }, workspace), (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /Cleanup failed: Permission denied/u);
+        assert.match(error.message, /Project sync\/restart failed:/u);
+        if (rootState !== "diverged main") assert.match(error.message, /expected branch main, found (feature\/interactive|detached HEAD)/u);
+        return true;
+      });
+      assert.equal(git(fixture.repository, "rev-parse", "HEAD"), originalHead);
+      assert.equal(git(fixture.repository, "branch", "--show-current"), originalBranch);
+      assert.equal(existsSync(join(fixture.repository, "unexpected-restart")), false);
+    } finally {
+      fixture.dispose();
+    }
+  });
+}
 
 test("completing a merged review runs stop.py before start.py from the updated project root", async () => {
   const fixture = createRepositoryFixture();

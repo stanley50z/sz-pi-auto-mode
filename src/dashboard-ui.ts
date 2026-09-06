@@ -107,6 +107,8 @@ export interface DashboardLaneProjection {
 
 export interface DashboardProjection {
   readonly version: 1;
+  readonly rootCheckout?: CoordinatorProjection["rootCheckout"];
+  readonly warnings?: CoordinatorProjection["warnings"];
   readonly repository: { readonly name: string; readonly url: string };
   readonly run: {
     readonly id: string;
@@ -286,6 +288,11 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 }
 .banner.warning { border-color: #705b28; background: #231d0e; color: #ffe5a0; }
 .banner strong { flex: 0 0 auto; }
+.root-branch { margin-top: 7px; color: var(--info); font-size: 12px; overflow-wrap: anywhere; }
+.post-merge-warnings { display: block; }
+.post-merge-warnings summary { cursor: pointer; min-height: 44px; }
+.post-merge-warnings ul { padding-left: 20px; margin-bottom: 0; max-height: 240px; overflow: auto; }
+.post-merge-warnings li { margin: 10px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .supervision-bar {
   position: sticky;
@@ -623,6 +630,13 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
 
   function validateProjection(value) {
     if (!isRecord(value) || value.version !== 1 || !isRecord(value.repository) || typeof value.repository.name !== "string" || !isWebUrl(value.repository.url) || !isRecord(value.run) || typeof value.run.id !== "string" || !MODE_LABELS[value.run.mode] || !RUN_LIFECYCLES.has(value.run.lifecycle) || !isTimestamp(value.run.startedAt) || !optionalString(value.run.lastSuccessfulPoll) || !optionalString(value.run.nextPoll) || !optionalString(value.run.pollError) || !Array.isArray(value.lanes) || !Array.isArray(value.recent) || (value.stale !== undefined && typeof value.stale !== "boolean") || !optionalString(value.tailscaleError)) contractError("root");
+    if (value.rootCheckout !== undefined && (!isRecord(value.rootCheckout) || !((typeof value.rootCheckout.branch === "string" && value.rootCheckout.error === undefined) || (typeof value.rootCheckout.error === "string" && value.rootCheckout.branch === undefined)))) contractError("rootCheckout");
+    if (value.warnings !== undefined) {
+      if (!Array.isArray(value.warnings)) contractError("warnings");
+      value.warnings.forEach((warning) => {
+        if (!isRecord(warning) || typeof warning.message !== "string" || !isRecord(warning.item) || warning.item.kind !== "pull-request" || !Number.isInteger(warning.item.number) || warning.item.number < 1 || !isWebUrl(warning.item.url)) contractError("warnings.item");
+      });
+    }
     validateTotals(value.totals, "totals", true);
     const seenStages = new Set();
     const seenCandidates = new Set();
@@ -852,6 +866,7 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
   function render() {
     if (!state.projection) return;
     const identity = focusIdentity();
+    const warningsOpen = document.querySelector(".post-merge-warnings")?.open === true;
     const currentRecent = document.querySelector(".recent");
     if (currentRecent) state.recentOpen = currentRecent.open;
     const currentFeed = document.querySelector(".feed");
@@ -865,7 +880,10 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
     const disabled = supervisionDisabled(projection);
     const exposureError = state.network.exposureError || projection.tailscaleError;
     const exposureSeparator = exposureError && /[.!?]$/.test(exposureError.trim()) ? " " : ". ";
+    const warnings = projection.warnings || [];
     const banners = [
+      warnings.length ? '<details class="banner warning post-merge-warnings" role="status" ' + (warningsOpen ? 'open' : '') + '><summary data-focus-id="post-merge-warnings"><strong>Post-merge warnings · ' + warnings.length + '</strong> · GitHub merges succeeded; local finalization reported problems.</summary><ul>' + warnings.map((warning) => '<li><a href="' + escapeHtml(warning.item.url) + '" target="_blank" rel="noopener noreferrer">PR #' + warning.item.number + '</a> · ' + escapeHtml(warning.message) + '</li>').join("") + '</ul></details>' : "",
+      projection.rootCheckout?.error ? '<div class="banner warning" role="status"><strong>Root branch unavailable</strong><span>' + escapeHtml(projection.rootCheckout.error) + '</span></div>' : "",
       exposureError ? '<div class="banner warning" role="status"><strong>Tailscale unavailable</strong><span>' + escapeHtml(exposureError) + exposureSeparator + "Localhost access remains available.</span></div>" : "",
       disconnected ? '<div class="banner" role="alert"><strong>Disconnected</strong><span>This view is stale. Supervisory controls are disabled until the live connection returns.</span></div>' : "",
       state.activityRetentionTruncated ? '<div class="banner warning" role="status"><strong>Activity history limited</strong><span>Earlier activity was truncated to keep this dashboard responsive.</span></div>' : "",
@@ -874,7 +892,7 @@ const DASHBOARD_SCRIPT = String.raw`(() => {
     const connectionClass = disconnected ? "disconnected" : connecting ? "connecting" : "";
     const connectionLabel = disconnected ? "Disconnected · stale snapshot" : connecting ? "Connecting to live Coordinator stream" : "Live Coordinator connection";
     app.innerHTML = '<div class="dashboard"><header class="masthead"><div><p class="eyebrow">AUTOMODE COORDINATOR</p><h1>Stage Lanes</h1></div><div class="connection ' + connectionClass + '"><span class="connection-dot" aria-hidden="true"></span><span>' + connectionLabel + "</span></div></header>" +
-      '<section class="run-panel" aria-label="Automode Run summary"><div class="repository"><strong class="repo-name">' + escapeHtml(projection.repository.name) + '</strong><a class="repo-url" href="' + escapeHtml(projection.repository.url) + '" target="_blank" rel="noreferrer">' + escapeHtml(projection.repository.url) + "</a></div>" +
+      '<section class="run-panel" aria-label="Automode Run summary"><div class="repository"><strong class="repo-name">' + escapeHtml(projection.repository.name) + '</strong><a class="repo-url" href="' + escapeHtml(projection.repository.url) + '" target="_blank" rel="noreferrer">' + escapeHtml(projection.repository.url) + '</a><div class="root-branch">Root checkout · ' + escapeHtml(projection.rootCheckout?.branch ?? (projection.rootCheckout?.error ? "Unavailable" : "Reading…")) + '</div></div>' +
       '<div class="metric"><span class="metric-label">Run identity</span><strong class="metric-value">' + escapeHtml(projection.run.id) + "</strong></div>" +
       '<div class="metric"><span class="metric-label">Launch mode</span><strong class="metric-value">' + modeLabel(projection.run.mode) + "</strong></div>" +
       '<div class="metric"><span class="metric-label">Lifecycle</span><strong class="metric-value lifecycle ' + projection.run.lifecycle + '">' + projection.run.lifecycle.toUpperCase() + "</strong></div>" +
@@ -1198,6 +1216,8 @@ export function createDashboardProjection(
   return {
     version: 1,
     repository: { ...context.repository },
+    ...(coordinator.rootCheckout === undefined ? {} : { rootCheckout: { ...coordinator.rootCheckout } }),
+    warnings: coordinator.warnings?.map((warning) => ({ ...warning, item: { ...warning.item } })) ?? [],
     run: {
       ...context.run,
       ...(coordinator.poll.lastSuccessfulPoll === undefined

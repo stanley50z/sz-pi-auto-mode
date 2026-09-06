@@ -154,6 +154,7 @@ export interface TicketWorkspaceRequest {
 }
 
 export interface TicketWorkspaceManager {
+  readRootBranch?(): Promise<string>;
   prepare(request: TicketWorkspaceRequest): Promise<TicketWorkspaceIdentity>;
   completeReview(item: WorkflowItem, workspace: TicketWorkspaceIdentity): Promise<void>;
 }
@@ -237,8 +238,19 @@ export interface RecentStageCandidateProjection {
   readonly session?: TicketSessionProjection;
 }
 
+export type RootCheckoutSnapshot =
+  | { readonly branch: string; readonly error?: never }
+  | { readonly error: string; readonly branch?: never };
+
+export interface PostMergeWarning {
+  readonly item: TicketItemReference;
+  readonly message: string;
+}
+
 /** Complete replacement snapshot consumed by Coordinator supervision surfaces. */
 export interface CoordinatorProjection {
+  readonly warnings?: readonly PostMergeWarning[];
+  readonly rootCheckout?: RootCheckoutSnapshot;
   readonly lanes: readonly StageLaneProjection[];
   readonly totals: StageCandidateTotals;
   readonly recent: readonly RecentStageCandidateProjection[];
@@ -444,6 +456,7 @@ export class AutomodeCoordinator {
   private readonly currentItems = new Map<string, WorkflowItem>();
   private readonly settledThisProcess = new Map<string, RecentStageCandidateProjection>();
   private readonly sessionTimings = new Map<string, TicketSessionTiming>();
+  private readonly postMergeWarnings = new Map<string, PostMergeWarning>();
   private readonly operatingStates: Record<AutomationStage, AutomationStageOperatingState>;
   private readonly supervisionListeners = new Set<(event: CoordinatorSupervisionEvent) => void>();
   private projection: CoordinatorProjection;
@@ -453,6 +466,7 @@ export class AutomodeCoordinator {
   private lastSuccessfulPoll: string | undefined;
   private nextScheduledPoll: string | undefined;
   private pollError: string | undefined;
+  private rootCheckout: RootCheckoutSnapshot | undefined;
   private started = false;
   private draining = false;
   private forcing = false;
@@ -665,6 +679,8 @@ export class AutomodeCoordinator {
       lanes,
       totals: candidateTotals(lanes.flatMap((lane) => lane.candidates)),
       recent: [...this.settledThisProcess.values()],
+      warnings: [...this.postMergeWarnings.values()],
+      ...(this.rootCheckout === undefined ? {} : { rootCheckout: this.rootCheckout }),
       poll: {
         ...(this.lastSuccessfulPoll === undefined ? {} : { lastSuccessfulPoll: this.lastSuccessfulPoll }),
         ...(this.nextScheduledPoll === undefined ? {} : { nextScheduledPoll: this.nextScheduledPoll }),
@@ -739,6 +755,17 @@ export class AutomodeCoordinator {
     this.emitSupervision({ type: "projection", projection: this.projection });
   }
 
+  /** Keeps bounded post-merge diagnostics visible independently of the successful merge status. */
+  private recordPostMergeWarning(item: TicketItemReference, message: string): void {
+    const key = itemKey(item);
+    this.postMergeWarnings.delete(key);
+    this.postMergeWarnings.set(key, { item, message: boundedCoordinatorActivity(message) });
+    if (this.postMergeWarnings.size > 100) {
+      this.postMergeWarnings.delete(this.postMergeWarnings.keys().next().value!);
+    }
+    this.refreshProjection();
+  }
+
   private scheduleNextPoll(): void {
     this.nextScheduledPoll = new Date(this.clock.now().getTime() + POLL_INTERVAL_MS).toISOString();
   }
@@ -783,6 +810,9 @@ export class AutomodeCoordinator {
           ...(record.endedAt === undefined ? {} : { endedAt: record.endedAt }),
         });
       }
+      if (record.lifecycle === "succeeded" && record.skillName === "code-review" && record.diagnostic) {
+        this.recordPostMergeWarning(record.item, record.diagnostic);
+      }
       if (record.lifecycle === "awaiting-feedback") {
         this.awaitingFeedback.set(key, record);
         continue;
@@ -799,6 +829,7 @@ export class AutomodeCoordinator {
           ? item.merged === true
           : !eligible;
         if (record.skillName === "code-review" && item.merged === true) {
+          diagnostic = undefined;
           if (record.workspace) {
             try {
               await this.options.workspaces!.completeReview(item, record.workspace);
@@ -808,6 +839,9 @@ export class AutomodeCoordinator {
           } else {
             diagnostic = "Merge succeeded but no recorded workspace was available for recovery cleanup";
           }
+        }
+        if (record.skillName === "code-review" && trackerProvesCompletion && diagnostic) {
+          this.recordPostMergeWarning(itemReference(item), diagnostic);
         }
         await this.options.tracker.upsertBookkeeping({
           ...record,
@@ -828,8 +862,20 @@ export class AutomodeCoordinator {
     }
   }
 
+  /** Reads the root checkout independently of GitHub revisions and preserves Git failures as warnings. */
+  private async refreshRootCheckout(): Promise<void> {
+    if (!this.options.workspaces?.readRootBranch) return;
+    try {
+      this.rootCheckout = { branch: await this.options.workspaces.readRootBranch() };
+    } catch (error) {
+      this.rootCheckout = { error: boundedCoordinatorActivity(errorMessage(error)) };
+    }
+    this.refreshProjection();
+  }
+
   private async scan(initial: boolean): Promise<void> {
     if (this.draining) return;
+    await this.refreshRootCheckout();
     const snapshot = await this.options.tracker.snapshot();
     this.lastSuccessfulPoll = this.clock.now().toISOString();
     this.pollError = undefined;
@@ -1166,7 +1212,9 @@ export class AutomodeCoordinator {
             await this.options.workspaces!.completeReview(fresh, preparedWorkspace!);
           } catch (error) {
             finalizationDiagnostic = `Merge succeeded but post-merge finalization failed: ${errorMessage(error)}`;
+            this.recordPostMergeWarning(itemReference(fresh), finalizationDiagnostic);
           }
+          await this.refreshRootCheckout();
         }
         await this.options.tracker.upsertBookkeeping({
           version: 1,

@@ -31,6 +31,11 @@ test("Coordinator Stage Candidates map to the browser projection without tracker
       startedAt: "2026-08-17T11:45:00.000Z",
     },
   }, {
+    rootCheckout: { branch: "feature/interactive" },
+    warnings: [{
+      item: { kind: "pull-request", number: 153, url: "https://github.com/example/repository/pull/153" },
+      message: "Cleanup failed: Permission denied",
+    }],
     lanes: [{
       stage: "auto-triage",
       operatingState: "ON",
@@ -109,6 +114,9 @@ test("Coordinator Stage Candidates map to the browser projection without tracker
   });
 
   assert.equal(projection.version, 1);
+  assert.deepEqual(projection.rootCheckout, { branch: "feature/interactive" });
+  assert.equal(projection.warnings?.[0]?.item.number, 153);
+  assert.equal(projection.warnings?.[0]?.message, "Cleanup failed: Permission denied");
   assert.deepEqual(projection.run, {
     id: "run-45",
     mode: "full",

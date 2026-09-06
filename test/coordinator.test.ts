@@ -1230,6 +1230,74 @@ test("Auto-Review requires merged proof and finalizes the project only after mer
   await coordinator.whenStopped();
 });
 
+test("merged reviews expose finalization warnings without retrying or losing merge success", async () => {
+  const item = issue({ kind: "pull-request", number: 153, draft: false, labels: [] });
+  const tracker = new FakeTracker([item]);
+  const sessions = new FakeTicketSessions(() => { item.state = "closed"; item.merged = true; });
+  const coordinator = new AutomodeCoordinator({
+    configuration: createAutomationStageConfiguration("half", ["auto-review"]),
+    actor: "automation-user", tracker, sessions, clock: new ManualClock(),
+    workspaces: {
+      ...fakeWorkspaces,
+      async completeReview() { throw new Error("Cleanup failed: Permission denied"); },
+    },
+  });
+  await coordinator.start();
+  await coordinator.waitForIdle();
+  assert.equal(tracker.records.get("pull-request:153")?.lifecycle, "succeeded");
+  assert.equal(sessions.requests.length, 1);
+  assert.match(coordinator.getProjection().warnings?.[0]?.message ?? "", /Cleanup failed: Permission denied/u);
+  assert.equal(coordinator.getProjection().warnings?.[0]?.item.number, 153);
+  coordinator.interrupt();
+  await coordinator.whenStopped();
+});
+
+test("relaunch restores persisted post-merge warnings without rerunning merged reviews", async () => {
+  const tracker = new FakeTracker([]);
+  tracker.records.set("pull-request:153", {
+    version: 1,
+    item: { kind: "pull-request", number: 153, url: "https://github.com/owner/repository/pull/153" },
+    stage: "auto-review", skillName: "code-review", attempt: 1, lifecycle: "succeeded",
+    materialVersion: "merged-153", diagnostic: "Merge succeeded but post-merge finalization failed: Permission denied",
+  });
+  const sessions = new FakeTicketSessions(() => {});
+  const coordinator = new AutomodeCoordinator({
+    configuration: createAutomationStageConfiguration("half", ["auto-review"]),
+    actor: "automation-user", tracker, sessions, clock: new ManualClock(), workspaces: fakeWorkspaces,
+  });
+  await coordinator.start();
+  assert.match(coordinator.getProjection().warnings?.[0]?.message ?? "", /Permission denied/u);
+  assert.equal(sessions.requests.length, 0);
+  coordinator.interrupt();
+  await coordinator.whenStopped();
+});
+
+test("a failed root branch read is visible without presenting the old branch as current", async () => {
+  let failRead = false;
+  const coordinator = new AutomodeCoordinator({
+    configuration: createAutomationStageConfiguration("half", ["auto-review"]),
+    actor: "automation-user", tracker: new FakeTracker([]),
+    sessions: new FakeTicketSessions(() => {}), clock: new ManualClock(),
+    workspaces: {
+      ...fakeWorkspaces,
+      async readRootBranch() {
+        if (failRead) throw new Error("Git branch lookup failed");
+        return "main";
+      },
+    },
+  });
+  await coordinator.start();
+  assert.equal(coordinator.getProjection().rootCheckout?.branch, "main");
+  failRead = true;
+  await coordinator.refresh();
+  assert.deepEqual(coordinator.getProjection().rootCheckout, { error: "Git branch lookup failed" });
+  failRead = false;
+  await coordinator.refresh();
+  assert.deepEqual(coordinator.getProjection().rootCheckout, { branch: "main" });
+  coordinator.interrupt();
+  await coordinator.whenStopped();
+});
+
 test("any waiting Ticket Session holds after one attempt and exposes its summary", async () => {
   const implementation = issue({
     number: 47,

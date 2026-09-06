@@ -202,6 +202,13 @@ export class WorkspaceManager implements TicketWorkspaceManager {
     }
   }
 
+  /** Reports the root checkout for supervision without changing it or inspecting Ticket worktrees. */
+  async readRootBranch(): Promise<string> {
+    const branch = (await this.#runner.run("git", ["branch", "--show-current"], this.#repositoryRoot)).trim();
+    return branch || "detached HEAD";
+  }
+
+  /** Finalizes a proven merge; cleanup failures must not prevent a safe project sync and restart. */
   async completeReview(item: TicketWorkspaceRequest["item"], workspace: TicketWorkspaceIdentity): Promise<void> {
     if (item.kind !== "pull-request" || item.merged !== true) {
       throw new Error("Review workspace cleanup requires fresh merged pull-request proof");
@@ -209,14 +216,24 @@ export class WorkspaceManager implements TicketWorkspaceManager {
     if (!this.#repositorySlug || !item.headRepository || !item.headBranch) {
       throw new Error("Review workspace cleanup requires repository and head identity");
     }
-    await this.cleanupAfterSuccessfulMerge({
-      mergeSucceeded: true,
-      workspace,
-      headRemote: "origin",
-      headBranch: item.headBranch,
-      sameRepository: item.headRepository.toLowerCase() === this.#repositorySlug.toLowerCase(),
-    });
-    await this.#refreshProjectAfterMerge();
+    const failures: string[] = [];
+    try {
+      await this.cleanupAfterSuccessfulMerge({
+        mergeSucceeded: true,
+        workspace,
+        headRemote: "origin",
+        headBranch: item.headBranch,
+        sameRepository: item.headRepository.toLowerCase() === this.#repositorySlug.toLowerCase(),
+      });
+    } catch (error) {
+      failures.push(`Cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    try {
+      await this.#refreshProjectAfterMerge();
+    } catch (error) {
+      failures.push(`Project sync/restart failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (failures.length > 0) throw new Error(failures.join("\n"));
   }
 
   async prepareProductionIssue(issueNumber: number): Promise<WorkspaceIdentity> {
