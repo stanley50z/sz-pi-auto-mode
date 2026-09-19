@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn } from "node:child_process";
 import type {
   Tracker,
   TrackerBookkeeping,
@@ -12,8 +11,6 @@ import type {
   TrackerItemState,
   TrackerSnapshot,
 } from "./tracker.js";
-
-const execFileAsync = promisify(execFile);
 
 export const AUTOMODE_BOOKKEEPING_MARKER = "<!-- sz-pi-automode:bookkeeping:v1 -->";
 const AUTOMODE_BOOKKEEPING_DATA_PREFIX = "<!-- sz-pi-automode:data:";
@@ -29,15 +26,32 @@ export interface GitHubTrackerOptions {
   readonly runner?: GitHubCommandRunner;
 }
 
+/** Collects complete paginated gh output without execFile's 1 MiB buffer ceiling. */
 export const processGitHubCommandRunner: GitHubCommandRunner = {
-  async run(command, args, cwd) {
-    const result = await execFileAsync(command, [...args], {
-      cwd,
-      encoding: "utf8",
-      timeout: 30_000,
-      windowsHide: true,
+  run(command, args, cwd) {
+    return new Promise<string>((resolve, reject) => {
+      const child = spawn(command, [...args], {
+        cwd,
+        timeout: 30_000,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      const stdout: string[] = [];
+      let stderr = "";
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk: string) => stdout.push(chunk));
+      child.stderr.on("data", (chunk: string) => {
+        stderr = (stderr + chunk).slice(-4096);
+      });
+      child.once("error", reject);
+      child.once("close", (code, signal) => {
+        if (code === 0 && !child.killed) resolve(stdout.join(""));
+        else reject(new Error(
+          `GitHub command failed (${signal ?? code}${child.killed ? ", timed out" : ""}): ${stderr.trim()}`,
+        ));
+      });
     });
-    return result.stdout;
   },
 };
 

@@ -4,9 +4,41 @@ import type { CoordinatorTracker } from "../src/coordinator.js";
 import {
   AUTOMODE_BOOKKEEPING_MARKER,
   GitHubTracker,
+  processGitHubCommandRunner,
   type GitHubCommandRunner,
 } from "../src/github-tracker.js";
 import type { TrackerBookkeeping } from "../src/tracker.js";
+
+test("GitHub command output larger than Node's default buffer is returned intact", async () => {
+  const output = await processGitHubCommandRunner.run(process.execPath, [
+    "-e",
+    "process.stdout.write(JSON.stringify([[{body: '界'.repeat(800000)}]]))",
+  ], process.cwd());
+  const pages = JSON.parse(output);
+  assert.equal(pages[0][0].body, "界".repeat(800000));
+});
+
+test("GitHub command failure rejects partial output and retains bounded stderr diagnostics", async () => {
+  await assert.rejects(processGitHubCommandRunner.run(process.execPath, [
+    "-e",
+    "process.stdout.write('partial response'); process.stderr.write('x'.repeat(10000) + 'HTTP 503'); process.exitCode = 1",
+  ], process.cwd()), (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /GitHub command failed \(1\)/);
+    assert.match(error.message, /HTTP 503$/);
+    assert.ok(error.message.length < 4200);
+    assert.doesNotMatch(error.message, /partial response/);
+    return true;
+  });
+});
+
+test("GitHub command launch errors reject instead of returning an empty response", async () => {
+  await assert.rejects(processGitHubCommandRunner.run(
+    "automode-nonexistent-gh-command",
+    [],
+    process.cwd(),
+  ), { code: "ENOENT" });
+});
 
 class FixtureRunner implements GitHubCommandRunner {
   readonly calls: Array<{ command: string; args: readonly string[]; cwd: string }> = [];
