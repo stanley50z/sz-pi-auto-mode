@@ -241,6 +241,68 @@ test("review preparation creates a writable isolated worktree at the exact adver
   }
 });
 
+test("review preparation reuses its own workspace across retries and recovery", async () => {
+  const fixture = createRepositoryFixture();
+  try {
+    const headSha = fixture.commitAndPush("review retry head\n");
+    git(fixture.seed, "push", "origin", "HEAD:refs/heads/contributor/pr-44");
+    git(fixture.seed, "push", "origin", "HEAD:refs/pull/44/head");
+    const manager = new WorkspaceManager({ repositoryRoot: fixture.repository });
+    const request = {
+      pullRequestNumber: 44,
+      headSha,
+      headBranch: "contributor/pr-44",
+      pushRemote: "origin",
+    };
+    const workspace = await manager.prepareReview(request);
+
+    for (const recoveringManager of [manager, new WorkspaceManager({ repositoryRoot: fixture.repository })]) {
+      const resumed = await recoveringManager.prepareReview({ ...request, existingWorkspace: workspace });
+      assert.deepEqual(resumed, {
+        branch: "automode/review-pr-44",
+        worktree: join(fixture.repository, ".worktree", "review-pr-44"),
+      });
+      assert.equal(git(resumed.worktree, "rev-parse", "HEAD"), headSha);
+    }
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test("review reuse rejects another PR, prototype branches, and mismatched paths", async () => {
+  const fixture = createRepositoryFixture();
+  try {
+    const headSha = fixture.commitAndPush("review identity guards\n");
+    git(fixture.seed, "push", "origin", "HEAD:refs/pull/44/head");
+    const manager = new WorkspaceManager({ repositoryRoot: fixture.repository });
+    const request = {
+      pullRequestNumber: 44,
+      headSha,
+      headBranch: "contributor/pr-44",
+      pushRemote: "origin",
+    };
+    for (const branch of ["automode/review-pr-45", "automode/prototype-44"]) {
+      await assert.rejects(
+        manager.prepareReview({
+          ...request,
+          existingWorkspace: { branch, worktree: join(fixture.repository, ".worktree", "review-pr-44") },
+        }),
+        /cannot reuse non-production workspace/,
+      );
+    }
+    await assert.rejects(
+      manager.prepareReview({
+        ...request,
+        existingWorkspace: { branch: "automode/review-pr-44", worktree: fixture.repository },
+      }),
+      /workspace path does not match/,
+    );
+    assert.equal(existsSync(join(fixture.repository, ".worktree", "review-pr-44")), false);
+  } finally {
+    fixture.dispose();
+  }
+});
+
 test("review preparation fails before checkout when the fetched pull-request head is not exact", async () => {
   const fixture = createRepositoryFixture();
   try {

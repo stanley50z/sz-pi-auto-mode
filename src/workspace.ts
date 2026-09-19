@@ -268,9 +268,15 @@ export class WorkspaceManager implements TicketWorkspaceManager {
       );
     }
 
-    const identity = request.existingWorkspace === undefined
-      ? this.#identity(`automode/review-pr-${pullRequestNumber}`, `review-pr-${pullRequestNumber}`)
-      : this.#assertProductionIdentity(request.existingWorkspace);
+    const reviewIdentity = this.#identity(`automode/review-pr-${pullRequestNumber}`, `review-pr-${pullRequestNumber}`);
+    const existing = request.existingWorkspace;
+    // Retries retain this PR's review workspace; implementation handoffs retain their production workspace.
+    const identity = existing === undefined || existing.branch === reviewIdentity.branch
+      ? reviewIdentity
+      : this.#assertProductionIdentity(existing);
+    if (existing && comparablePath(existing.worktree) !== comparablePath(identity.worktree)) {
+      throw new Error(`Review workspace path does not match ${identity.branch}`);
+    }
     await this.#prepareIdentity(identity, fetchedRef, expectedHead);
     try {
       await this.#runner.run(

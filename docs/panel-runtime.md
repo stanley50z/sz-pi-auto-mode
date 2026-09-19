@@ -8,6 +8,14 @@ Both functions launch every configured seat concurrently through a `PanelSeatLau
 
 Grilling accepts at least one complete usable Panel Answer after every configured seat terminates and records failed seats without retry or substitution. Review receives a small parent-owned context containing the round, exact head SHA, and a prose review brief. It returns every non-empty Markdown report with parent-generated seat, head, and usage attribution alongside all failed-seat diagnostics. The Review Session publishes each completed report as a commit-pinned GitHub pull-request review with inline comments on exact changed lines and that Reviewer's input, output, cached-input, and calculated-cost totals. Missing seats still prevent disposition, fixes, and merge. The `automode_panel` tool records completed Reviewer usage as nested tool usage, so Pi includes every round in the parent Review Session's exact session totals. After the Review Session settles, the controlled runtime posts the final validation disposition with whole-session usage, including the Review Session and all Reviewer sessions. The authoritative Grilling Session or Review Session judges and applies the results; the Panel never does.
 
+## Process output
+
+`processPanelCommandRunner` collects stdout and stderr without a lifetime byte cap and waits for both pipes to close before returning the result. Pi's JSON stream includes tool results in multiple lifecycle events, as well as assistant text, thinking, and streaming metadata. The former 10 MiB cap could kill a long read-only review even with a small final report; it was an Automode transport limit, not a provider token limit.
+
+On [sz-bridge PR #161](https://github.com/stanley50z/sz-bridge/pull/161#issuecomment-5743293895), the Kimi seat hit this cap after its retained activity recorded 61 tool calls. The parent session preserves bounded activity and the error, but seats run with `--no-session` and the runner discards captured output on rejection. The original stdout/stderr byte breakdown is unavailable. A synthetic replay through the production runner confirmed that 61 results of 50 KiB each fit when emitted once, but exceed the limit when repeated across `tool_execution_end`, `message_start`, `message_end`, and `turn_end`. This demonstrates the failure mechanism, not the exact contents of the failed Kimi stream.
+
+The lifetime cap has been removed. Output is still buffered in memory, so memory use grows with the stream. A separate improvement would parse Pi JSONL incrementally and retain only the final assistant output, usage, and necessary diagnostics rather than buffering every lifecycle event. Regression coverage runs a real child process producing 11 MiB of stdout plus 1 MiB of stderr and verifies complete capture and streaming.
+
 Focused validation:
 
 ```sh

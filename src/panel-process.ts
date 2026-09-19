@@ -9,7 +9,6 @@ import { loadGlobalGuidance } from "./global-guidance.js";
 import { createAssistantTranscript } from "./ticket-transcript.js";
 import { addUsage, emptyUsage, parseUsage } from "./usage.js";
 
-const MAX_PANEL_OUTPUT_BYTES = 10 * 1024 * 1024;
 const ALLOWED_PI_TOOLS = new Set(["read", "grep", "find", "ls"]);
 
 export interface PanelCommandRunner {
@@ -34,23 +33,14 @@ export const processPanelCommandRunner: PanelCommandRunner = {
       });
       const stdout: Buffer[] = [];
       const stderr: Buffer[] = [];
-      let outputBytes = 0;
-      const collect = (target: Buffer[], chunk: Buffer): void => {
-        outputBytes += chunk.length;
-        if (outputBytes > MAX_PANEL_OUTPUT_BYTES) {
-          child.kill("SIGKILL");
-          rejectResult(new Error(`Panel seat output exceeded ${MAX_PANEL_OUTPUT_BYTES} bytes`));
-          return;
-        }
-        target.push(chunk);
-      };
       child.stdout.on("data", (chunk: Buffer) => {
-        collect(stdout, chunk);
+        stdout.push(chunk);
         onStdout?.(chunk.toString("utf8"));
       });
-      child.stderr.on("data", (chunk: Buffer) => collect(stderr, chunk));
+      child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
       child.on("error", rejectResult);
-      child.on("exit", (exitCode, signal) => resolveResult({
+      // Wait for both output pipes to drain, not just for the process to exit.
+      child.on("close", (exitCode, signal) => resolveResult({
         exitCode,
         signal,
         stdout: Buffer.concat(stdout).toString("utf8"),

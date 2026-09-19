@@ -6,9 +6,36 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CliPanelProcessLauncher,
+  processPanelCommandRunner,
   type PanelCommandRunner,
 } from "../src/panel-process.js";
 import type { PanelSeatLaunchRequest } from "../src/panel-runtime.js";
+
+/** Exercises real child-process output collection without provider calls. */
+test("panel processes can exceed 10 MiB and retain complete stdout, stderr, and streamed output", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "automode-panel-output-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const script = join(directory, "output.cjs");
+  writeFileSync(script, [
+    "const { writeSync } = require('node:fs');",
+    "for (let i = 0; i < 176; i++) writeSync(1, Buffer.alloc(65536, 'x'));",
+    "for (let i = 0; i < 16; i++) writeSync(2, Buffer.alloc(65536, 'e'));",
+    "writeSync(1, 'stdout complete');",
+    "writeSync(2, 'stderr complete');",
+  ].join("\n"), "utf8");
+  let streamedBytes = 0;
+
+  const result = await processPanelCommandRunner.run(
+    process.execPath, [script], directory, process.env,
+    (chunk) => { streamedBytes += Buffer.byteLength(chunk); },
+  );
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.signal, null);
+  assert.equal(result.stdout, "x".repeat(11 * 1024 * 1024) + "stdout complete");
+  assert.equal(result.stderr, "e".repeat(1024 * 1024) + "stderr complete");
+  assert.equal(streamedBytes, 11 * 1024 * 1024 + 15);
+});
 
 const answer = { answers: [{ questionNumber: 1, proposedAnswer: "A" }] };
 const zeroUsage = {
