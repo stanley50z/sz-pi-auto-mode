@@ -113,7 +113,7 @@ One independently executed advisory seat in the Review Panel. A Reviewer examine
 _Avoid_: Panel Member, Review Session, voter
 
 **Half-Auto Mode**:
-The launch label whose selector preset initially enables Auto-Implement and Auto-Review while leaving Auto-Triage and Auto-Grilling off. The user may confirm any non-empty launch baseline, including all four Automation Stages. The label remains fixed within the launched Coordinator process even when process-local Automation Stage Operating State changes; a later `/automode` launch may select another mode.
+The default launch label whose selector preset initially enables Auto-Triage, Auto-Implement, and Auto-Review while leaving Auto-Grilling off. The user may confirm any non-empty launch baseline, including all four Automation Stages. The label remains fixed within the launched Coordinator process even when process-local Automation Stage Operating State changes; a later `/automode` launch may select another mode.
 _Avoid_: Assisted mode, manual mode, proper subset
 
 **Full-Auto Mode**:

@@ -186,6 +186,63 @@ test("global guidance enters the controlled session without ambient user or proj
   }
 });
 
+test("repository filename examples do not block startup or become guidance, while document references load", async (t) => {
+  const fixture = mkdtempSync(join(tmpdir(), "automode-guidance-examples-"));
+  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  const cwd = join(fixture, "repository");
+  mkdirSync(join(cwd, ".git"), { recursive: true });
+  mkdirSync(join(cwd, "docs"), { recursive: true });
+  writeFileSync(join(cwd, "AGENTS.md"), [
+    "`script.md` has no priority.",
+    "`sample.md` is an example output, not instructions.",
+    "Read `docs/tracker.md` and [domain](domain.md).",
+  ].join("\n"), "utf8");
+  writeFileSync(join(cwd, "sample.md"), "EXAMPLE_OUTPUT_NOT_GUIDANCE", "utf8");
+  writeFileSync(join(cwd, "docs", "tracker.md"), "TRACKER_GUIDANCE", "utf8");
+  writeFileSync(join(cwd, "domain.md"), "DOMAIN_GUIDANCE", "utf8");
+  writeFileSync(join(cwd, "CONTEXT.md"), "REPOSITORY_CONTEXT", "utf8");
+
+  const controlled = await createCapabilitySession({
+    cwd, home: fixture,
+    mainExecution: TEST_MAIN_EXECUTION,
+    model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
+  });
+  try {
+    const prompt = controlled.session.agent.state.systemPrompt;
+    assert.match(prompt, /`script.md` has no priority/);
+    assert.match(prompt, /TRACKER_GUIDANCE/);
+    assert.match(prompt, /DOMAIN_GUIDANCE/);
+    assert.match(prompt, /REPOSITORY_CONTEXT/);
+    assert.doesNotMatch(prompt, /EXAMPLE_OUTPUT_NOT_GUIDANCE/);
+    assert.deepEqual(controlled.services.resourceLoader.getAgentsFiles().agentsFiles.map((file) =>
+      relative(cwd, file.path).replaceAll("\\", "/")
+    ), ["AGENTS.md", "CONTEXT.md", "docs/tracker.md", "domain.md"]);
+  } finally {
+    controlled.session.dispose();
+  }
+});
+
+test("explicit repository guidance references still fail when missing or outside the repository", async (t) => {
+  const fixture = mkdtempSync(join(tmpdir(), "automode-guidance-invalid-"));
+  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  const cwd = join(fixture, "repository");
+  mkdirSync(join(cwd, ".git"), { recursive: true });
+  mkdirSync(join(cwd, "docs"), { recursive: true });
+  writeFileSync(join(fixture, "outside.md"), "OUTSIDE_GUIDANCE", "utf8");
+  for (const { content, error } of [
+    { content: "Read [required guidance](missing.md).", error: /ENOENT/ },
+    { content: "Read `docs/missing.md`.", error: /ENOENT/ },
+    { content: "Read `../outside.md`.", error: /reference leaves the repository/ },
+  ]) {
+    writeFileSync(join(cwd, "AGENTS.md"), content, "utf8");
+    await assert.rejects(() => createCapabilitySession({
+      cwd, home: fixture,
+      mainExecution: TEST_MAIN_EXECUTION,
+      model: getBuiltinModel("openai-codex", "gpt-5.6-sol"),
+    }), error);
+  }
+});
+
 test("global guidance uses Pi file precedence and permits an absent global file", async (t) => {
   const fixture = mkdtempSync(join(tmpdir(), "automode-guidance-precedence-"));
   t.after(() => rmSync(fixture, { recursive: true, force: true }));

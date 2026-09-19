@@ -157,7 +157,7 @@ test("PTY walkthrough relaunches a stopped Full-Auto repository as Half-Auto", a
   mkdirSync(join(halfAllRepository, ".git"), { recursive: true });
   mkdirSync(halfAllNestedDirectory, { recursive: true });
 
-  const full = await runBridge(fullNestedDirectory, "\r");
+  const full = await runBridge(fullNestedDirectory, "\t\r");
   assert.deepEqual(full.proof.configuration, {
     mode: "full",
     stages: ["auto-triage", "auto-grilling", "auto-implement", "auto-review"],
@@ -175,10 +175,10 @@ test("PTY walkthrough relaunches a stopped Full-Auto repository as Half-Auto", a
   assert.notEqual(full.proof.pid, full.bridgePid);
   assert.equal(full.proof.sessionName, "Automode Main — Full-Auto");
 
-  const half = await runBridge(fullNestedDirectory, "\t\r");
+  const half = await runBridge(fullNestedDirectory, "\r");
   assert.deepEqual(half.proof.configuration, {
     mode: "half",
-    stages: ["auto-implement", "auto-review"],
+    stages: ["auto-triage", "auto-implement", "auto-review"],
   });
   assert.equal(half.proof.cwd, fullRepository);
   assert.doesNotMatch(half.output, /UNEXPECTED_AGENT_START/);
@@ -187,7 +187,7 @@ test("PTY walkthrough relaunches a stopped Full-Auto repository as Half-Auto", a
   assert.notEqual(half.proof.pid, half.bridgePid);
   assert.equal(half.proof.sessionName, "Automode Main — Half-Auto");
 
-  const halfAll = await runBridge(halfAllNestedDirectory, "\t \x1b[B \r");
+  const halfAll = await runBridge(halfAllNestedDirectory, "\x1b[B \r");
   assert.deepEqual(halfAll.proof.configuration, {
     mode: "half",
     stages: ["auto-triage", "auto-grilling", "auto-implement", "auto-review"],

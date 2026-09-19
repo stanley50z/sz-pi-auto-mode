@@ -7,11 +7,11 @@ npm ci
 pi install .
 ```
 
-The selector starts in Full-Auto with all four stages enabled. The minimum supported terminal size is 32 columns by 20 rows; labels, stage states, validation, and every control hint remain available at that size alongside Pi's reserved terminal rows.
+The selector starts in Half-Auto with Auto-Triage, Auto-Implement, and Auto-Review enabled and Auto-Grilling disabled. The minimum supported terminal size is 32 columns by 20 rows; labels, stage states, validation, and every control hint remain available at that size alongside Pi's reserved terminal rows.
 
 - `Tab` switches Full-Auto/Half-Auto mode.
 - Up, down, left, and right arrow keys move stage focus.
-- `Space` toggles the focused stage only in Half-Auto, which defaults to Auto-Implement and Auto-Review enabled and the other two stages disabled.
+- `Space` toggles the focused stage only in Half-Auto.
 - Half-Auto launches with any non-empty Stage baseline, including all four; an empty selection shows a validation message. A Half-Auto baseline containing all four Stages has the same initial operating state as Full-Auto while preserving the Half-Auto launch label.
 - `Escape` cancels without launching a process.
 - `Enter` confirms a valid configuration.
@@ -45,7 +45,7 @@ The startup attestation, Main Session, and every new or resumed Ticket Session e
 
 Pi and Claude Code Panel seats receive the same selected global instructions through an explicit system-prompt append. Pi's `--no-context-files` and other discovery-disable flags remain in place; Claude Code keeps `--safe-mode`. The advisory tool allowlist is unchanged. Loading guidance does not grant tools, register skills, or enable extensions.
 
-Global guidance is read at session construction or Panel launch, like repository guidance rather than snapshotted executable resources. Existing sessions are not hot-reloaded. Markdown references in the global file remain instructions for the model to follow when relevant; they are not recursively loaded or admitted as executable resources. Repository guidance retains its existing direct-reference loading rules.
+Global guidance is read at session construction or Panel launch, like repository guidance rather than snapshotted executable resources. Existing sessions are not hot-reloaded. Markdown references in the global file remain instructions for the model to follow when relevant; they are not recursively loaded or admitted as executable resources. Repository guidance preloads explicit Markdown links and backticked `.md` paths containing a directory separator, resolved relative to the guidance file and restricted to the repository. Bare backticked filenames such as `script.md` remain prose for the agent to interpret, even when such a file exists. Use a Markdown link or `./filename.md` to preload a root-level document. Explicit references still fail startup when missing or unreadable; the loader does not silently skip them. Root `CONTEXT.md` loads when present.
 
 ## Validation
 

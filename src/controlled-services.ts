@@ -22,6 +22,7 @@ export interface ControlledServicesOptions {
   extensions?: readonly InlineExtension[];
 }
 
+/** Preloads explicit links and code-formatted document paths, not bare filename examples. */
 function directMarkdownReferences(markdownPath: string, repository: string): string[] {
   const markdown = readFileSync(markdownPath, "utf8");
   const references: string[] = [];
@@ -30,10 +31,12 @@ function directMarkdownReferences(markdownPath: string, repository: string): str
       index: match.index,
       target: match[1]!,
     })),
-    ...[...markdown.matchAll(/`([^`\r\n]+\.md)`/g)].map((match) => ({
-      index: match.index,
-      target: match[1]!,
-    })),
+    ...[...markdown.matchAll(/`([^`\r\n]+\.md)`/g)]
+      .filter((match) => /[/\\]/.test(match[1]!))
+      .map((match) => ({
+        index: match.index,
+        target: match[1]!,
+      })),
   ].sort((left, right) => left.index - right.index);
   for (const { target } of targets) {
     if (/^[a-z][a-z0-9+.-]*:/i.test(target) || isAbsolute(target)) continue;

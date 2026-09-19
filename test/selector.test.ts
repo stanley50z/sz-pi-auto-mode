@@ -28,24 +28,23 @@ function selector() {
   };
 }
 
-test("selector starts in focused Full-Auto with all stages visible", () => {
+test("selector starts in focused Half-Auto with all stages visible", () => {
   const view = selector();
   const output = view.component.render(40).join("\n");
 
-  assert.match(output, /\[Full-Auto\]/);
+  assert.match(output, /\[Half-Auto\]/);
   assert.match(output, /> .*Auto-Triage/);
   assert.match(output, /Auto-Grilling/);
   assert.match(output, /Auto-Implement/);
   assert.match(output, /Auto-Review/);
-  assert.match(output, /all four stages enabled/i);
+  assert.match(output, /3 stages enabled/i);
 });
 
-test("Half-Auto defaults to Auto-Implement and Auto-Review only", () => {
+test("Half-Auto defaults to Auto-Triage, Auto-Implement, and Auto-Review", () => {
   const view = selector();
-  view.component.handleInput("\t");
   const output = view.component.render(80).join("\n");
 
-  assert.match(output, /Auto-Triage.*disabled/);
+  assert.match(output, /Auto-Triage.*enabled/);
   assert.match(output, /Auto-Grilling.*disabled/);
   assert.match(output, /Auto-Implement.*enabled/);
   assert.match(output, /Auto-Review.*enabled/);
@@ -53,12 +52,13 @@ test("Half-Auto defaults to Auto-Implement and Auto-Review only", () => {
   view.component.handleInput("\r");
   assert.deepEqual(view.result(), {
     mode: "half",
-    stages: ["auto-implement", "auto-review"],
+    stages: ["auto-triage", "auto-implement", "auto-review"],
   });
 });
 
 test("Tab changes mode, arrows move focus, and Space only toggles Half-Auto stages", () => {
   const view = selector();
+  view.component.handleInput("\t");
   view.component.handleInput(" ");
   assert.match(view.component.render(80).join("\n"), /all four stages enabled/i);
 
@@ -75,8 +75,6 @@ test("Tab changes mode, arrows move focus, and Space only toggles Half-Auto stag
 
 test("Half-Auto launches with all four stages and visibly rejects an empty selection", () => {
   const allFour = selector();
-  allFour.component.handleInput("\t");
-  allFour.component.handleInput(" ");
   allFour.component.handleInput("\x1b[B");
   allFour.component.handleInput(" ");
   allFour.component.handleInput("\r");
@@ -86,7 +84,7 @@ test("Half-Auto launches with all four stages and visibly rejects an empty selec
   });
 
   const invalidZero = selector();
-  invalidZero.component.handleInput("\t");
+  invalidZero.component.handleInput(" ");
   invalidZero.component.handleInput("\x1b[B");
   invalidZero.component.handleInput("\x1b[B");
   invalidZero.component.handleInput(" ");
@@ -124,7 +122,7 @@ test("Escape cancels and minimum-size rendering keeps every label and control re
   }
 
   const invalid = selector();
-  invalid.component.handleInput("\t");
+  invalid.component.handleInput(" ");
   invalid.component.handleInput("\x1b[B");
   invalid.component.handleInput("\x1b[B");
   invalid.component.handleInput(" ");
