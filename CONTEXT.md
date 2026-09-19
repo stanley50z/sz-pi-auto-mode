@@ -121,7 +121,7 @@ The launch label whose baseline enables all four Automation Stages. It remains f
 _Avoid_: Unattended mode, headless mode
 
 **Deliberation Panel**:
-The independent Panel Members advising Auto-Grilling without seeing one another's answers. Two fixed high-reasoning seats, Pi / `openai-codex/gpt-6-astra` and Pi / `github-copilot/claude-fable-5`, are joined by the Ticket Session's inherited Main Session execution only when its provider/model is not already represented.
+The independent Panel Members advising Auto-Grilling without seeing one another's answers. Three fixed seats, Pi / `openai-codex/gpt-6-astra` and Pi / `github-copilot/claude-fable-5` at high reasoning plus Pi / `azure-foundry/FW-Kimi-K3` at max reasoning, are joined by the Ticket Session's inherited Main Session execution only when its provider/model is not already represented.
 _Avoid_: Agent swarm, voting committee
 
 **Panel Member**:

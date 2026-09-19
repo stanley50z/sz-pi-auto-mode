@@ -81,6 +81,7 @@ export const AUTOMODE_SETTINGS: AutomodeSettings = Object.freeze({
 export const PANEL_EXECUTIONS: readonly ExecutionProfile[] = Object.freeze([
   Object.freeze({ harness: "pi", provider: "openai-codex", model: "gpt-6-astra", reasoning: "high" }),
   Object.freeze({ harness: "pi", provider: "github-copilot", model: "claude-fable-5", reasoning: "high" }),
+  Object.freeze({ harness: "pi", provider: "azure-foundry", model: "FW-Kimi-K3", reasoning: "max" }),
 ]);
 
 /** Validates execution settings crossing the Main Session and Ticket Session process boundaries. */

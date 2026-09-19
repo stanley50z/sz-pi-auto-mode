@@ -43,6 +43,7 @@ test("the capability profile preloads every Automode Stage Skill and fixed contr
   assert.deepEqual(profile.panelExecutions, [
     { harness: "pi", provider: "openai-codex", model: "gpt-6-astra", reasoning: "high" },
     { harness: "pi", provider: "github-copilot", model: "claude-fable-5", reasoning: "high" },
+    { harness: "pi", provider: "azure-foundry", model: "FW-Kimi-K3", reasoning: "max" },
     { harness: "pi", provider: "openai-codex", model: "gpt-5.6-sol", reasoning: "high" },
   ]);
 });
@@ -58,6 +59,7 @@ test("workers and an additional Panel seat inherit a distinct Main Session execu
   assert.deepEqual(profile.panelExecutions, [
     { harness: "pi", provider: "openai-codex", model: "gpt-6-astra", reasoning: "high" },
     { harness: "pi", provider: "github-copilot", model: "claude-fable-5", reasoning: "high" },
+    { harness: "pi", provider: "azure-foundry", model: "FW-Kimi-K3", reasoning: "max" },
     { harness: "pi", provider: "custom", model: "other-model", reasoning: "max" },
   ]);
 });
@@ -65,6 +67,7 @@ test("workers and an additional Panel seat inherit a distinct Main Session execu
 for (const [provider, model] of [
   ["openai-codex", "gpt-6-astra"],
   ["github-copilot", "claude-fable-5"],
+  ["azure-foundry", "FW-Kimi-K3"],
 ] as const) {
   test(`the Panel does not duplicate ${provider}/${model} for different reasoning`, () => {
     const profile = createAutomodeCapabilityProfile({
@@ -74,6 +77,7 @@ for (const [provider, model] of [
     assert.deepEqual(profile.panelExecutions, [
       { harness: "pi", provider: "openai-codex", model: "gpt-6-astra", reasoning: "high" },
       { harness: "pi", provider: "github-copilot", model: "claude-fable-5", reasoning: "high" },
+      { harness: "pi", provider: "azure-foundry", model: "FW-Kimi-K3", reasoning: "max" },
     ]);
   });
 }
@@ -82,8 +86,8 @@ test("the same model ID on another provider is a distinct Panel execution", () =
   const profile = createAutomodeCapabilityProfile({
     mainExecution: { harness: "pi", provider: "custom", model: "gpt-6-astra", reasoning: "off" },
   });
-  assert.equal(profile.panelExecutions.length, 3);
-  assert.deepEqual(profile.panelExecutions[2], {
+  assert.equal(profile.panelExecutions.length, 4);
+  assert.deepEqual(profile.panelExecutions[3], {
     harness: "pi", provider: "custom", model: "gpt-6-astra", reasoning: "off",
   });
 });

@@ -74,6 +74,7 @@ test("startup verifies the GitHub repository and every required execution profil
     [
       { harness: "pi", provider: "openai-codex", model: "gpt-6-astra", reasoning: "high" },
       { harness: "pi", provider: "github-copilot", model: "claude-fable-5", reasoning: "high" },
+      { harness: "pi", provider: "azure-foundry", model: "FW-Kimi-K3", reasoning: "max" },
       { harness: "pi", provider: "openai-codex", model: "gpt-5.6-sol", reasoning: "high" },
     ],
   );

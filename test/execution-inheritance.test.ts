@@ -108,13 +108,13 @@ test("workers inherit live Main Session settings across dispatch and resume; the
     assert.deepEqual(await active.completion, { status: "waiting", summary: "Deterministic execution proof." });
     const profile = createAutomodeCapabilityProfile({ mainExecution: getMainExecution() });
     const seats = createPanelSeats(profile.panelExecutions);
-    assert.equal(seats.length, 3);
-    assert.deepEqual(seats[2], {
-      seat: "seat-3", harness: "pi", providerSlug: "inheritance-proof", modelSlug: "second", reasoningLevel: "medium",
+    assert.equal(seats.length, 4);
+    assert.deepEqual(seats[3], {
+      seat: "seat-4", harness: "pi", providerSlug: "inheritance-proof", modelSlug: "second", reasoningLevel: "medium",
     });
     const reviewer = new CliPanelProcessLauncher({ cwd: repository, normalAgentDir, piPackageDir: getPackageDir() });
     const review = await reviewer.launch({
-      kind: "review", attribution: seats[2]!, tools: ["read"], prompt: "Review this deterministic fixture. Return a short Markdown report.",
+      kind: "review", attribution: seats[3]!, tools: ["read"], prompt: "Review this deterministic fixture. Return a short Markdown report.",
       context: { round: 1, headSha: "abcdef1234567890", brief: "Deterministic execution proof." },
     });
     assert.equal(review.exitCode, 0, review.stderr);
