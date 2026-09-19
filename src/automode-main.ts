@@ -34,7 +34,6 @@ import {
   type StartupCommandRunner,
 } from "./startup.js";
 import {
-  AUTOMODE_MODE_LABELS,
   parseConfirmedAutomationStageConfiguration,
   restoreAutomationStageOperatingState,
   type AutomationStageConfiguration,
@@ -249,6 +248,14 @@ function persistAutomodeRunRecord(
   return runRecordFile;
 }
 
+/** Names the Main Session after its launch time so its tab and session list identify the run. */
+export function createMainSessionName(startedAt: Date): string {
+  const hours = startedAt.getHours();
+  const hour = hours % 12 || 12;
+  const minutes = String(startedAt.getMinutes()).padStart(2, "0");
+  return `automode ${startedAt.getMonth() + 1}/${startedAt.getDate()} ${hour}:${minutes} ${hours < 12 ? "am" : "pm"}`;
+}
+
 export async function startAutomodeMainSession(
   options: StartAutomodeMainOptions,
 ): Promise<StartedAutomodeMainSession> {
@@ -257,7 +264,7 @@ export async function startAutomodeMainSession(
     options.configurationConfirmation,
   );
   const operatingState = restoreAutomationStageOperatingState(configuration);
-  const automodeStartedAt = (options.coordinatorClock ?? processCoordinatorClock).now().toISOString();
+  const automodeStartedAt = (options.coordinatorClock ?? processCoordinatorClock).now();
   const validated = await validateAutomodeStartup({
     repository: options.repository,
     mainExecution: options.mainExecution,
@@ -318,7 +325,7 @@ export async function startAutomodeMainSession(
       id: lease.coordinatorId,
       mode: configuration.mode,
       lifecycle: "loading",
-      startedAt: automodeStartedAt,
+      startedAt: automodeStartedAt.toISOString(),
     },
   }, coordinator.getProjection());
   const statusCard = createAutomodeStatusCard({
@@ -365,7 +372,7 @@ export async function startAutomodeMainSession(
     throw error;
   }
 
-  const sessionName = `Automode Main — ${AUTOMODE_MODE_LABELS[configuration.mode]}`;
+  const sessionName = createMainSessionName(automodeStartedAt);
   runtime.session.setSessionName(sessionName);
   runtime.session.sessionManager.appendCustomEntry("automode.stage-configuration", configuration);
   runtime.session.sessionManager.appendCustomEntry("automode.coordinator", {
@@ -381,7 +388,7 @@ export async function startAutomodeMainSession(
         id: lease.coordinatorId,
         mode: configuration.mode,
         lifecycle: runLifecycle,
-        startedAt: automodeStartedAt,
+        startedAt: automodeStartedAt.toISOString(),
       },
     }, coordinatorProjection);
     return dashboardStatus.exposureError === undefined

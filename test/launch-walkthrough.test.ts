@@ -147,6 +147,7 @@ test("the Main Session rejects environment tampering between confirmation and ch
 });
 
 test("PTY walkthrough relaunches a stopped Full-Auto repository as Half-Auto", async () => {
+  const launchedAt = /^automode \d{1,2}\/\d{1,2} \d{1,2}:\d{2} (am|pm)$/;
   const fixture = mkdtempSync(join(tmpdir(), "automode-launch-"));
   const fullRepository = join(fixture, "full-repository");
   const fullNestedDirectory = join(fullRepository, "src", "feature");
@@ -173,7 +174,7 @@ test("PTY walkthrough relaunches a stopped Full-Auto repository as Half-Auto", a
     { harness: "pi", provider: "openai-codex", model: "gpt-5.6-sol", reasoning: "low" },
   ]);
   assert.notEqual(full.proof.pid, full.bridgePid);
-  assert.equal(full.proof.sessionName, "Automode Main — Full-Auto");
+  assert.match(full.proof.sessionName, launchedAt);
 
   const half = await runBridge(fullNestedDirectory, "\r");
   assert.deepEqual(half.proof.configuration, {
@@ -185,7 +186,7 @@ test("PTY walkthrough relaunches a stopped Full-Auto repository as Half-Auto", a
   assert.equal(half.proof.configurationFrozen, true);
   assert.equal(half.proof.mutationRejected, true);
   assert.notEqual(half.proof.pid, half.bridgePid);
-  assert.equal(half.proof.sessionName, "Automode Main — Half-Auto");
+  assert.match(half.proof.sessionName, launchedAt);
 
   const halfAll = await runBridge(halfAllNestedDirectory, "\x1b[B \r");
   assert.deepEqual(halfAll.proof.configuration, {
@@ -197,5 +198,5 @@ test("PTY walkthrough relaunches a stopped Full-Auto repository as Half-Auto", a
   assert.equal(halfAll.proof.configurationFrozen, true);
   assert.equal(halfAll.proof.mutationRejected, true);
   assert.notEqual(halfAll.proof.pid, halfAll.bridgePid);
-  assert.equal(halfAll.proof.sessionName, "Automode Main — Half-Auto");
+  assert.match(halfAll.proof.sessionName, launchedAt);
 });

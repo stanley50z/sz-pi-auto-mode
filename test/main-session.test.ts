@@ -7,6 +7,7 @@ import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   automodeRunConfigurationGuard,
+  createMainSessionName,
   startAutomodeMainSession,
   type StartAutomodeMainOptions,
 } from "../src/automode-main.js";
@@ -114,6 +115,12 @@ test("the Automode Run guard cancels Main Session replacement and forking", asyn
   assert.deepEqual(await handlers.get("session_before_fork")!(), { cancel: true });
 });
 
+test("the Main Session name renders its local launch time as a 12-hour timestamp", () => {
+  assert.equal(createMainSessionName(new Date(2026, 8, 19, 13, 20)), "automode 9/19 1:20 pm");
+  assert.equal(createMainSessionName(new Date(2026, 0, 3, 0, 5)), "automode 1/3 12:05 am");
+  assert.equal(createMainSessionName(new Date(2026, 11, 31, 12, 0)), "automode 12/31 12:00 pm");
+});
+
 test("a fresh Main Session separates process-local operating state from the durable launch baseline", async () => {
   const fixture = mkdtempSync(join(tmpdir(), "automode-main-"));
   const repository = join(fixture, "repository");
@@ -124,10 +131,14 @@ test("a fresh Main Session separates process-local operating state from the dura
     repository,
     home,
     ...confirmedConfiguration("half", ["auto-triage", "auto-review"]),
+    coordinatorClock: {
+      now: () => new Date(2026, 8, 19, 13, 20),
+      every: () => ({ dispose() {} }),
+    },
   });
   try {
     assert.equal(main.cwd, repository);
-    assert.equal(main.sessionName, "Automode Main — Half-Auto");
+    assert.equal(main.sessionName, "automode 9/19 1:20 pm");
     assert.deepEqual(main.configuration, {
       mode: "half",
       stages: ["auto-triage", "auto-review"],

@@ -657,6 +657,11 @@ test("black-box /automode gracefully drains and resumes the original normal Pi s
       await new Promise<void>((resolve) => setTimeout(resolve, 50));
     }
     assert.match(launched.output(), /Returned to normal Pi/);
+    // Pi derives the terminal window and tab title from the Main Session name.
+    assert.match(
+      launched.output(),
+      /\u001b\]0;[^\u0007]*automode \d{1,2}\/\d{1,2} \d{1,2}:\d{2} (am|pm)[^\u0007]*\u0007/,
+    );
     launched.submitCommand("/normal-proof-exit");
     const result = await launched.exited;
     assert.equal(result.exitCode, 0);
