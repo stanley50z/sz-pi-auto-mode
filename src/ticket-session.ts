@@ -529,6 +529,22 @@ function readSessionHeaderId(sessionFile: string): string {
   }
 }
 
+/** Completed sessions remain evidence; unfinished and waiting sessions can still resume. */
+function hasCompletedTicketResult(sessionFile: string): boolean {
+  return SessionManager.open(sessionFile).getBranch().some((entry) => {
+    if (entry.type !== "message") return false;
+    const message = entry.message;
+    if (
+      message.role !== "toolResult"
+      || message.toolName !== "automode_ticket_result"
+      || message.isError
+    ) return false;
+    const details: unknown = message.details;
+    return details !== null && typeof details === "object"
+      && "status" in details && details.status === "complete";
+  });
+}
+
 const MAX_TICKET_ACTIVITY_TEXT = 2_000;
 const MAX_PERSISTED_HISTORY_EVENTS = 500;
 
@@ -727,6 +743,7 @@ export class AutomodeTicketSessionHost implements CoordinatorTicketSessionHost {
       && request.resumeSessionId
       && isPathInside(candidateResumeFile, controlledSessionDir)
       && readSessionHeaderId(candidateResumeFile) === request.resumeSessionId
+      && !hasCompletedTicketResult(candidateResumeFile)
       ? candidateResumeFile
       : undefined;
     const expectedSessionId = resumableSessionFile === undefined ? undefined : request.resumeSessionId;

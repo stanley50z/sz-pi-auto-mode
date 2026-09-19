@@ -286,6 +286,69 @@ test("Coordinator recovery replaces mismatched in-root session history instead o
   await handle.completion;
 });
 
+for (const outcome of [
+  { status: "complete", isError: false, replace: true },
+  { status: "waiting", isError: false, replace: false },
+  { status: "complete", isError: true, replace: false },
+]) test(`recovery ${outcome.replace ? "replaces" : "resumes"} a Review Session with ${outcome.status}, isError=${outcome.isError}, preserving evidence`, async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "ticket-completed-recovery-"));
+  mkdirSync(join(cwd, ".git"));
+  const home = join(cwd, "home");
+  const sessionDir = resolveAutomodePaths(cwd, home).sessionDir;
+  mkdirSync(sessionDir, { recursive: true });
+  const closedFile = join(sessionDir, "closed-session.jsonl");
+  const original = [
+    { type: "session", version: 3, id: "closed-session", timestamp: "2026-09-19T17:07:53.943Z", cwd },
+    { type: "message", id: "result01", parentId: null, timestamp: "2026-09-19T17:42:02.823Z", message: {
+      role: "toolResult", toolCallId: "report-1", toolName: "automode_ticket_result", isError: outcome.isError,
+      content: [{ type: "text", text: `Ticket Session reported ${outcome.status}.` }],
+      details: { status: outcome.status, summary: "Review attempt stopped; PR remains open. Missing usable seat report." },
+      timestamp: 1,
+    } },
+    { type: "compaction", id: "compact1", parentId: "result01", timestamp: "2026-09-19T17:43:00.000Z",
+      summary: "Review attempt stopped.", retainedTail: [], tokensBefore: 1000 },
+    { type: "message", id: "refusal1", parentId: "compact1", timestamp: "2026-09-19T18:56:22.350Z", message: {
+      role: "assistant", content: [{ type: "text", text: "No further action is permitted in this completed session. Dispatch a new Review Session." }], timestamp: 2,
+    } },
+  ].map((entry) => JSON.stringify(entry)).join("\n") + "\n";
+  writeFileSync(closedFile, original);
+  const freshFile = join(sessionDir, "fresh-session.jsonl");
+  writeFileSync(freshFile, JSON.stringify({ type: "session", version: 3, id: "fresh-session", cwd }) + "\n");
+  const child = new FakeTicketProcess();
+  const adapter = new AutomodeTicketSessionHost({
+    getMainExecution: () => TEST_MAIN_EXECUTION,
+    repository: cwd,
+    configuration: createAutomationStageConfiguration("half", ["auto-review"]),
+    home,
+    processHost: new TicketSessionHost({ launcher: () => child }),
+  });
+  const starting = adapter.start({
+    item: { kind: "pull-request", number: 161, url: "https://github.com/owner/repository/pull/161" },
+    stage: "auto-review", skillName: "code-review", attempt: 1, cwd,
+    resumeSessionFile: closedFile, resumeSessionId: "closed-session",
+  });
+  assert.equal((child.sent[0] as TicketSessionStartMessage).request.resumeSessionFile,
+    outcome.replace ? undefined : realpathSync(closedFile));
+  const sessionId = outcome.replace ? "fresh-session" : "closed-session";
+  const sessionFile = outcome.replace ? freshFile : closedFile;
+  child.emit("message", {
+    type: "ticket-session:event", version: TICKET_SESSION_PROTOCOL_VERSION,
+    event: { type: "lifecycle", state: "ready", timestamp: Date.now(), sessionId, sessionFile },
+  });
+  const handle = await starting;
+  assert.equal(handle.sessionId, sessionId);
+  if (outcome.replace) assert.deepEqual(handle.history, []);
+  else assert.ok(handle.history!.length > 0);
+  assert.equal(readFileSync(closedFile, "utf8"), original);
+  child.emit("message", {
+    type: "ticket-session:terminal", version: TICKET_SESSION_PROTOCOL_VERSION,
+    result: { status: "clean", sessionId, sessionFile, summary: "Review completed." },
+  });
+  child.exitCode = 0;
+  child.emit("exit", 0, null);
+  assert.equal((await handle.completion).status, "clean");
+});
+
 test("a fresh Ticket Session validates its persisted identity before reporting success", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "ticket-fresh-identity-"));
   mkdirSync(join(cwd, ".git"));
