@@ -6,8 +6,10 @@ For work on Automode launch, orchestration, or any Automation Stage, use [the im
 
 ## OpenWiki
 
-This repository uses OpenWiki for recurring code documentation. Start with `openwiki/quickstart.md`, then follow its links to architecture, workflows, integrations, and operations.
+For code documentation, start with `openwiki/quickstart.md`. Treat source code and tests as authoritative. The ignored `openwiki/` directory is this repository's separate native GitHub Wiki clone; `Home.md` is its published landing page.
 
-Refresh OpenWiki locally with `OPENWIKI_PROVIDER=openai-chatgpt openwiki code --update --print`; this repository intentionally has no OpenWiki CI workflow. Do not hand-edit generated OpenWiki pages unless explicitly asked; prefer updating source code/docs and regenerating them locally.
+Refresh locally from the project root with `openwiki code --update --print`, setting `OPENWIKI_PROVIDER=openai-chatgpt` and `OPENWIKI_MODEL_ID=gpt-5.6-luna` using the saved ChatGPT subscription login. Review and publish page changes in the Wiki repository. Keep generation local-only.
+
+Migration diagnostics: `C:/Users/13982/.tmp/openwiki-root-update/sz-pi-auto-mode/` contains `generation.log`, validation results, snapshots, and `*-crash-report.txt` stack traces when a helper fails.
 
 <!-- OPENWIKI:END -->
