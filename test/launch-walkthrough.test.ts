@@ -168,7 +168,7 @@ test("PTY walkthrough relaunches a stopped Full-Auto repository as Half-Auto", a
   assert.equal(full.proof.configurationFrozen, true);
   assert.equal(full.proof.mutationRejected, true);
   assert.deepEqual(full.proof.panelExecutions, [
-    { harness: "pi", provider: "openai-codex", model: "gpt-6-astra", reasoning: "high" },
+    { harness: "pi", provider: "openai", model: "gpt-6-astra", reasoning: "high" },
     { harness: "pi", provider: "github-copilot", model: "claude-fable-5", reasoning: "high" },
     { harness: "pi", provider: "azure-foundry", model: "FW-Kimi-K3", reasoning: "max" },
     { harness: "pi", provider: "openai-codex", model: "gpt-5.6-sol", reasoning: "low" },

@@ -41,7 +41,7 @@ test("the capability profile preloads every Automode Stage Skill and fixed contr
     reasoning: "high",
   });
   assert.deepEqual(profile.panelExecutions, [
-    { harness: "pi", provider: "openai-codex", model: "gpt-6-astra", reasoning: "high" },
+    { harness: "pi", provider: "openai", model: "gpt-6-astra", reasoning: "high" },
     { harness: "pi", provider: "github-copilot", model: "claude-fable-5", reasoning: "high" },
     { harness: "pi", provider: "azure-foundry", model: "FW-Kimi-K3", reasoning: "max" },
     { harness: "pi", provider: "openai-codex", model: "gpt-5.6-sol", reasoning: "high" },
@@ -57,7 +57,7 @@ test("workers and an additional Panel seat inherit a distinct Main Session execu
     harness: "pi", provider: "custom", model: "other-model", reasoning: "max",
   });
   assert.deepEqual(profile.panelExecutions, [
-    { harness: "pi", provider: "openai-codex", model: "gpt-6-astra", reasoning: "high" },
+    { harness: "pi", provider: "openai", model: "gpt-6-astra", reasoning: "high" },
     { harness: "pi", provider: "github-copilot", model: "claude-fable-5", reasoning: "high" },
     { harness: "pi", provider: "azure-foundry", model: "FW-Kimi-K3", reasoning: "max" },
     { harness: "pi", provider: "custom", model: "other-model", reasoning: "max" },
@@ -65,7 +65,7 @@ test("workers and an additional Panel seat inherit a distinct Main Session execu
 });
 
 for (const [provider, model] of [
-  ["openai-codex", "gpt-6-astra"],
+  ["openai", "gpt-6-astra"],
   ["github-copilot", "claude-fable-5"],
   ["azure-foundry", "FW-Kimi-K3"],
 ] as const) {
@@ -75,7 +75,7 @@ for (const [provider, model] of [
     });
     assert.equal(profile.ordinaryTicketExecution.reasoning, "low");
     assert.deepEqual(profile.panelExecutions, [
-      { harness: "pi", provider: "openai-codex", model: "gpt-6-astra", reasoning: "high" },
+      { harness: "pi", provider: "openai", model: "gpt-6-astra", reasoning: "high" },
       { harness: "pi", provider: "github-copilot", model: "claude-fable-5", reasoning: "high" },
       { harness: "pi", provider: "azure-foundry", model: "FW-Kimi-K3", reasoning: "max" },
     ]);
