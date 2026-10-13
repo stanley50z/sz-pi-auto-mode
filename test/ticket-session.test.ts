@@ -98,6 +98,36 @@ class FakeTicketProcess extends EventEmitter implements TicketSessionProcess {
   }
 }
 
+test("review dispatch captures global bot settings once and carries them into the isolated child", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "ticket-review-bots-"));
+  mkdirSync(join(cwd, ".git"));
+  const home = join(cwd, "home");
+  const paths = resolveAutomodePaths(cwd, home);
+  mkdirSync(paths.normalAgentDir, { recursive: true });
+  mkdirSync(paths.sessionDir, { recursive: true });
+  const bots = [{ name: "Cursor", comment: "@cursor review", author: "cursor[bot]", checkName: "Cursor Bugbot" }];
+  const configFile = join(paths.normalAgentDir, "automode-review.json");
+  writeFileSync(configFile, JSON.stringify({ bots }));
+  const child = new FakeTicketProcess();
+  const adapter = new AutomodeTicketSessionHost({
+    repository: cwd, home,
+    configuration: createAutomationStageConfiguration("half", ["auto-review"]),
+    getMainExecution: () => TEST_MAIN_EXECUTION,
+    processHost: new TicketSessionHost({ launcher: () => child }),
+  });
+  writeFileSync(configFile, JSON.stringify({ bots: [] }));
+  const starting = adapter.start({ item: { kind: "pull-request", number: 42, url: "https://github.com/owner/repo/pull/42" }, stage: "auto-review", skillName: "code-review", attempt: 1 });
+  assert.deepEqual((child.sent[0] as TicketSessionStartMessage).request.externalReviewBots, bots);
+  const sessionFile = join(paths.sessionDir, "review.jsonl");
+  writeFileSync(sessionFile, JSON.stringify({ type: "session", version: 3, id: "review-session", cwd }) + "\n");
+  child.emit("message", { type: "ticket-session:event", version: TICKET_SESSION_PROTOCOL_VERSION, event: { type: "lifecycle", state: "ready", timestamp: Date.now(), sessionId: "review-session", sessionFile } });
+  const handle = await starting;
+  child.emit("message", { type: "ticket-session:terminal", version: TICKET_SESSION_PROTOCOL_VERSION, result: { status: "clean", sessionId: "review-session", sessionFile, summary: "Reviewed." } });
+  child.exitCode = 0;
+  child.emit("exit", 0, null);
+  await handle.completion;
+});
+
 const configuration = createAutomationStageConfiguration("half", ["auto-triage"]);
 test("TicketSessionHost launches one child in the actual item cwd with deterministic canonical dispatch", async () => {
   const cwd = join(mkdtempSync(join(tmpdir(), "ticket-host-")), "worktree");

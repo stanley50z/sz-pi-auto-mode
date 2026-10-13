@@ -12,6 +12,7 @@ import {
   type ReviewRoundContext,
 } from "./panel-runtime.js";
 import { addUsage, emptyUsage } from "./usage.js";
+import type { GitHubExternalReviews } from "./external-review.js";
 
 export interface TicketPanelNestedActivity {
   readonly toolName: "automode_panel";
@@ -19,10 +20,12 @@ export interface TicketPanelNestedActivity {
   readonly child: NestedSessionEvent;
 }
 
+/** Exposes controlled Panel rounds, optionally joining external bot reviews before disposition. */
 export function createTicketPanelExtension(
   launcher: PanelSeatLauncher,
   executions: readonly ExecutionProfile[],
   onNestedActivity?: (activity: TicketPanelNestedActivity) => void,
+  externalReviews?: GitHubExternalReviews,
 ): InlineExtension {
   const seats = createPanelSeats(executions);
   return {
@@ -36,7 +39,7 @@ export function createTicketPanelExtension(
           kind: StringEnum(["grilling", "review"] as const),
           context: Type.Unknown(),
         }),
-        async execute(toolCallId, params) {
+        async execute(toolCallId, params, signal) {
           const nestedSessions: NestedSessionEvent[] = [];
           const emit = (child: NestedSessionEvent): void => {
             nestedSessions.push(child);
@@ -54,12 +57,33 @@ export function createTicketPanelExtension(
               details: { ...result, nestedSessions } as unknown,
             };
           }
-          const result = await runReviewPanel(
-            { context: params.context as ReviewRoundContext },
-            launcher,
-            seats,
-            emit,
-          );
+          const context = params.context as ReviewRoundContext;
+          await externalReviews?.begin(context, signal);
+          const externalAbort = new AbortController();
+          const externalSignal = signal ? AbortSignal.any([signal, externalAbort.signal]) : externalAbort.signal;
+          const panelRun = runReviewPanel({ context }, launcher, seats, emit).then((result) => {
+            if (result.failures.length > 0) externalAbort.abort(new Error("External wait cancelled because the built-in Review Panel failed"));
+            return result;
+          }, (error: unknown) => {
+            externalAbort.abort(error);
+            throw error;
+          });
+          const [panel, external] = await Promise.allSettled([
+            panelRun,
+            externalReviews?.wait(context, externalSignal),
+          ]);
+          const externalError: unknown = externalAbort.signal.aborted ? externalAbort.signal.reason
+            : external.status === "rejected" ? external.reason : undefined;
+          if (panel.status === "rejected") throw panel.reason;
+          const result = {
+            ...panel.value,
+            ...(externalReviews ? {
+              externalReports: external.status === "fulfilled" ? external.value : [],
+              externalFailures: external.status === "rejected"
+                ? [externalError instanceof Error ? externalError.message : String(externalError)]
+                : [],
+            } : {}),
+          };
           const usage = result.reports.reduce(
             (total, report) => addUsage(total, report.usage),
             emptyUsage(),

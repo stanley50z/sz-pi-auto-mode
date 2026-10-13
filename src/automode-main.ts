@@ -22,6 +22,7 @@ import {
 } from "./dashboard.js";
 import { createDashboardProjection } from "./dashboard-ui.js";
 import { GitHubTracker } from "./github-tracker.js";
+import { loadExternalReviewBots } from "./external-review.js";
 import { requestReturnToNormalPi } from "./handoff-protocol.js";
 import { createAutomodeStatusCard } from "./main-status-card.js";
 import { resolveAutomodePaths } from "./paths.js";
@@ -278,6 +279,7 @@ export async function startAutomodeMainSession(
     options.home,
     options.normalAgentDir,
   );
+  const externalReviewBots = loadExternalReviewBots(validated.repository, paths.normalAgentDir);
   const lease = acquireRepositoryCoordinator(paths.coordinatorDir);
   let runtime: Awaited<ReturnType<typeof createMainSessionRuntime>> | undefined;
   const coordinator = options.coordinator ?? new AutomodeCoordinator({
@@ -292,6 +294,7 @@ export async function startAutomodeMainSession(
     sessions: new AutomodeTicketSessionHost({
       repository: validated.repository,
       configuration,
+      externalReviewBots,
       getMainExecution: () => {
         const session = runtime?.session;
         if (!session?.model) throw new Error("Ticket dispatch requires an active Main Session model");

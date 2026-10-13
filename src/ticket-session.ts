@@ -14,6 +14,7 @@ import type {
 } from "./coordinator.js";
 import { nestedSessionEventMessage, type NestedSessionEvent } from "./nested-session.js";
 import { resolveAutomodePaths } from "./paths.js";
+import { loadExternalReviewBots, parseExternalReviewBots, type ExternalReviewBot } from "./external-review.js";
 import { AutomodeRestartRequiredError } from "./restart-required.js";
 import type { AutomationStageConfiguration } from "./stage-configuration.js";
 import { createCanonicalTicketSessionPrompt } from "./ticket-session-prompt.js";
@@ -21,7 +22,7 @@ import { createAssistantTranscript } from "./ticket-transcript.js";
 
 export { createCanonicalTicketSessionPrompt } from "./ticket-session-prompt.js";
 
-export const TICKET_SESSION_PROTOCOL_VERSION = 4 as const;
+export const TICKET_SESSION_PROTOCOL_VERSION = 5 as const;
 
 export interface TicketSessionLaunchRequest {
   cwd: string;
@@ -33,6 +34,7 @@ export interface TicketSessionLaunchRequest {
   resumeSessionFile?: string;
   home?: string;
   normalAgentDir?: string;
+  externalReviewBots?: readonly ExternalReviewBot[];
 }
 
 export interface TicketSessionChildRequest extends TicketSessionLaunchRequest {
@@ -355,6 +357,7 @@ export class TicketSessionHost {
       prompt: createCanonicalTicketSessionPrompt(request.skillName, request.itemUrl),
       configuration: request.configuration,
       mainExecution: parsePiExecutionProfile(JSON.stringify(request.mainExecution)),
+      ...(request.externalReviewBots === undefined ? {} : { externalReviewBots: parseExternalReviewBots(request.externalReviewBots) }),
       ...(request.sessionName === undefined ? {} : { sessionName: request.sessionName }),
       ...(request.resumeSessionFile === undefined
         ? {}
@@ -712,6 +715,7 @@ export interface AutomodeTicketSessionHostOptions {
   readonly home?: string;
   readonly normalAgentDir?: string;
   readonly processHost?: TicketSessionHost;
+  readonly externalReviewBots?: readonly ExternalReviewBot[];
 }
 
 /** Adapts the full-process host to the Coordinator's durable Ticket Session seam. */
@@ -723,6 +727,7 @@ export class AutomodeTicketSessionHost implements CoordinatorTicketSessionHost {
   readonly #normalAgentDir: string | undefined;
   readonly #processHost: TicketSessionHost;
   readonly #startingRuns = new Map<string, TicketSessionRun>();
+  readonly #externalReviewBots: readonly ExternalReviewBot[];
 
   constructor(options: AutomodeTicketSessionHostOptions) {
     this.#repository = realpathSync(resolve(options.repository));
@@ -731,6 +736,10 @@ export class AutomodeTicketSessionHost implements CoordinatorTicketSessionHost {
     this.#home = options.home;
     this.#normalAgentDir = options.normalAgentDir;
     this.#processHost = options.processHost ?? new TicketSessionHost();
+    const paths = resolveAutomodePaths(this.#repository, this.#home, this.#normalAgentDir);
+    this.#externalReviewBots = options.externalReviewBots === undefined
+      ? loadExternalReviewBots(this.#repository, paths.normalAgentDir)
+      : parseExternalReviewBots(options.externalReviewBots);
   }
 
   async start(request: CoordinatorTicketSessionRequest): Promise<CoordinatorTicketSessionHandle> {
@@ -757,6 +766,8 @@ export class AutomodeTicketSessionHost implements CoordinatorTicketSessionHost {
       resumeSessionFile: resumableSessionFile,
       home: this.#home,
       normalAgentDir: this.#normalAgentDir,
+      ...(request.skillName === "code-review" && this.#externalReviewBots.length > 0
+        ? { externalReviewBots: this.#externalReviewBots } : {}),
     });
     const key = `${request.item.kind}:${request.item.number}`;
     this.#startingRuns.set(key, run);

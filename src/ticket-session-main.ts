@@ -11,6 +11,7 @@ import {
 import { attestCanonicalCommands, isPathInside } from "./attestation.js";
 import { createAutomodeCapabilityProfile } from "./capability-profile.js";
 import { createControlledServices } from "./controlled-services.js";
+import { GitHubExternalReviews } from "./external-review.js";
 import { resolvePiExecutionModel } from "./model-execution.js";
 import { nestedSessionEventMessage, type NestedSessionEvent } from "./nested-session.js";
 import { CliPanelProcessLauncher } from "./panel-process.js";
@@ -263,7 +264,13 @@ export const createControlledTicketSession: TicketSessionChildSessionFactory = a
         toolCallId,
         child,
       });
-    }));
+    }, request.skillName === "code-review" && request.externalReviewBots?.length
+      ? new GitHubExternalReviews({
+        cwd,
+        itemUrl: request.itemUrl,
+        bots: request.externalReviewBots,
+        stateDirectory: join(paths.coordinatorDir, "external-reviews"),
+      }) : undefined));
     tools.push("automode_panel");
   }
   const services = await createControlledServices({

@@ -16,6 +16,10 @@ This repository uses the single-context domain docs layout. See `docs/agents/dom
 
 For work on Automode launch, orchestration, or any Automation Stage, use [the implementation specification](https://github.com/stanley50z/sz-pi-auto-mode/issues/21). The [Wayfinder map](https://github.com/stanley50z/sz-pi-auto-mode/issues/1) indexes the underlying decisions. The entrypoint is `/automode` inside normal Pi; `pi automode` is obsolete. Personal-WeChat integration is outside this MVP.
 
+### Matt Pocock skill support
+
+Automode provides first-class support for Matt Pocock's skill suite. Judge skill additions, removals, and upgrades by their value and fit within the user's skill stack, independently of Automode's current implementation. Adapt Automode to the chosen skill workflows when needed; current orchestration constraints are not a reason to reject or weaken a skill. Preserve the user's chosen skill customizations when adapting support.
+
 <!-- OPENWIKI:START -->
 
 ## OpenWiki

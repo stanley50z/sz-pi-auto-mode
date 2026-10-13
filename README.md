@@ -48,6 +48,10 @@ The canonical implementation specification is [GitHub issue #21](https://github.
 
 Personal-WeChat/OpenClaw channel integration is outside the Automode workflow MVP and must be charted separately.
 
+## External review bots
+
+Auto-Review supports configurable trigger comments for additional GitHub review bots and waits for their results before disposition. Global defaults in normal Pi's `automode-review.json` can be replaced by `.pi/automode-review.json` per repository. For Cursor, configure the exact comment `@cursor review` and the `Cursor Bugbot` completion check. See [configuration, waiting, and diagnostics](docs/external-reviews.md).
+
 ## Development proof
 
 The `/automode` launch flow is documented in [docs/automode-launch.md](docs/automode-launch.md). The approved Coordinator supervision design is documented in [docs/automode-dashboard-design.md](docs/automode-dashboard-design.md). The underlying isolated process-handoff seam is documented in [docs/process-handoff-proof.md](docs/process-handoff-proof.md).
